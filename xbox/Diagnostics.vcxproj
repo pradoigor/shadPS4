@@ -30,6 +30,8 @@
     <AppxBundle>Never</AppxBundle><GenerateAppxPackageOnBuild>true</GenerateAppxPackageOnBuild>
     <AppxPackageDir>$(MSBuildThisFileDirectory)AppPackages\</AppxPackageDir>
     <AppxSymbolPackageEnabled>true</AppxSymbolPackageEnabled>
+    <!-- UI is loaded as loose XAML; there are no compiled XAML or localized resource maps. -->
+    <AppxGeneratePriEnabled>false</AppxGeneratePriEnabled>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
