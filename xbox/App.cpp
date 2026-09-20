@@ -111,6 +111,15 @@ struct App : ApplicationT<App> {
             audio.MediaFailed([this](auto const&, ExceptionRoutedEventArgs const& e) {
                 if (pending >= 0 && report->tests[pending].id == L"audio") FinishPending(false, e.ErrorMessage().c_str());
             });
+            audio.MediaOpened([this](auto const&, RoutedEventArgs const&) {
+                if (pending >= 0 && report->tests[pending].id == L"audio") {
+                    audio.Volume(1.0);
+                    audio.Play();
+                    report->tests[pending].detail = L"WAV carregado pelo MediaElement; reprodução iniciada. Confirme se ouviu o tom.";
+                    Save();
+                    ShowDetails();
+                }
+            });
             timer = DispatcherTimer(); timer.Interval(std::chrono::milliseconds(100));
             timer.Tick([this](auto const&, auto const&) { PollController(); });
             timer.Start();
@@ -184,7 +193,6 @@ struct App : ApplicationT<App> {
                 audio.Stop();
                 audio.Volume(1.0);
                 audio.Source(Uri(L"ms-appx:///Assets/tone.wav"));
-                audio.Play();
             } else if (original.id == L"controller") {
                 original.status = L"awaiting_confirmation";
                 original.detail = L"Pressione e solte X no controle nos próximos 30 segundos."; pending = index;
