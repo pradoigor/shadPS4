@@ -32,6 +32,7 @@
     <AppxSymbolPackageEnabled>true</AppxSymbolPackageEnabled>
     <!-- UI is loaded as loose XAML; there are no compiled XAML or localized resource maps. -->
     <AppxGeneratePriEnabled>false</AppxGeneratePriEnabled>
+    <AppxUseResourceIndexerApi>false</AppxUseResourceIndexerApi>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
