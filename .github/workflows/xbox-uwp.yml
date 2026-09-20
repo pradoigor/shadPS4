@@ -21,6 +21,12 @@ jobs:
       - name: Build and sign diagnostic APPX
         shell: pwsh
         run: ./xbox/scripts/build.ps1
+      - name: Validate actual package contents
+        shell: pwsh
+        run: python xbox/scripts/validate_package.py xbox/artifacts/ShadPS4Xbox.appx xbox/artifacts/build-info.json
+      - name: Audit representative desktop APIs against UWP
+        shell: pwsh
+        run: ./xbox/scripts/audit_api_surface.ps1
       - name: Upload package, dependencies, symbols and build evidence
         if: always()
         uses: actions/upload-artifact@v4

@@ -36,7 +36,10 @@ void WriteDurable(std::wstring const& path, std::string const& text) {
     if (written != text.size()) throw hresult_error(E_FAIL, L"Gravação incompleta do relatório.");
     check_bool(FlushFileBuffers(file.get()));
     file.close();
-    check_bool(MoveFileExFromAppW(temp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH));
+    if (std::filesystem::exists(std::filesystem::path(path)))
+        check_bool(ReplaceFileFromAppW(path.c_str(), temp.c_str(), nullptr, 0, nullptr, nullptr));
+    else
+        check_bool(MoveFileFromAppW(temp.c_str(), path.c_str()));
 }
 Report::Report() {
     directory = Windows::Storage::ApplicationData::Current().LocalFolder().Path();

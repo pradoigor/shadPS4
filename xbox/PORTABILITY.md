@@ -13,7 +13,7 @@ equivale a aprovação do subsistema completo do emulador.
 | Espaço de endereços | `src/core/address_space.cpp`: VirtualAlloc2 e placeholders | Reservas pequenas em três endereços representativos | Layout completo, colisões, alinhamentos e reservas simultâneas |
 | Backing/alias | Mesmo arquivo: CreateFileMapping2, MapViewOfFile3 e backing grande executável | Duas visões de 64 KiB usando APIs FromApp | Placeholders, aliases executáveis e orçamento real do backing PS4 |
 | Execução | Mesmo arquivo: PAGE_EXECUTE_READWRITE; `src/core/linker.cpp`: carregamento/execução | Seis bytes x64 próprios, RW para RX, retorno 42 | ABI, relocação, TLS, instruções, bibliotecas e execução de homebrew |
-| Exceções | `src/common/signal_context.cpp`, contexto por plataforma | Interrupções detectadas por journal persistente | Compatibilidade do mecanismo de tratamento de exceções do núcleo; journal não substitui um handler |
+| Exceções | `src/core/signals.cpp`: AddVectoredExceptionHandler | Interrupções detectadas por journal persistente | Compatibilidade do mecanismo de tratamento de exceções do núcleo; journal não substitui um handler |
 | Sistema/arquivos | Dependências desktop, bibliotecas e caminhos do núcleo | LocalState, persistência e áudio UWP | Adaptar acesso ao conteúdo e módulos, threads e dependências |
 
 `api-surface.json`, quando produzido no Windows, registra se chamadas nativas

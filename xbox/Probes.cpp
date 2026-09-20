@@ -11,6 +11,7 @@
 #include <memory>
 #include <thread>
 #include <winrt/Windows.ApplicationModel.h>
+#include <winrt/Windows.Storage.h>
 #include <winrt/Windows.System.h>
 
 using namespace winrt;
@@ -89,8 +90,8 @@ void RunProbe(Test& t, std::wstring const& directory) {
         if (read != payload) throw hresult_error(E_FAIL, L"Conteúdo lido difere do conteúdo gravado.");
         t.detail = L"Arquivo gravado, sincronizado e relido em LocalState.";
     } else if (t.id == L"budget") {
-        Number(t, L"app_memory_usage_bytes", Windows::System::MemoryManager::AppMemoryUsage());
-        Number(t, L"app_memory_limit_bytes", Windows::System::MemoryManager::AppMemoryUsageLimit());
+        Number(t, L"app_memory_usage_bytes", static_cast<double>(Windows::System::MemoryManager::AppMemoryUsage()));
+        Number(t, L"app_memory_limit_bytes", static_cast<double>(Windows::System::MemoryManager::AppMemoryUsageLimit()));
         t.detail = L"Orçamento consultado no sistema. Este resultado não confirma espaço suficiente para um jogo; o núcleo reserva grandes regiões e memória de backing adicional.";
     } else if (t.id == L"d3d11") Compute(t);
     else if (t.id == L"d3d12") {
