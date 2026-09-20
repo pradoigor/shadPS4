@@ -30,7 +30,7 @@ usa C++/WinRT 2.0.250303.1 e shaders HLSL pré-compilados, sem compilador no Xbo
 3. Confira o certificado do console e faça login. Não desative a autenticação.
 4. Em **Home → My games & apps → Add**, selecione `ShadPS4Xbox.appx`.
 5. Selecione as dependências **x64** da pasta `Dependencies` e conclua.
-6. Inicie **shadPS4 · Xbox Lab**. O lote automático roda na primeira abertura.
+6. Inicie **shadPS4 · Xbox Lab**. A abertura não inicia testes; selecione **Executar testes automáticos** após a interface aparecer. As etapas de inicialização ficam em `LocalState/startup.log`, inclusive erros anteriores à criação do relatório.
 
 A assinatura é de desenvolvimento. Builds seguintes usam certificado temporário
 com o mesmo Publisher. Se o console recusar uma atualização por assinatura,

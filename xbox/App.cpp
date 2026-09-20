@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "Probes.h"
 #include "Report.h"
+#include "BuildInfo.h"
 #include <windows.ui.xaml.media.dxinterop.h>
 #include <filesystem>
 #include <fstream>
@@ -22,6 +23,22 @@ using namespace Windows::Foundation;
 using namespace Windows::UI::Xaml;
 using namespace Windows::UI::Xaml::Controls;
 
+// Best-effort diagnostics must never replace the original startup failure.
+static void StartupLog(std::wstring const& message) noexcept {
+    try {
+        auto line = std::to_wstring(Lab::Now()) + L" " + message + L"\r\n";
+        OutputDebugStringW(line.c_str());
+        auto path = std::wstring(Windows::Storage::ApplicationData::Current().LocalFolder().Path()) + L"\\startup.log";
+        CREATEFILE2_EXTENDED_PARAMETERS params{sizeof(params)};
+        params.dwFileAttributes = FILE_ATTRIBUTE_NORMAL;
+        winrt::handle file{CreateFile2(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, OPEN_ALWAYS, &params)};
+        if (!file) return;
+        auto bytes = to_string(line); DWORD written{};
+        if (WriteFile(file.get(), bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr))
+            FlushFileBuffers(file.get());
+    } catch (...) {}
+}
+
 struct App : ApplicationT<App> {
     std::unique_ptr<Lab::Report> report;
     Grid root{nullptr}; ListView list{nullptr}; TextBlock status{nullptr}, details{nullptr};
@@ -33,6 +50,10 @@ struct App : ApplicationT<App> {
     bool sawSuspension{};
 
     App() {
+        StartupLog(L"Application constructed");
+        UnhandledException([](auto const&, UnhandledExceptionEventArgs const& e) {
+            StartupLog(L"Unhandled XAML error: " + std::to_wstring(static_cast<uint32_t>(e.Exception().value)) + L" " + std::wstring(e.Message()));
+        });
         Suspending([this](auto const&, Windows::ApplicationModel::SuspendingEventArgs const& args) {
             auto deferral = args.SuspendingOperation().GetDeferral();
             if (report && pending >= 0 && report->tests[pending].id == L"lifecycle") {
@@ -60,15 +81,18 @@ struct App : ApplicationT<App> {
         return false;
     }
     void OnLaunched(Windows::ApplicationModel::Activation::LaunchActivatedEventArgs const&) {
+        StartupLog(L"OnLaunched entered");
         if (root) { Window::Current().Activate(); return; }
         try {
             auto path = std::filesystem::path(Windows::ApplicationModel::Package::Current().InstalledLocation().Path().c_str()) / L"MainPage.xaml";
             std::ifstream file(path, std::ios::binary);
             if (!file) throw hresult_error(E_FAIL, L"MainPage.xaml ausente no pacote.");
             std::string xaml{std::istreambuf_iterator<char>(file), {}};
+            StartupLog(L"Loading MainPage.xaml");
             root = Markup::XamlReader::Load(to_hstring(xaml)).as<Grid>();
             list = Find<ListView>(L"Tests"); status = Find<TextBlock>(L"Status"); details = Find<TextBlock>(L"Details");
             panel = Find<SwapChainPanel>(L"GpuPanel"); audio = Find<MediaElement>(L"Audio");
+            StartupLog(L"XAML loaded; opening report");
             report = std::make_unique<Lab::Report>();
             Find<TextBlock>(L"DeviceInfo").Text(report->Summary());
             list.SelectionChanged([this](auto const&, auto const&) { if (!refreshing) ShowDetails(); });
@@ -95,13 +119,19 @@ struct App : ApplicationT<App> {
             Save();
             Window::Current().Content(root); Window::Current().Activate();
             Find<Button>(L"RunAll").Focus(FocusState::Programmatic);
-            // A first launch gathers the safe baseline without requiring remote input.
-            // Potentially terminating probes and sensory checks remain individual actions.
-            if (report->tests.front().status == L"not_run" && !persistenceFailed) RunAll();
+            StartupLog(L"Window activated; ready for explicit tests");
         } catch (hresult_error const& e) {
-            TextBlock error; error.Text(L"Falha ao iniciar Xbox Lab: " + e.message()); error.TextWrapping(TextWrapping::Wrap);
-            Window::Current().Content(error); Window::Current().Activate();
+            StartupLog(L"OnLaunched HRESULT: " + std::to_wstring(static_cast<uint32_t>(e.code().value)) + L" " + std::wstring(e.message()));
+            ShowStartupError(e.message());
+        } catch (std::exception const& e) {
+            StartupLog(L"OnLaunched C++ exception: " + std::wstring(to_hstring(e.what())));
+            ShowStartupError(to_hstring(e.what()));
         }
+    }
+    void ShowStartupError(hstring const& message) {
+        TextBlock error; error.Text(L"Falha ao iniciar Xbox Lab: " + message);
+        error.TextWrapping(TextWrapping::Wrap); error.Margin({48,48,48,48});
+        Window::Current().Content(error); Window::Current().Activate();
     }
     void Refresh() {
         int index = list.SelectedIndex(); refreshing = true;
@@ -242,7 +272,22 @@ struct App : ApplicationT<App> {
 };
 
 int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
-    init_apartment(apartment_type::single_threaded);
-    Application::Start([](auto&&) { make<App>(); });
-    return 0;
+    try {
+        // UWP starts from an MTA; Application::Start creates the XAML view thread.
+        // The desktop WinUI/STA bootstrap is not the UWP activation model.
+        init_apartment(apartment_type::multi_threaded);
+        StartupLog(L"Process entered; commit " + std::wstring(XBOX_BUILD_COMMIT));
+        Application::Start([](auto&&) {
+            StartupLog(L"Application::Start callback");
+            make<App>();
+        });
+        StartupLog(L"Application::Start returned");
+        return 0;
+    } catch (hresult_error const& e) {
+        StartupLog(L"Bootstrap HRESULT: " + std::to_wstring(static_cast<uint32_t>(e.code().value)) + L" " + std::wstring(e.message()));
+        return static_cast<int>(e.code().value);
+    } catch (std::exception const& e) {
+        StartupLog(L"Bootstrap C++ exception: " + std::wstring(to_hstring(e.what())));
+        return 1;
+    }
 }
