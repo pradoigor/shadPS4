@@ -1,0 +1,243 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+#include "Probes.h"
+#include "Report.h"
+#include <windows.ui.xaml.media.dxinterop.h>
+#include <filesystem>
+#include <fstream>
+#include <chrono>
+#include <winrt/Windows.ApplicationModel.h>
+#include <winrt/Windows.ApplicationModel.Activation.h>
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.Gaming.Input.h>
+#include <winrt/Windows.Storage.h>
+#include <winrt/Windows.UI.Xaml.h>
+#include <winrt/Windows.UI.Xaml.Controls.h>
+#include <winrt/Windows.UI.Xaml.Markup.h>
+#include <winrt/Windows.UI.Xaml.Media.h>
+
+using namespace winrt;
+using namespace Windows::Foundation;
+using namespace Windows::UI::Xaml;
+using namespace Windows::UI::Xaml::Controls;
+
+struct App : ApplicationT<App> {
+    std::unique_ptr<Lab::Report> report;
+    Grid root{nullptr}; ListView list{nullptr}; TextBlock status{nullptr}, details{nullptr};
+    MediaElement audio{nullptr}; SwapChainPanel panel{nullptr}; DispatcherTimer timer{nullptr};
+    com_ptr<IDXGISwapChain1> swapchain;
+    bool busy{}, refreshing{}, persistenceFailed{};
+    int pending{-1};
+    uint64_t controllerBaseline{};
+    bool sawSuspension{};
+
+    App() {
+        Suspending([this](auto const&, Windows::ApplicationModel::SuspendingEventArgs const& args) {
+            auto deferral = args.SuspendingOperation().GetDeferral();
+            if (report && pending >= 0 && report->tests[pending].id == L"lifecycle") {
+                sawSuspension = true;
+                report->tests[pending].detail = L"Evento Suspending recebido. Aguardando Resuming.";
+                Save();
+            }
+            deferral.Complete();
+        });
+        Resuming([this](auto const&, auto const&) {
+            if (report && pending >= 0 && report->tests[pending].id == L"lifecycle" && sawSuspension)
+                FinishPending(true, L"Eventos Suspending e Resuming recebidos na mesma sessão.");
+        });
+    }
+    template<typename T> T Find(wchar_t const* name) { return root.FindName(name).as<T>(); }
+    bool Save() {
+        try { report->Save(); return true; }
+        catch (hresult_error const& e) {
+            persistenceFailed = true;
+            if (status) status.Text(L"Falha ao persistir; testes bloqueados: " + e.message());
+        } catch (std::exception const&) {
+            persistenceFailed = true;
+            if (status) status.Text(L"Falha de armazenamento; testes bloqueados.");
+        }
+        return false;
+    }
+    void OnLaunched(Windows::ApplicationModel::Activation::LaunchActivatedEventArgs const&) {
+        if (root) { Window::Current().Activate(); return; }
+        try {
+            auto path = std::filesystem::path(Windows::ApplicationModel::Package::Current().InstalledLocation().Path().c_str()) / L"MainPage.xaml";
+            std::ifstream file(path, std::ios::binary);
+            if (!file) throw hresult_error(E_FAIL, L"MainPage.xaml ausente no pacote.");
+            std::string xaml{std::istreambuf_iterator<char>(file), {}};
+            root = Markup::XamlReader::Load(to_hstring(xaml)).as<Grid>();
+            list = Find<ListView>(L"Tests"); status = Find<TextBlock>(L"Status"); details = Find<TextBlock>(L"Details");
+            panel = Find<SwapChainPanel>(L"GpuPanel"); audio = Find<MediaElement>(L"Audio");
+            report = std::make_unique<Lab::Report>();
+            Find<TextBlock>(L"DeviceInfo").Text(report->Summary());
+            list.SelectionChanged([this](auto const&, auto const&) { if (!refreshing) ShowDetails(); });
+            Find<Button>(L"RunAll").Click([this](auto const&, auto const&) { RunAll(); });
+            Find<Button>(L"RunSelected").Click([this](auto const&, auto const&) { RunSelected(); });
+            Find<Button>(L"Export").Click([this](auto const&, auto const&) {
+                if (!Save()) return;
+                try {
+                    auto name = L"report-export-" + std::to_wstring(static_cast<uint64_t>(Lab::Now())) + L".json";
+                    Lab::WriteDurable(report->directory + L"\\" + name, to_string(report->Json().Stringify()));
+                    status.Text(L"Exportado para LocalState\\" + name + L". Baixe pelo Device Portal.");
+                } catch (hresult_error const& e) { status.Text(L"Falha na exportação: " + e.message()); }
+            });
+            Find<Button>(L"Confirm").Click([this](auto const&, auto const&) { Confirm(true); });
+            Find<Button>(L"Reject").Click([this](auto const&, auto const&) { Confirm(false); });
+            audio.MediaFailed([this](auto const&, ExceptionRoutedEventArgs const& e) {
+                if (pending >= 0 && report->tests[pending].id == L"audio") FinishPending(false, e.ErrorMessage().c_str());
+            });
+            timer = DispatcherTimer(); timer.Interval(std::chrono::milliseconds(100));
+            timer.Tick([this](auto const&, auto const&) { PollController(); });
+            timer.Start();
+            Refresh(); list.SelectedIndex(0);
+            if (!report->recoveryNotice.empty()) status.Text(report->recoveryNotice);
+            Save();
+            Window::Current().Content(root); Window::Current().Activate();
+            Find<Button>(L"RunAll").Focus(FocusState::Programmatic);
+        } catch (hresult_error const& e) {
+            TextBlock error; error.Text(L"Falha ao iniciar Xbox Lab: " + e.message()); error.TextWrapping(TextWrapping::Wrap);
+            Window::Current().Content(error); Window::Current().Activate();
+        }
+    }
+    void Refresh() {
+        int index = list.SelectedIndex(); refreshing = true;
+        list.Items().Clear();
+        for (auto const& t : report->tests) {
+            TextBlock text; text.Text(Lab::StatusLabel(t.status) + L"\n" + t.title);
+            text.TextWrapping(TextWrapping::Wrap); text.FontSize(16); text.Margin({0, 6, 0, 6});
+            list.Items().Append(text);
+        }
+        list.SelectedIndex(index < 0 ? 0 : index); refreshing = false; ShowDetails();
+    }
+    void ShowDetails() {
+        auto i = list.SelectedIndex(); if (i < 0) return;
+        auto const& t = report->tests[i];
+        details.Text(t.title + L"\n" + Lab::StatusLabel(t.status) + L"\n\n" +
+            (t.detail.empty() ? L"Nenhuma evidência coletada." : t.detail) + L"\n" + t.error +
+            L"\n\n" + std::wstring(t.measurements.Stringify()));
+    }
+    bool CanRun() {
+        if (persistenceFailed) { status.Text(L"Persistência indisponível. Feche e reabra após corrigir o armazenamento."); return false; }
+        if (busy) { status.Text(L"Um teste está em execução."); return false; }
+        if (pending >= 0) {
+            // Preserve unfinished manual tests as inconclusive before starting another one.
+            auto& t = report->tests[pending]; t.status = L"inconclusive";
+            t.detail += L"\nFinalizado sem confirmação ao iniciar outro teste.";
+            audio.Stop(); pending = -1; if (!Save()) return false;
+        }
+        return true;
+    }
+    IAsyncAction Run(int index) {
+        auto lifetime = get_strong();
+        auto& original = report->tests[index];
+        original.status = L"running"; original.detail = L"Teste iniciado; registro persistido antes da execução.";
+        original.error.clear(); original.measurements = Windows::Data::Json::JsonObject();
+        original.startedAt = Lab::Now(); original.durationMs = 0;
+        // Never run a potentially terminating probe if its start record cannot be persisted.
+        if (!Save()) co_return;
+        Refresh(); status.Text(L"Executando: " + original.title);
+        auto start = std::chrono::steady_clock::now();
+        try {
+            if (original.id == L"presentation") {
+                swapchain = Lab::RenderTriangle();
+                auto native = panel.as<ISwapChainPanelNative>(); check_hresult(native->SetSwapChain(swapchain.get()));
+                check_hresult(swapchain->Present(1, 0));
+                original.status = L"awaiting_confirmation";
+                original.detail = L"Draw e Present concluídos. Confirme se há um triângulo verde na área de imagem."; pending = index;
+            } else if (original.id == L"audio") {
+                original.status = L"awaiting_confirmation";
+                original.detail = L"Reprodução solicitada: tom suave de 440 Hz por 2 segundos. Confirme se ouviu o som."; pending = index;
+                audio.Source(Uri(L"ms-appx:///Assets/tone.wav")); audio.Volume(0.2); audio.Play();
+            } else if (original.id == L"controller") {
+                original.status = L"awaiting_confirmation";
+                original.detail = L"Pressione e solte X no controle nos próximos 30 segundos."; pending = index;
+                controllerBaseline = 0;
+                for (auto const& pad : Windows::Gaming::Input::Gamepad::Gamepads())
+                    controllerBaseline = (std::max)(controllerBaseline, pad.GetCurrentReading().Timestamp);
+            } else if (original.id == L"lifecycle") {
+                original.status = L"awaiting_confirmation"; pending = index; sawSuspension = false;
+                original.detail = L"Saia para o painel do Xbox e retorne. O resultado depende de eventos reais de suspensão e retomada, não apenas da troca de foco.";
+            } else {
+                apartment_context ui;
+                // Construct all JSON objects on the UI apartment. Probe measurements are collected
+                // in a worker-owned Test, then transferred as JSON text after the worker completes.
+                auto id = original.id; auto directory = report->directory;
+                std::wstring serialized, probeStatus, probeDetail, probeError;
+                co_await resume_background();
+                try {
+                    Lab::Test result; result.id = id;
+                    Lab::RunProbe(result, directory);
+                    serialized = result.measurements.Stringify(); probeStatus = result.status; probeDetail = result.detail;
+                } catch (hresult_error const& e) {
+                    auto hr = e.code();
+                    probeStatus = (hr == E_ACCESSDENIED || hr == E_NOTIMPL || hr == DXGI_ERROR_UNSUPPORTED ||
+                        hr == HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED)) ? L"unavailable" : L"failed";
+                    probeError = std::to_wstring(static_cast<uint32_t>(hr.value)) + L": " + std::wstring(e.message());
+                    probeDetail = L"A operação não concluiu. Consulte o código de erro; falha isolada não prova impossibilidade do port.";
+                } catch (std::exception const& e) {
+                    probeStatus = L"failed"; probeError = to_hstring(e.what());
+                }
+                co_await ui;
+                original.status = probeStatus; original.detail = probeDetail; original.error = probeError;
+                if (!serialized.empty()) original.measurements = Windows::Data::Json::JsonObject::Parse(serialized);
+            }
+        } catch (hresult_error const& e) {
+            original.status = L"failed"; original.error = e.message();
+            if (pending == index) pending = -1;
+        }
+        original.durationMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        bool saved = Save(); Refresh();
+        if (saved) status.Text(Lab::StatusLabel(original.status) + L" · " + original.title);
+    }
+    fire_and_forget RunSelected() {
+        auto lifetime = get_strong(); if (!CanRun()) co_return;
+        auto index = list.SelectedIndex(); if (index < 0) co_return;
+        busy = true;
+        try { co_await Run(index); } catch (hresult_error const& e) { status.Text(L"Erro: " + e.message()); }
+        busy = false;
+    }
+    fire_and_forget RunAll() {
+        auto lifetime = get_strong(); if (!CanRun()) co_return;
+        busy = true;
+        try {
+            for (size_t i = 0; i < report->tests.size() && !persistenceFailed; ++i)
+                if (!report->tests[i].isolated) co_await Run(static_cast<int>(i));
+            if (!persistenceFailed) status.Text(L"Lote concluído. Testes de execução, imagem, áudio, controle e ciclo de vida são individuais.");
+        } catch (hresult_error const& e) { status.Text(L"Erro: " + e.message()); }
+        busy = false;
+    }
+    void FinishPending(bool ok, std::wstring const& evidence) {
+        if (pending < 0) return;
+        auto& t = report->tests[pending]; t.status = ok ? L"passed" : L"failed";
+        t.detail += L"\n" + evidence; t.durationMs = (Lab::Now() - t.startedAt) * 1000;
+        pending = -1; bool saved = Save(); Refresh(); if (saved) status.Text(evidence);
+    }
+    void Confirm(bool ok) {
+        if (busy || pending < 0) return;
+        auto const& id = report->tests[pending].id;
+        if (id != L"presentation" && id != L"audio") return;
+        FinishPending(ok, ok ? L"Confirmação visual/auditiva registrada pelo usuário." : L"Usuário informou falha visual/auditiva.");
+    }
+    void PollController() {
+        if (busy || pending < 0 || report->tests[pending].id != L"controller") return;
+        try {
+            for (auto const& pad : Windows::Gaming::Input::Gamepad::Gamepads()) {
+                auto reading = pad.GetCurrentReading();
+                if (reading.Timestamp > controllerBaseline &&
+                    (reading.Buttons & Windows::Gaming::Input::GamepadButtons::X) != Windows::Gaming::Input::GamepadButtons::None) {
+                    FinishPending(true, L"Entrada X recebida via Windows.Gaming.Input após iniciar o teste."); return;
+                }
+            }
+            if (Lab::Now() - report->tests[pending].startedAt > 30) {
+                auto& t = report->tests[pending]; t.status = L"inconclusive";
+                t.detail = L"Nenhuma entrada X recebida em 30 segundos. Conecte o controle e repita.";
+                pending = -1; Save(); Refresh();
+            }
+        } catch (hresult_error const& e) { FinishPending(false, e.message().c_str()); }
+    }
+};
+
+int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
+    init_apartment(apartment_type::single_threaded);
+    Application::Start([](auto&&) { make<App>(); });
+}

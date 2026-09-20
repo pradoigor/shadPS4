@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{D3F395D9-5434-4B03-AE63-771AEEA7AA25}</ProjectGuid>
+    <RootNamespace>ShadPS4Xbox</RootNamespace>
+    <DefaultLanguage>pt-BR</DefaultLanguage>
+    <AppContainerApplication>true</AppContainerApplication>
+    <ApplicationType>Windows Store</ApplicationType>
+    <ApplicationTypeRevision>10.0</ApplicationTypeRevision>
+    <WindowsTargetPlatformVersion>10.0.22621.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformMinVersion>10.0.19041.0</WindowsTargetPlatformMinVersion>
+    <CppWinRTOptimized>true</CppWinRTOptimized>
+    <CppWinRTRootNamespaceAutoMerge>true</CppWinRTRootNamespaceAutoMerge>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType><PlatformToolset>v143</PlatformToolset>
+    <UseDebugLibraries>false</UseDebugLibraries><CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <TargetName>ShadPS4Xbox</TargetName>
+    <OutDir>$(MSBuildThisFileDirectory)bin\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(MSBuildThisFileDirectory)obj\$(Platform)\$(Configuration)\</IntDir>
+    <AppxPackageSigningEnabled>false</AppxPackageSigningEnabled>
+    <AppxBundle>Never</AppxBundle><GenerateAppxPackageOnBuild>true</GenerateAppxPackageOnBuild>
+    <AppxPackageDir>$(MSBuildThisFileDirectory)AppPackages\</AppxPackageDir>
+    <AppxSymbolPackageEnabled>true</AppxSymbolPackageEnabled>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <LanguageStandard>stdcpp20</LanguageStandard><WarningLevel>Level4</WarningLevel>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader><ExceptionHandling>Sync</ExceptionHandling>
+      <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalOptions>/bigobj /utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem><GenerateDebugInformation>true</GenerateDebugInformation>
+      <GenerateWindowsMetadata>false</GenerateWindowsMetadata>
+      <AdditionalDependencies>WindowsApp.lib;d3d11.lib;d3d12.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <FxCompile><ShaderModel>5.0</ShaderModel><EntryPointName>main</EntryPointName></FxCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Windows.CppWinRT" Version="2.0.250303.1" />
+    <ClCompile Include="App.cpp" /><ClCompile Include="Probes.cpp" /><ClCompile Include="Report.cpp" />
+    <ClInclude Include="Probes.h" /><ClInclude Include="Report.h" /><ClInclude Include="BuildInfo.h" />
+    <AppxManifest Include="Package.appxmanifest" />
+    <Content Include="MainPage.xaml" /><Content Include="Assets\*.png" /><Content Include="Assets\tone.wav" />
+    <Content Include="Shaders\*.cso" />
+    <FxCompile Include="Shaders\TriangleVS.hlsl"><ShaderType>Vertex</ShaderType><ObjectFileOutput>$(ProjectDir)Shaders\TriangleVS.cso</ObjectFileOutput></FxCompile>
+    <FxCompile Include="Shaders\TrianglePS.hlsl"><ShaderType>Pixel</ShaderType><ObjectFileOutput>$(ProjectDir)Shaders\TrianglePS.cso</ObjectFileOutput></FxCompile>
+    <FxCompile Include="Shaders\ProbeCS.hlsl"><ShaderType>Compute</ShaderType><ObjectFileOutput>$(ProjectDir)Shaders\ProbeCS.cso</ObjectFileOutput></FxCompile>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

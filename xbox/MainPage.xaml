@@ -1,0 +1,34 @@
+<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Background="#101827" RequestedTheme="Dark" XYFocusKeyboardNavigation="Enabled">
+  <Grid Margin="48,28">
+    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+    <StackPanel>
+      <TextBlock Text="shadPS4 / XBOX LAB" FontSize="32" FontWeight="SemiBold" Foreground="#65E4C3"/>
+      <TextBlock Text="Viabilidade no Series X · Dev Mode" FontSize="22" Margin="0,4,0,0"/>
+      <TextBlock Text="Diagnóstico experimental. O núcleo PS4 ainda não está portado e este aplicativo não executa jogos." FontSize="16" Foreground="#C4CDD9" TextWrapping="Wrap" Margin="0,6,0,0"/>
+      <TextBlock x:Name="DeviceInfo" FontSize="14" TextWrapping="Wrap" Margin="0,8,0,0"/>
+    </StackPanel>
+    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,16,0,12" Spacing="12">
+      <Button x:Name="RunAll" Content="Executar testes automáticos" Padding="16,10"/>
+      <Button x:Name="RunSelected" Content="Executar selecionado" Padding="16,10"/>
+      <Button x:Name="Export" Content="Exportar JSON" Padding="16,10"/>
+    </StackPanel>
+    <Grid Grid.Row="2">
+      <Grid.ColumnDefinitions><ColumnDefinition Width="5*"/><ColumnDefinition Width="6*"/></Grid.ColumnDefinitions>
+      <ListView x:Name="Tests" SelectionMode="Single" IsItemClickEnabled="False" Margin="0,0,24,0"/>
+      <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+        <StackPanel Spacing="12">
+          <TextBlock x:Name="Details" Text="Selecione um teste para ver as evidências e os limites." FontSize="18" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
+          <SwapChainPanel x:Name="GpuPanel" Height="180" HorizontalAlignment="Stretch"/>
+          <MediaElement x:Name="Audio" AutoPlay="False" AreTransportControlsEnabled="False" Height="0"/>
+          <StackPanel Orientation="Horizontal" Spacing="10">
+            <Button x:Name="Confirm" Content="Confirmar imagem / áudio"/>
+            <Button x:Name="Reject" Content="Imagem / áudio não funcionou"/>
+          </StackPanel>
+          <TextBlock Text="Controle: direcional move o foco; A seleciona. Para suspensão, execute o teste e saia para o painel do Xbox, depois retorne." FontSize="15" Foreground="#C4CDD9" TextWrapping="Wrap"/>
+        </StackPanel>
+      </ScrollViewer>
+    </Grid>
+    <TextBlock x:Name="Status" Grid.Row="3" Text="Pronto. Nenhum resultado é presumido." FontSize="16" TextWrapping="Wrap" Margin="0,12,0,0" Foreground="#65E4C3"/>
+  </Grid>
+</Grid>

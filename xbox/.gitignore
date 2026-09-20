@@ -1,0 +1,12 @@
+/bin/
+/obj/
+/packages/
+/AppPackages/
+/artifacts/
+/Shaders/*.cso
+*.pfx
+*.cer
+*.binlog
+*.user
+*.vs/
+__pycache__/
