@@ -20,7 +20,7 @@
         <StackPanel Spacing="12">
           <TextBlock x:Name="Details" Text="Selecione um teste para ver as evidências e os limites." FontSize="18" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
           <SwapChainPanel x:Name="GpuPanel" Height="180" HorizontalAlignment="Stretch"/>
-          <MediaElement x:Name="Audio" AutoPlay="False" AreTransportControlsEnabled="False" Height="0"/>
+          <MediaElement x:Name="Audio" AutoPlay="False" AreTransportControlsEnabled="False" AudioCategory="GameMedia" Volume="1" Height="1"/>
           <StackPanel Orientation="Horizontal" Spacing="10">
             <Button x:Name="Confirm" Content="Confirmar imagem / áudio"/>
             <Button x:Name="Reject" Content="Imagem / áudio não funcionou"/>

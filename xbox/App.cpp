@@ -181,7 +181,11 @@ struct App : ApplicationT<App> {
             } else if (original.id == L"audio") {
                 original.status = L"awaiting_confirmation";
                 original.detail = L"Reprodução solicitada: tom suave de 440 Hz por 2 segundos. Confirme se ouviu o som."; pending = index;
-                audio.Source(Uri(L"ms-appx:///Assets/tone.wav")); audio.Volume(0.2); audio.Play();
+                audio.Stop();
+                audio.AudioCategory(Windows::UI::Xaml::Media::MediaElementAudioCategory::GameMedia);
+                audio.Volume(1.0);
+                audio.Source(Uri(L"ms-appx:///Assets/tone.wav"));
+                audio.Play();
             } else if (original.id == L"controller") {
                 original.status = L"awaiting_confirmation";
                 original.detail = L"Pressione e solte X no controle nos próximos 30 segundos."; pending = index;

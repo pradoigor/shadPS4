@@ -33,7 +33,7 @@ def generate(directory):
         samples = bytearray()
         for i in range(96000):
             envelope = min(1, i / 2400, (95999 - i) / 2400)
-            samples.extend(struct.pack('<h', round(5000 * envelope * math.sin(2 * math.pi * 440 * i / 48000))))
+            samples.extend(struct.pack('<h', round(14000 * envelope * math.sin(2 * math.pi * 440 * i / 48000))))
         output.writeframes(samples)
 
 
