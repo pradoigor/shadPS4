@@ -94,6 +94,9 @@ struct App : ApplicationT<App> {
             Save();
             Window::Current().Content(root); Window::Current().Activate();
             Find<Button>(L"RunAll").Focus(FocusState::Programmatic);
+            // A first launch gathers the safe baseline without requiring remote input.
+            // Potentially terminating probes and sensory checks remain individual actions.
+            if (report->tests.front().status == L"not_run" && !persistenceFailed) RunAll();
         } catch (hresult_error const& e) {
             TextBlock error; error.Text(L"Falha ao iniciar Xbox Lab: " + e.message()); error.TextWrapping(TextWrapping::Wrap);
             Window::Current().Content(error); Window::Current().Activate();
@@ -240,4 +243,5 @@ struct App : ApplicationT<App> {
 int __stdcall wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     init_apartment(apartment_type::single_threaded);
     Application::Start([](auto&&) { make<App>(); });
+    return 0;
 }

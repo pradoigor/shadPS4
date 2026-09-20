@@ -9,11 +9,15 @@ on:
     paths-ignore:
       - "documents/**"
       - "**/*.md"
+      - "xbox/**"
+      - ".github/workflows/xbox-uwp.yml"
 
   pull_request:
     paths-ignore:
       - "documents/**"
       - "**/*.md"
+      - "xbox/**"
+      - ".github/workflows/xbox-uwp.yml"
 
   workflow_dispatch:
 

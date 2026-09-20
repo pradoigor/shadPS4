@@ -27,6 +27,8 @@ $commitInfo = @"
 #define XBOX_UPSTREAM_COMMIT L"42c555b7ab5d0678f531a7e4d505560ccc0f8add"
 "@
 Set-Content "$project\BuildInfo.h" $commitInfo -Encoding utf8
+& nuget install Microsoft.Windows.CppWinRT -Version 2.0.250303.1 -OutputDirectory "$project\packages" -Source https://api.nuget.org/v3/index.json -NonInteractive
+if ($LASTEXITCODE -ne 0) { throw 'C++/WinRT restore failed.' }
 & python "$PSScriptRoot\generate_assets.py"
 if ($LASTEXITCODE -ne 0) { throw 'Asset generation failed.' }
 # Compile shaders before MSBuild evaluates its Content wildcard.
@@ -35,7 +37,7 @@ foreach ($shader in @(@('TriangleVS', 'vs_5_0'), @('TrianglePS', 'ps_5_0'), @('P
     & $fxc /nologo /T $shader[1] /E main /Fo "$project\Shaders\$($shader[0]).cso" "$project\Shaders\$($shader[0]).hlsl"
     if ($LASTEXITCODE -ne 0) { throw "Shader compilation failed: $($shader[0])" }
 }
-& $msbuild "$project\Diagnostics.vcxproj" /restore /m /p:Configuration=Release /p:Platform=x64 "/p:WindowsTargetPlatformVersion=$SdkVersion" /p:UapAppxPackageBuildMode=SideloadOnly /p:AppxBundle=Never /p:AppxPackageSigningEnabled=false "/bl:$artifacts\build.binlog"
+& $msbuild "$project\Diagnostics.vcxproj" /m /p:Configuration=Release /p:Platform=x64 "/p:WindowsTargetPlatformVersion=$SdkVersion" /p:UapAppxPackageBuildMode=SideloadOnly /p:AppxBundle=Never /p:AppxPackageSigningEnabled=false "/bl:$artifacts\build.binlog"
 if ($LASTEXITCODE -ne 0) { throw 'UWP build failed; see build.binlog.' }
 $packages = @(Get-ChildItem "$project\AppPackages" -Recurse -Filter '*.appx' | Where-Object { $_.Name -like 'PradoIgor*' -or $_.Name -like 'Diagnostics*' -or $_.Name -like 'ShadPS4Xbox*' })
 if ($packages.Count -ne 1) { throw "Expected one app package, found $($packages.Count). Use a clean build directory." }
