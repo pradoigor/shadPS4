@@ -182,7 +182,6 @@ struct App : ApplicationT<App> {
                 original.status = L"awaiting_confirmation";
                 original.detail = L"Reprodução solicitada: tom suave de 440 Hz por 2 segundos. Confirme se ouviu o som."; pending = index;
                 audio.Stop();
-                audio.AudioCategory(Windows::UI::Xaml::Media::MediaElementAudioCategory::GameMedia);
                 audio.Volume(1.0);
                 audio.Source(Uri(L"ms-appx:///Assets/tone.wav"));
                 audio.Play();
