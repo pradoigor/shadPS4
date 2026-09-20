@@ -31,6 +31,17 @@ Set-Content "$project\BuildInfo.h" $commitInfo -Encoding utf8
 if ($LASTEXITCODE -ne 0) { throw 'C++/WinRT restore failed.' }
 & python "$PSScriptRoot\generate_assets.py"
 if ($LASTEXITCODE -ne 0) { throw 'Asset generation failed.' }
+# Index only package assets, never the source tree, NuGet tools, or generated objects.
+$priRoot = Join-Path $project 'obj\pri-assets'
+New-Item $priRoot -ItemType Directory -Force | Out-Null
+Copy-Item "$project\Assets" $priRoot -Recurse -Force
+$binaryDir = Join-Path $project 'bin\x64\Release'
+New-Item $binaryDir -ItemType Directory -Force | Out-Null
+$makepri = "$sdk\bin\$SdkVersion\x64\makepri.exe"
+& $makepri createconfig /cf "$project\obj\assets.priconfig.xml" /dq pt-BR /o
+if ($LASTEXITCODE -ne 0) { throw 'PRI configuration failed.' }
+& $makepri new /pr $priRoot /cf "$project\obj\assets.priconfig.xml" /of "$binaryDir\resources.pri" /in PradoIgor.ShadPS4Xbox.Diagnostics /o
+if ($LASTEXITCODE -ne 0) { throw 'Asset resource indexing failed.' }
 # Compile shaders before MSBuild evaluates its Content wildcard.
 $fxc = "$sdk\bin\$SdkVersion\x64\fxc.exe"
 foreach ($shader in @(@('TriangleVS', 'vs_5_0'), @('TrianglePS', 'ps_5_0'), @('ProbeCS', 'cs_5_0'))) {
