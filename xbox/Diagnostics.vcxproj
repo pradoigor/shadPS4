@@ -54,8 +54,10 @@
     <ClCompile Include="App.cpp" /><ClCompile Include="Probes.cpp" /><ClCompile Include="Report.cpp" />
     <ClInclude Include="Probes.h" /><ClInclude Include="Report.h" /><ClInclude Include="BuildInfo.h" />
     <AppxManifest Include="Package.appxmanifest" />
-    <Content Include="MainPage.xaml" /><Content Include="Assets\*.png" /><Content Include="Assets\tone.wav" />
-    <Content Include="Shaders\*.cso" />
+    <None Include="MainPage.xaml"><DeploymentContent>true</DeploymentContent></None>
+    <Image Include="Assets\*.png" />
+    <None Include="Assets\tone.wav"><DeploymentContent>true</DeploymentContent></None>
+    <None Include="Shaders\*.cso"><DeploymentContent>true</DeploymentContent></None>
     <FxCompile Include="Shaders\TriangleVS.hlsl"><ShaderType>Vertex</ShaderType><ObjectFileOutput>$(ProjectDir)Shaders\TriangleVS.cso</ObjectFileOutput></FxCompile>
     <FxCompile Include="Shaders\TrianglePS.hlsl"><ShaderType>Pixel</ShaderType><ObjectFileOutput>$(ProjectDir)Shaders\TrianglePS.cso</ObjectFileOutput></FxCompile>
     <FxCompile Include="Shaders\ProbeCS.hlsl"><ShaderType>Compute</ShaderType><ObjectFileOutput>$(ProjectDir)Shaders\ProbeCS.cso</ObjectFileOutput></FxCompile>
