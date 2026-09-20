@@ -2,8 +2,9 @@
 
 Base analisada: `42c555b7ab5d0678f531a7e4d505560ccc0f8add`.
 
-Este alvo é um laboratório UWP independente dentro do fork. Não liga o núcleo,
-não carrega ELF/PKG e não executa jogos. Resultado aprovado em um teste não
+Este alvo é um laboratório UWP dentro do fork. Ele já compila diretamente os
+headers originais `common/endian.h` e `core/file_format/psf.h`, mas ainda não
+liga o núcleo completo, não carrega ELF/PKG e não executa jogos. Resultado aprovado em um teste não
 equivale a aprovação do subsistema completo do emulador.
 
 | Área | Evidência no código original | Diagnóstico implementado | Ainda necessário |
@@ -15,6 +16,21 @@ equivale a aprovação do subsistema completo do emulador.
 | Execução | Mesmo arquivo: PAGE_EXECUTE_READWRITE; `src/core/linker.cpp`: carregamento/execução | Seis bytes x64 próprios, RW para RX, retorno 42 | ABI, relocação, TLS, instruções, bibliotecas e execução de homebrew |
 | Exceções | `src/core/signals.cpp`: AddVectoredExceptionHandler | Interrupções detectadas por journal persistente | Compatibilidade do mecanismo de tratamento de exceções do núcleo; journal não substitui um handler |
 | Sistema/arquivos | Dependências desktop, bibliotecas e caminhos do núcleo | LocalState, persistência e áudio UWP | Adaptar acesso ao conteúdo e módulos, threads e dependências |
+| Formatos do núcleo | `common/endian.h` e `core/file_format/psf.h` | Compilação no alvo UWP e validação em runtime dos tamanhos PSF e big-endian | Integrar implementação PSF, SELF/ELF e fontes com dependências de logging/assert |
+
+## Bloqueios confirmados do núcleo
+
+- `src/core/address_space.cpp` requer placeholders e backing executável por
+  `VirtualAlloc2`, `CreateFileMapping2` e `MapViewOfFile3`. As três chamadas
+  falham no link UWP, embora as alternativas `FromApp` usadas pelos probes funcionem.
+- `src/core/signals.cpp` depende de tratamento de exceções vetorizadas e de
+  componentes do emulador. A API isolada liga para UWP, mas o fluxo completo ainda
+  precisa ser exercitado com código convidado.
+- A janela, entrada e áudio do núcleo dependem de SDL3. O alvo Xbox usa XAML,
+  `Windows.Gaming.Input` e mídia UWP.
+- O renderer em `src/video_core/renderer_vulkan` não pode usar diretamente os
+  dispositivos D3D11/D3D12 validados pelo laboratório; é necessário um backend
+  gráfico próprio ou uma camada Vulkan realmente disponível no Xbox Dev Mode.
 
 `api-surface.json`, quando produzido no Windows, registra se chamadas nativas
 representativas compilam e ligam para UWP x64. Compilar não comprova que elas

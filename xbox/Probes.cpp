@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "Probes.h"
+#include "CoreProbe.h"
 #include <d3d12.h>
 #include <memoryapi.h>
 #include <fileapifromapp.h>
@@ -89,6 +90,14 @@ void RunProbe(Test& t, std::wstring const& directory) {
         std::string read{std::istreambuf_iterator<char>(input), {}};
         if (read != payload) throw hresult_error(E_FAIL, L"Conteúdo lido difere do conteúdo gravado.");
         t.detail = L"Arquivo gravado, sincronizado e relido em LocalState.";
+    } else if (t.id == L"core_types") {
+        auto result = ProbeUpstreamCoreTypes();
+        Number(t, L"psf_header_size", result.psf_header_size);
+        Number(t, L"psf_entry_size", result.psf_entry_size);
+        Number(t, L"decoded_magic", result.decoded_magic);
+        Number(t, L"stored_magic", result.stored_magic);
+        if (!result.passed) throw hresult_error(E_FAIL, L"Tipos do núcleo divergiram no alvo UWP.");
+        t.detail = L"Headers originais common/endian.h e core/file_format/psf.h compilaram no APPX; tamanhos e representação big-endian foram validados no console.";
     } else if (t.id == L"budget") {
         Number(t, L"app_memory_usage_bytes", static_cast<double>(Windows::System::MemoryManager::AppMemoryUsage()));
         Number(t, L"app_memory_limit_bytes", static_cast<double>(Windows::System::MemoryManager::AppMemoryUsageLimit()));

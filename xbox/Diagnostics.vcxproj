@@ -36,11 +36,11 @@
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
-      <LanguageStandard>stdcpp20</LanguageStandard><WarningLevel>Level4</WarningLevel>
+      <LanguageStandard>stdcpplatest</LanguageStandard><WarningLevel>Level4</WarningLevel>
       <PrecompiledHeader>NotUsing</PrecompiledHeader><ExceptionHandling>Sync</ExceptionHandling>
       <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>/bigobj /utf-8 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <Link>
@@ -51,8 +51,8 @@
     <FxCompile><ShaderModel>5.0</ShaderModel><EntryPointName>main</EntryPointName></FxCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="App.cpp" /><ClCompile Include="Probes.cpp" /><ClCompile Include="Report.cpp" />
-    <ClInclude Include="Probes.h" /><ClInclude Include="Report.h" /><ClInclude Include="BuildInfo.h" />
+    <ClCompile Include="App.cpp" /><ClCompile Include="CoreProbe.cpp" /><ClCompile Include="Probes.cpp" /><ClCompile Include="Report.cpp" />
+    <ClInclude Include="CoreProbe.h" /><ClInclude Include="Probes.h" /><ClInclude Include="Report.h" /><ClInclude Include="BuildInfo.h" />
     <AppxManifest Include="Package.appxmanifest" />
     <None Include="MainPage.xaml"><DeploymentContent>true</DeploymentContent></None>
     <Image Include="Assets\*.png" />

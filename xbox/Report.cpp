@@ -47,6 +47,7 @@ Report::Report() {
         Test t; t.id = id; t.title = title; t.isolated = isolated; tests.push_back(std::move(t));
     };
     add(L"storage", L"Armazenamento · leitura e gravação");
+    add(L"core_types", L"Núcleo · tipos PSF e endian do shadPS4");
     add(L"budget", L"Memória · orçamento do aplicativo");
     add(L"d3d11", L"GPU · Direct3D 11 e shader com leitura de volta");
     add(L"d3d12", L"GPU · dispositivo Direct3D 12");
