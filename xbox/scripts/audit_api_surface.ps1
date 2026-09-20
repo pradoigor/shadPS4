@@ -37,8 +37,8 @@ foreach ($entry in $probes.GetEnumerator()) {
 </Project>
 "@
   Set-Content "$directory\$name.vcxproj" $xml
-  & $msbuild "$directory\$name.vcxproj" /t:Link /p:Configuration=Release /p:Platform=x64 /verbosity:minimal *> "$out\$name.log"
-  $passed = $LASTEXITCODE -eq 0
+  & $msbuild "$directory\$name.vcxproj" /t:Build /p:Configuration=Release /p:Platform=x64 /verbosity:minimal *> "$out\$name.log"
+  $passed = ($LASTEXITCODE -eq 0) -and (Test-Path "$directory\$name\$name.exe")
   $results += @{api=$name; compiles_and_links=$passed; log="api-surface/$name.log"; runtime_tested=$false}
   if ($name -eq 'baseline' -and !$passed) {
     $results | ConvertTo-Json -Depth 5 | Set-Content "$project\artifacts\api-surface.json"

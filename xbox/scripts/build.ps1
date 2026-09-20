@@ -48,7 +48,7 @@ foreach ($shader in @(@('TriangleVS', 'vs_5_0'), @('TrianglePS', 'ps_5_0'), @('P
     & $fxc /nologo /T $shader[1] /E main /Fo "$project\Shaders\$($shader[0]).cso" "$project\Shaders\$($shader[0]).hlsl"
     if ($LASTEXITCODE -ne 0) { throw "Shader compilation failed: $($shader[0])" }
 }
-& $msbuild "$project\Diagnostics.vcxproj" /t:Link /m /p:Configuration=Release /p:Platform=x64 "/p:WindowsTargetPlatformVersion=$SdkVersion" /p:GenerateAppxPackageOnBuild=false /p:AppxPackage=false "/bl:$artifacts\build.binlog"
+& $msbuild "$project\Diagnostics.vcxproj" /t:Build /m /p:Configuration=Release /p:Platform=x64 "/p:WindowsTargetPlatformVersion=$SdkVersion" /p:GenerateAppxPackageOnBuild=false /p:AppxPackage=false "/bl:$artifacts\build.binlog"
 if ($LASTEXITCODE -ne 0) { throw 'UWP build failed; see build.binlog.' }
 # Explicit staging avoids implicit C++ deployment mapping and makes the payload reviewable.
 $stage = Join-Path $project 'obj\package'
