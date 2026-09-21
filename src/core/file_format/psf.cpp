@@ -10,7 +10,11 @@
 // The vector encoder/decoder is platform-neutral. File I/O and the desktop logging
 // stack are supplied by a UWP adapter later, so keep this small codec usable now.
 #define LOG_ERROR(...) ((void)0)
-#define ASSERT(condition) do { if (!(condition)) std::abort(); } while (false)
+#define ASSERT(condition)                                                                          \
+    do {                                                                                           \
+        if (!(condition))                                                                          \
+            std::abort();                                                                          \
+    } while (false)
 #define ASSERT_MSG(condition, ...) ASSERT(condition)
 #define UNREACHABLE_MSG(...) std::abort()
 #else
