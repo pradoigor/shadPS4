@@ -37,6 +37,18 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     return HleResolution{encoded, nid, entries_.back().implemented, address};
 }
 
+HleBindingSummary HleDispatcher::Bind(std::vector<std::string> const& encodedSymbols) {
+    HleBindingSummary summary;
+    summary.requested = encodedSymbols.size();
+    for (auto const& encoded : encodedSymbols) {
+        const auto resolution = Resolve(encoded);
+        if (resolution.address) ++summary.executable_addresses;
+        if (resolution.implemented) ++summary.implemented_handlers;
+        else ++summary.unimplemented_handlers;
+    }
+    return summary;
+}
+
 std::size_t HleDispatcher::implementedCount() const noexcept {
     return static_cast<std::size_t>(std::count_if(entries_.begin(), entries_.end(),
         [](auto const& entry) { return entry.implemented; }));

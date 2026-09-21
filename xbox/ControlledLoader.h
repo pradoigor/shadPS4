@@ -48,6 +48,9 @@ struct ControlledLoadResult {
     // they do not provide an executable address or patch the guest image.
     std::uint64_t hle_symbols_known{};
     std::uint64_t hle_symbols_unknown{};
+    std::uint64_t hle_addresses_created{};
+    std::uint64_t hle_handlers_implemented{};
+    std::uint64_t hle_handlers_unimplemented{};
     std::uint64_t relocation_dry_run_checksum{};
     std::vector<std::string> pending_symbol_names;
     std::vector<std::string> hle_symbol_mappings;

@@ -38,10 +38,14 @@ RuntimeGateResult EvaluateRuntimeGate(ControlledLoadResult const& load) {
     if (load.tls_relocations_pending != 0)
         Add(unique, result.blockers, L"A inicialização TLS do convidado ainda está pendente.");
 
-    // These are implementation gates, not format failures. They remain until
-    // the UWP runtime supplies a real SysV thunk and host-backed HLE address.
-    Add(unique, result.blockers, L"A ponte ABI SysV do PS4 para o ABI x64 do Xbox ainda não está ligada.");
-    Add(unique, result.blockers, L"As funções HLE ainda não possuem endereços executáveis no runtime UWP.");
+    // The ABI thunk is now exercised on the console. Binding still happens in
+    // a short-lived table and is deliberately not written into guest memory.
+    if (load.hle_addresses_created < load.symbol_relocations_pending)
+        Add(unique, result.blockers, L"Nem todos os imports receberam um endereço HLE executável.");
+    if (load.hle_handlers_unimplemented != 0)
+        Add(unique, result.blockers, L"Há imports HLE com thunk ENOSYS; os handlers ainda precisam ser implementados.");
+    if (load.symbol_relocations_pending != 0)
+        Add(unique, result.blockers, L"As relocações de símbolos ainda não foram aplicadas à imagem convidada.");
 
     for (auto const& encoded : load.import_library_names) {
         const auto name = LibraryName(encoded);

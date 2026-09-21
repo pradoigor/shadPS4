@@ -3,6 +3,7 @@
 
 #include "SysvThunk.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -17,6 +18,13 @@ struct HleResolution {
     void* address{};
 };
 
+struct HleBindingSummary {
+    std::size_t requested{};
+    std::size_t executable_addresses{};
+    std::size_t implemented_handlers{};
+    std::size_t unimplemented_handlers{};
+};
+
 class HleDispatcher {
 public:
     HleDispatcher() = default;
@@ -28,6 +36,7 @@ public:
     // Returns a thunk for an import. Unimplemented imports receive a safe
     // ENOSYS-style return value and are still reported as unavailable.
     HleResolution Resolve(std::string_view encodedSymbol);
+    HleBindingSummary Bind(std::vector<std::string> const& encodedSymbols);
 
     std::size_t implementedCount() const noexcept;
     std::size_t unresolvedCount() const noexcept;

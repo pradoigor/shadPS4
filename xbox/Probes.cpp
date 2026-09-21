@@ -2,6 +2,7 @@
 #include "Probes.h"
 
 #include "ControlledLoader.h"
+#include "HleDispatcher.h"
 #include "RuntimeGate.h"
 
 #include <windows.h>
@@ -18,6 +19,11 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
         throw winrt::hresult_error(E_INVALIDARG, L"Selecione um ELF/SELF ou extraia um PKG antes de validar.");
 
     auto result = LoadControlled(executablePath);
+    HleDispatcher hleDispatcher;
+    const auto hleBindings = hleDispatcher.Bind(result.pending_symbol_names);
+    result.hle_addresses_created = hleBindings.executable_addresses;
+    result.hle_handlers_implemented = hleBindings.implemented_handlers;
+    result.hle_handlers_unimplemented = hleBindings.unimplemented_handlers;
     auto gate = EvaluateRuntimeGate(result);
     result.runtime_preflight_ready = gate.ready;
     result.runtime_blockers = gate.blockers;
@@ -58,6 +64,9 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
     test.measurements.Insert(L"symbol_relocations_invalid", JsonValue::CreateNumberValue(static_cast<double>(result.symbol_relocations_invalid)));
     test.measurements.Insert(L"hle_symbols_known", JsonValue::CreateNumberValue(static_cast<double>(result.hle_symbols_known)));
     test.measurements.Insert(L"hle_symbols_unknown", JsonValue::CreateNumberValue(static_cast<double>(result.hle_symbols_unknown)));
+    test.measurements.Insert(L"hle_addresses_created", JsonValue::CreateNumberValue(static_cast<double>(result.hle_addresses_created)));
+    test.measurements.Insert(L"hle_handlers_implemented", JsonValue::CreateNumberValue(static_cast<double>(result.hle_handlers_implemented)));
+    test.measurements.Insert(L"hle_handlers_unimplemented", JsonValue::CreateNumberValue(static_cast<double>(result.hle_handlers_unimplemented)));
     test.measurements.Insert(L"runtime_preflight_ready", JsonValue::CreateBooleanValue(result.runtime_preflight_ready));
     winrt::Windows::Data::Json::JsonArray symbolNames;
     for (auto const& name : result.pending_symbol_names)
@@ -120,10 +129,13 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
                   L", invalid=" + std::to_wstring(result.symbol_relocations_invalid) +
                   L", NIDs conhecidos no registro AeroLib=" + std::to_wstring(result.hle_symbols_known) +
                   L", NIDs sem correspondência=" + std::to_wstring(result.hle_symbols_unknown) +
+                  L", endereços HLE criados=" + std::to_wstring(result.hle_addresses_created) +
+                  L", handlers implementados=" + std::to_wstring(result.hle_handlers_implemented) +
+                  L", handlers pendentes=" + std::to_wstring(result.hle_handlers_unimplemented) +
                   L", TLS pending=" + std::to_wstring(result.tls_relocations_pending) +
                   std::wstring(L". Gate de runtime=") +
                   (result.runtime_preflight_ready ? L"pronto" : L"bloqueado") +
-                  L". O inventário AeroLib identifica nomes conhecidos, mas ainda não fornece endereços HLE; o dry-run não altera o arquivo nem executa o homebrew.\n" +
+                  L". O inventário AeroLib foi convertido em thunks temporários; eles ainda não foram gravados nas relocações e não executam o homebrew.\n" +
                   gateDetail + L"\n" +
                   execution.detail + L"\nArquivo: " + executablePath;
 }

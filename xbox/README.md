@@ -4,7 +4,7 @@ Aplicativo **UWP x64 / C++/WinRT / XAML** para medir a viabilidade de portar
 shadPS4 ao Xbox Series X em Dev Mode. **Ainda não é um emulador PS4 no Xbox.**
 O alvo é independente do CMake e das dependências desktop do núcleo.
 
-A versão **0.18.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
+A versão **0.19.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
 PKG/ELF, keysets FPKG embutidos, importação de chaves personalizadas, extração em
 segundo plano e um probe de execução controlada com auditoria de requisitos runtime,
 relocação e inventário de NIDs HLE. O ELF/SELF selecionado é apenas
@@ -29,8 +29,9 @@ motivos no relatório; nenhum `e_entry` recebido pode ser chamado.
 O código também contém o primeiro alocador de thunks SysV→Windows, protegido como
 RX e ainda sem dispatcher HLE; ele é uma fundação interna e não habilita execução.
 O dispatcher agora possui slots explícitos e duas operações de baixo risco
-(`sceKernelUsleep` e `sysKernelGetUpdVersion`); imports restantes retornam
-`ENOSYS` e continuam bloqueados pelo gate.
+(`sceKernelUsleep` e `sysKernelGetUpdVersion`). O probe cria um thunk temporário
+para cada import detectado, mede handlers implementados e mantém `ENOSYS` para os
+demais; esses endereços ainda não são gravados nas relocações do convidado.
 O probe interno também chama o thunk sem argumentos e exige retorno `0`, sem
 envolver o ELF selecionado.
 
