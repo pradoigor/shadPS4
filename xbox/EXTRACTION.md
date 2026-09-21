@@ -65,7 +65,8 @@ esses dois fluxos estavam incorretas.
 ## Limites explícitos
 
 Implementação experimental para o layout RSA/PFS/PFSC da referência: PFSC em
-fronteiras de 64 KiB no prefixo de 16 MiB, inodes de 0xA8, blocos contíguos,
+fronteiras de 64 KiB no prefixo de 16 MiB, inodes de 0xA8 e blocos resolvidos pelo
+mapa PFSC,
 `uroot`, jogo base com `eboot.bin` e `sce_sys/param.sfo`. Não é um instalador
 universal de PKG retail. Variantes não suportadas falham de forma explícita.
 Não aplica patches/DLC sobre jogos existentes, não verifica autenticidade Sony,

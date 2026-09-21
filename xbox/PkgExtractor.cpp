@@ -243,11 +243,8 @@ public:
             Require(node.size <= (uint64_t(1) << 40) && node.blocks <= plainSize / 65536, "Tamanho de inode invalido.");
             Require(node.size <= node.blocks * 65536, "Inode incompleto.");
             if (node.blocks) Range(node.location, node.blocks, plainSize / 65536);
-            // Only the contiguous block layout supported by the reference extractor.
-            for (uint64_t j = 1; j < std::min<uint64_t>(node.blocks, 12); ++j) {
-                auto direct = Number(inodeBlock, at + 100 + 4 * j, 4);
-                Require(direct == 0 || direct == node.location + j, "Inode fragmentado nao suportado.");
-            }
+            // The PFSC sector map resolves the logical block sequence. Bytes after
+            // loc are inode metadata/reserved space, not direct block pointers.
             nodes.push_back(node);
         }
         // The super-root stores internal metadata and the user root (uroot).
