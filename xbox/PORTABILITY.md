@@ -26,7 +26,8 @@ Isso não significa que o ABI, relocador, TLS, bibliotecas, renderer Vulkan ou o
 código do homebrew funcionem no Xbox.
 
 A auditoria registra a presença e os tamanhos dos metadados `PT_DYNAMIC` e `PT_TLS`,
-as tabelas de relocação e as dependências declaradas. Ela não aplica relocação,
+as tabelas de relocação e as dependências declaradas. Ela classifica os tipos de
+relocação e verifica se os alvos ficam em `PT_LOAD`, mas não aplica relocação,
 resolve imports nem chama inicializadores.
 
 ## Bloqueios ainda abertos

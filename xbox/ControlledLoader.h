@@ -35,10 +35,14 @@ struct ControlledLoadResult {
     std::uint64_t jmp_rela_entries{};
     std::uint64_t import_libraries{};
     std::uint64_t needed_modules{};
+    std::uint64_t supported_relocations{};
+    std::uint64_t unsupported_relocations{};
+    std::uint64_t relocation_targets_outside_loads{};
     bool has_dynamic{};
     bool has_tls{};
     bool has_relocations{};
     bool has_imports{};
+    bool relocation_data_valid{};
     std::wstring detail;
 };
 

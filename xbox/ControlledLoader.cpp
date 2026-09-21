@@ -130,6 +130,17 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
     result.min_virtual_address = std::numeric_limits<std::uint64_t>::max();
     result.max_virtual_address = 0;
 
+    struct DynamicTables {
+        std::uint64_t rela_offset{};
+        std::uint64_t rela_size{};
+        std::uint64_t jmp_rela_offset{};
+        std::uint64_t jmp_rela_size{};
+        std::uint64_t rela_entry_size{sizeof(elf_relocation)};
+    } dynamicTables;
+    const elf_program_header* dynlibData = nullptr;
+    for (auto const& program : programs)
+        if (program.p_type == PT_SCE_DYNLIBDATA) dynlibData = &program;
+
     // Read only the runtime metadata tables. This audit never resolves an
     // import and never follows an initializer; it records what a future
     // UWP loader would still need before guest control flow is possible.
@@ -148,21 +159,24 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
         const auto count = program.p_filesz / sizeof(elf_dynamic);
         std::vector<elf_dynamic> dynamic(count);
         logicalRead(program.p_offset, dynamic.data(), static_cast<std::size_t>(program.p_filesz));
-        std::uint64_t relaSize = 0;
-        std::uint64_t relaEntrySize = sizeof(elf_relocation);
-        std::uint64_t jmpRelaSize = 0;
         for (auto const& entry : dynamic) {
             if (entry.d_tag == DT_NULL) break;
             ++result.dynamic_entries;
             switch (entry.d_tag) {
+            case DT_SCE_RELA:
+                dynamicTables.rela_offset = entry.d_un.d_ptr;
+                break;
             case DT_SCE_RELASZ:
-                relaSize = entry.d_un.d_val;
+                dynamicTables.rela_size = entry.d_un.d_val;
                 break;
             case DT_SCE_RELAENT:
-                relaEntrySize = entry.d_un.d_val;
+                dynamicTables.rela_entry_size = entry.d_un.d_val;
+                break;
+            case DT_SCE_JMPREL:
+                dynamicTables.jmp_rela_offset = entry.d_un.d_ptr;
                 break;
             case DT_SCE_PLTRELSZ:
-                jmpRelaSize = entry.d_un.d_val;
+                dynamicTables.jmp_rela_size = entry.d_un.d_val;
                 break;
             case DT_SCE_IMPORT_LIB:
                 ++result.import_libraries;
@@ -175,10 +189,11 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
                 break;
             }
         }
-        if (relaEntrySize == sizeof(elf_relocation) && relaSize % relaEntrySize == 0)
-            result.rela_entries = relaSize / relaEntrySize;
-        if (jmpRelaSize % sizeof(elf_relocation) == 0)
-            result.jmp_rela_entries = jmpRelaSize / sizeof(elf_relocation);
+        if (dynamicTables.rela_entry_size == sizeof(elf_relocation) &&
+            dynamicTables.rela_size % dynamicTables.rela_entry_size == 0)
+            result.rela_entries = dynamicTables.rela_size / dynamicTables.rela_entry_size;
+        if (dynamicTables.jmp_rela_size % sizeof(elf_relocation) == 0)
+            result.jmp_rela_entries = dynamicTables.jmp_rela_size / sizeof(elf_relocation);
         result.has_relocations = result.rela_entries != 0 || result.jmp_rela_entries != 0;
         result.has_imports = result.import_libraries != 0 || result.needed_modules != 0;
     }
@@ -203,6 +218,48 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
     Require(result.max_virtual_address >= result.min_virtual_address &&
                 result.max_virtual_address - result.min_virtual_address <= MaxMappedBytes,
             "Mapa de segmentos ELF excede o limite seguro.");
+
+    auto targetIsMapped = [&](std::uint64_t address) {
+        for (auto const& load : loads) {
+            auto const& segment = load.header;
+            auto end = AddChecked(segment.p_vaddr, segment.p_memsz,
+                                  "Limite de segmento ELF excede o limite.");
+            if (address >= segment.p_vaddr && address < end) return true;
+        }
+        return false;
+    };
+    auto auditRelocationTable = [&](std::uint64_t offset, std::uint64_t size) {
+        if (size == 0) return true;
+        if (!dynlibData || dynamicTables.rela_entry_size != sizeof(elf_relocation) ||
+            size % sizeof(elf_relocation) != 0 || size > MaxMappedBytes)
+            return false;
+        Require(offset <= dynlibData->p_filesz && size <= dynlibData->p_filesz - offset,
+                "Tabela de relocação excede o segmento de dados ELF.");
+        auto fileOffset = AddChecked(dynlibData->p_offset, offset,
+                                     "Tabela de relocação excede o arquivo ELF.");
+        std::vector<elf_relocation> relocations(static_cast<std::size_t>(size / sizeof(elf_relocation)));
+        logicalRead(fileOffset, relocations.data(), static_cast<std::size_t>(size));
+        for (auto const& relocation : relocations) {
+            if (!targetIsMapped(relocation.rel_offset)) ++result.relocation_targets_outside_loads;
+            switch (relocation.GetType()) {
+            case R_X86_64_64:
+            case R_X86_64_GLOB_DAT:
+            case R_X86_64_JUMP_SLOT:
+            case R_X86_64_RELATIVE:
+            case R_X86_64_DTPMOD64:
+                ++result.supported_relocations;
+                break;
+            default:
+                ++result.unsupported_relocations;
+                break;
+            }
+        }
+        return true;
+    };
+    const bool relaAudit = auditRelocationTable(dynamicTables.rela_offset, dynamicTables.rela_size);
+    const bool jmpAudit = auditRelocationTable(dynamicTables.jmp_rela_offset, dynamicTables.jmp_rela_size);
+    result.relocation_data_valid = relaAudit && jmpAudit;
+
     bool entryInExecutable = false;
     for (auto const& load : loads) {
         auto const& program = load.header;
@@ -322,10 +379,14 @@ ControlledLoadResult LoadSelf(Reader& reader, self_header const& header) {
     result.jmp_rela_entries = inner.jmp_rela_entries;
     result.import_libraries = inner.import_libraries;
     result.needed_modules = inner.needed_modules;
+    result.supported_relocations = inner.supported_relocations;
+    result.unsupported_relocations = inner.unsupported_relocations;
+    result.relocation_targets_outside_loads = inner.relocation_targets_outside_loads;
     result.has_dynamic = inner.has_dynamic;
     result.has_tls = inner.has_tls;
     result.has_relocations = inner.has_relocations;
     result.has_imports = inner.has_imports;
+    result.relocation_data_valid = inner.relocation_data_valid;
     result.entry = inner.entry;
     result.load_segments = inner.load_segments;
     result.mapped = inner.mapped;

@@ -1,4 +1,4 @@
-# Extração e execução controlada UWP 0.6.0
+# Extração e execução controlada UWP 0.7.0
 
 O aplicativo executa extração, inspeciona metadados e oferece carregamento controlado. A biblioteca
 abre ao iniciar, usa uma faixa horizontal navegável pelo controle e distingue
@@ -28,6 +28,8 @@ inspirados no PS4, sem recursos gráficos da Sony.
    executável. Em seguida, executa somente um ELF mínimo gerado pelo projeto, que
    retorna `42`; o arquivo selecionado nunca é chamado. O relatório também registra
    metadados `PT_DYNAMIC`, `PT_TLS`, relocações e imports para orientar o carregador.
+   As relocações são lidas, classificadas e conferidas contra os segmentos, mas não
+   são aplicadas.
    Baixe `LocalState/report.json`
    ou use **Diagnóstico → Exportar JSON**.
 
