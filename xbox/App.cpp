@@ -5,6 +5,8 @@
 #include "PkgProbe.h"
 #include "PkgExtractor.h"
 #include "PkgBuiltinKeys.h"
+#include <windows.h>
+#include <fileapifromapp.h>
 #include <winrt/Windows.UI.Xaml.Media.Imaging.h>
 #include <winrt/Windows.Data.Json.h>
 #include <winrt/Windows.System.Display.h>

@@ -3,6 +3,7 @@
 
 #include "ControlledLoader.h"
 
+#include <windows.h>
 #include <winrt/Windows.Data.Json.h>
 #include <winrt/base.h>
 
