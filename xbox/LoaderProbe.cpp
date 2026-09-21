@@ -12,7 +12,9 @@ namespace Lab {
 LoaderProbeResult ProbeUpstreamLoaderStructures() {
     static_assert(sizeof(self_header) == 0x20);
     static_assert(sizeof(self_segment_header) == 0x20);
-    static_assert(sizeof(elf_ident) == 0x10);
+    // shadPS4's original declaration has six EI_PAD bytes, so this exact
+    // source layout is 15 bytes rather than the conventional 16-byte e_ident.
+    static_assert(sizeof(elf_ident) == 0x0F);
     static_assert(sizeof(elf_header) == 0x40);
     static_assert(sizeof(elf_program_header) == 0x38);
     static_assert(sizeof(elf_section_header) == 0x40);
