@@ -59,7 +59,7 @@ SysvThunkArena::~SysvThunkArena() {
     for (auto* page : pages_) VirtualFree(page, 0, MEM_RELEASE);
 }
 
-void* SysvThunkArena::Create(std::uint64_t slot, SysvDispatch dispatch) {
+void* SysvThunkArena::Create(void* context, std::uint64_t slot, SysvDispatch dispatch) {
     if (!dispatch) throw std::invalid_argument("SysV thunk sem dispatcher.");
     auto* page = static_cast<std::uint8_t*>(
         VirtualAllocFromApp(nullptr, PageSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
@@ -81,10 +81,11 @@ void* SysvThunkArena::Create(std::uint64_t slot, SysvDispatch dispatch) {
     for (std::uint8_t index = 0; index != 8; ++index)
         StoreXmm(page, offset, index, 0x40u + index * 16u);
 
-    // Windows x64 dispatcher(slot, frame, originalGuestStack).
-    Byte(page, offset, 0x48); Byte(page, offset, 0xB9); U64(page, offset, slot); // mov rcx,slot
-    Byte(page, offset, 0x48); Byte(page, offset, 0x8D); Byte(page, offset, 0x14); Byte(page, offset, 0x24); // lea rdx,[rsp]
-    Byte(page, offset, 0x4D); Byte(page, offset, 0x89); Byte(page, offset, 0xD8); // mov r8,r11
+    // Windows x64 dispatcher(context, slot, frame, originalGuestStack).
+    Byte(page, offset, 0x48); Byte(page, offset, 0xB9); U64(page, offset, reinterpret_cast<std::uint64_t>(context)); // mov rcx,context
+    Byte(page, offset, 0x48); Byte(page, offset, 0xBA); U64(page, offset, slot); // mov rdx,slot
+    Byte(page, offset, 0x4C); Byte(page, offset, 0x8D); Byte(page, offset, 0x04); Byte(page, offset, 0x24); // lea r8,[rsp]
+    Byte(page, offset, 0x4D); Byte(page, offset, 0x89); Byte(page, offset, 0xD9); // mov r9,r11
     Byte(page, offset, 0x48); Byte(page, offset, 0xB8);
     U64(page, offset, reinterpret_cast<std::uint64_t>(dispatch)); // mov rax,dispatch
     Byte(page, offset, 0xFF); Byte(page, offset, 0xD0); // call rax

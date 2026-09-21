@@ -26,8 +26,11 @@ para o `e_entry` enquanto algum desses requisitos faltar.
 
 A build seguinte contém um alocador de thunks SysV→Windows que preserva os
 registradores inteiros, a pilha convidada e os registradores XMM antes de chamar
-um dispatcher Windows. Ele ainda não recebe imports nem possui dispatcher HLE;
-portanto é infraestrutura compilada, não uma autorização de execução.
+um dispatcher Windows. O dispatcher possui somente dois handlers iniciais
+(`sceKernelUsleep` e `sysKernelGetUpdVersion`); todos os outros imports retornam
+`ENOSYS`. Ele ainda não recebe os imports do ELF nem possui memória convidada
+executável, portanto continua sendo infraestrutura compilada, não uma autorização
+de execução.
 
 ## Carregamento controlado
 

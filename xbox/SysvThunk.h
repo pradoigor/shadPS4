@@ -12,8 +12,8 @@ struct GuestCallFrame {
     alignas(16) std::uint8_t xmm[8][16]{};
 };
 
-using SysvDispatch = std::uint64_t (*)(std::uint64_t slot, GuestCallFrame const* frame,
-                                       void* guestStack);
+using SysvDispatch = std::uint64_t (*)(void* context, std::uint64_t slot,
+                                       GuestCallFrame const* frame, void* guestStack);
 
 // Allocates small executable thunks that convert the PS4 SysV register frame
 // into the Windows x64 call used by the UWP dispatcher. The thunks are not
@@ -25,7 +25,7 @@ public:
     SysvThunkArena(SysvThunkArena const&) = delete;
     SysvThunkArena& operator=(SysvThunkArena const&) = delete;
 
-    void* Create(std::uint64_t slot, SysvDispatch dispatch);
+    void* Create(void* context, std::uint64_t slot, SysvDispatch dispatch);
     bool empty() const noexcept { return pages_.empty(); }
 
 private:
