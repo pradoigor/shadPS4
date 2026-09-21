@@ -24,7 +24,7 @@ que o carregador tenha uma ponte ABI SysV compatível, endereços HLE reais e um
 renderer UWP para Piglet. O aplicativo deve manter essa barreira e nunca saltar
 para o `e_entry` enquanto algum desses requisitos faltar.
 
-A build `0.24.0.0` contém um alocador de thunks SysV→Windows que preserva os
+A build `0.25.0.0` contém um alocador de thunks SysV→Windows que preserva os
 registradores inteiros, a pilha convidada e os registradores XMM antes de chamar
 um dispatcher Windows. O dispatcher possui somente dois handlers iniciais
 (`sceKernelUsleep` e `sysKernelGetUpdVersion`); todos os outros imports retornam
