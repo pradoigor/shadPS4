@@ -8,6 +8,7 @@
 #include "ExecProbe.h"
 #include "RelocProbe.h"
 #include "TlsProbe.h"
+#include "ExceptionProbe.h"
 #include <d3d12.h>
 #include <memoryapi.h>
 #include <fileapifromapp.h>
@@ -97,6 +98,14 @@ void RunProbe(Test& t, std::wstring const& directory) {
         std::string read{std::istreambuf_iterator<char>(input), {}};
         if (read != payload) throw hresult_error(E_FAIL, L"Conteúdo lido difere do conteúdo gravado.");
         t.detail = L"Arquivo gravado, sincronizado e relido em LocalState.";
+    } else if (t.id == L"exception_delivery") {
+        auto result = ProbeOriginalExceptionDelivery(directory);
+        Number(t, L"exception_code", result.exception_code);
+        Number(t, L"handler_registered", result.handler_registered);
+        Number(t, L"handler_invocations", result.handler_invocations);
+        Number(t, L"handler_removed", result.handler_removed);
+        if (!result.passed) throw hresult_error(E_FAIL, L"A exceção vetorizada não foi entregue e removida corretamente.");
+        t.detail = L"AddVectoredExceptionHandler original do Windows recebeu uma exceção software gerada pelo probe, continuou a execução e foi removido. Teste isolado; não valida o dispatch completo de sinais do núcleo nem falhas de memória de código convidado.";
     } else if (t.id == L"tls_model") {
         auto result = ProbeOriginalTlsModel(directory);
         Number(t, L"slot", result.slot);

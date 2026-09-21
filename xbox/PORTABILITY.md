@@ -5,8 +5,8 @@ Base analisada: `42c555b7ab5d0678f531a7e4d505560ccc0f8add`.
 Este alvo é um laboratório UWP dentro do fork. Ele já compila diretamente os
 headers originais `common/endian.h`, `core/file_format/psf.h`, `core/loader/elf.h`
 e `core/file_sys/ifile.h`, além do codec original `src/core/file_format/psf.cpp`.
-O único teste ativo usa a estrutura original `Core::Tcb` de `core/tls.h` e o slot TLS do
-Windows para validar armazenamento por thread; os
+O único teste ativo registra o handler vetorizado original do Windows, entrega uma exceção
+software controlada e remove o handler; os
 probes anteriores ficam apenas nas evidências históricas. Ainda não liga o
 núcleo completo, não carrega ELF/PKG e não executa jogos. Resultado aprovado em um teste não
 equivale a aprovação do subsistema completo do emulador.
@@ -18,7 +18,7 @@ equivale a aprovação do subsistema completo do emulador.
 | Espaço de endereços | `src/core/address_space.cpp`: VirtualAlloc2 e placeholders | Reservas pequenas em três endereços representativos | Layout completo, colisões, alinhamentos e reservas simultâneas |
 | Backing/alias | Mesmo arquivo: CreateFileMapping2, MapViewOfFile3 e backing grande executável | Duas visões de 64 KiB usando APIs FromApp | Placeholders, aliases executáveis e orçamento real do backing PS4 |
 | Execução | Mesmo arquivo: PAGE_EXECUTE_READWRITE; `src/core/linker.cpp`: carregamento/execução | Seis bytes x64 próprios, RW para RX, retorno 42 | ABI, relocação completa, TLS, instruções, bibliotecas e execução de homebrew |
-| Exceções | `src/core/signals.cpp`: AddVectoredExceptionHandler | Interrupções detectadas por journal persistente | Compatibilidade do mecanismo de tratamento de exceções do núcleo; journal não substitui um handler |
+| Exceções | `src/core/signals.cpp`: AddVectoredExceptionHandler | Handler vetorizado recebe exceção software controlada e é removido; execução isolada | Compatibilidade do dispatch completo de sinais do núcleo e de falhas de memória de código convidado |
 | Sistema/arquivos | Dependências desktop, bibliotecas e caminhos do núcleo | LocalState, persistência e áudio UWP | Adaptar acesso ao conteúdo e módulos, threads e dependências |
 | Formatos do núcleo | `common/endian.h`, `core/file_format/psf.h`, `psf.cpp`, `core/loader/elf.h`, `elf.cpp` e `core/file_sys/ifile.h` | Estruturas ELF originais aplicam três formas de relocação em imagem sintética | `Linker::Relocate` completo, SELF real/descriptografia, ABI, TLS, exceções e fontes restantes com dependências de logging/assert |
 
