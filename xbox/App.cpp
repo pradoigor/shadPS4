@@ -82,9 +82,9 @@ struct App : ApplicationT<App> {
         const auto magic = (static_cast<std::uint32_t>(header[0]) << 24u) |
             (static_cast<std::uint32_t>(header[1]) << 16u) |
             (static_cast<std::uint32_t>(header[2]) << 8u) | static_cast<std::uint32_t>(header[3]);
-        if (input.gcount() == static_cast<std::streamsize>(header.size()) && magic == 0x7F504B47u) {
+        if (input.gcount() == static_cast<std::streamsize>(header.size()) && magic == 0x7F434E54u) {
             const std::wstring size_text = error ? L"tamanho indisponível" : std::to_wstring(size) + L" bytes";
-            return std::wstring(L"PKG PS4 reconhecido pelo magic 0x7F504B47 · ") + size_text +
+            return std::wstring(L"PKG PS4 reconhecido pelo magic 0x7F434E54 · ") + size_text +
                 L"\nLeitura limitada ao cabeçalho; conteúdo criptografado não é aberto.";
         }
         return error ? L"Arquivo selecionado; tamanho indisponível." :
