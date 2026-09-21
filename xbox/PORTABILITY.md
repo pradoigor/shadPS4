@@ -24,7 +24,7 @@ que o carregador tenha uma ponte ABI SysV compatível, endereços HLE reais e um
 renderer UWP para Piglet. O aplicativo deve manter essa barreira e nunca saltar
 para o `e_entry` enquanto algum desses requisitos faltar.
 
-A build `0.33.0.0` corrige o alocador de thunks SysV→Windows para preservar os
+A build `0.34.0.0` corrige o alocador de thunks SysV→Windows para preservar os
 seis registradores inteiros, a pilha convidada e os registradores XMM em uma área
 separada do shadow space exigido pelo ABI Windows. Um chamador de máquina gerado
 pelo projeto injeta padrões distintos em registradores e argumentos de pilha e
@@ -40,8 +40,9 @@ ainda depende de substituir a reserva física monolítica por compromisso sob de
 pois reservar e confirmar toda a memória do PS4 excede o orçamento prático do UWP.
 O probe agora cria e conta thunks para todos os imports do ELF e aplica
 os endereços em uma cópia privada não executável e mapeia essa cópia como somente
-leitura com proteção por segmento para validar a faixa de memória. Segmentos
-`PF_W` usam cópias graváveis isoladas e as demais regiões permanecem não executáveis.
+leitura com proteção por segmento para validar a faixa de memória. A imagem agora
+é uma alocação coerente colocada no endereço virtual solicitado: segmentos `PF_W`
+e HLE compartilham os mesmos bytes e as demais regiões permanecem não executáveis.
 O primeiro handler com ponteiro,
 `sceKernelDebugOutText`, rejeita endereços fora da faixa antes de usar o log do
 host. A imagem convidada continua sem memória executável; isso ainda é infraestrutura de
@@ -49,7 +50,7 @@ ligação, não uma autorização de execução.
 O probe também chama `clock_gettime` com um ponteiro para uma faixa `PF_W` e
 valida os segundos e nanossegundos escritos pelo handler.
 O handler `sceKernelMprotect` foi acrescentado para a camada de memória: ele
-aceita somente proteções sem execução dentro das cópias `PF_W` isoladas e
+aceita somente proteções sem execução dentro das faixas `PF_W` coerentes e
 retorna erro para `PROT_EXEC` ou endereços fora dessas faixas. A mudança é
 validada por compilação e análise estática; sua validação no console é opcional
 até que um probe de ponteiro seja necessário para o próximo marco.

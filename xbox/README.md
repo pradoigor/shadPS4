@@ -4,7 +4,7 @@ Aplicativo **UWP x64 / C++/WinRT / XAML** para medir a viabilidade de portar
 shadPS4 ao Xbox Series X em Dev Mode. **Ainda não é um emulador PS4 no Xbox.**
 O alvo é independente do CMake e das dependências desktop do núcleo.
 
-A versão **0.33.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
+A versão **0.34.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
 PKG/ELF, keysets FPKG embutidos, importação de chaves personalizadas, extração em
 segundo plano e um probe de execução controlada com auditoria de requisitos runtime,
 relocação e inventário de NIDs HLE. O ELF/SELF selecionado é apenas
@@ -44,13 +44,13 @@ Orbis correto de `ENOSYS`. `sceKernelDebugOutText` traduz e valida um ponteiro d
 contra a memória convidada somente leitura antes de enviá-lo ao log de depuração.
 O probe aplica os endereços em uma cópia privada não executável para
 validar as relocações, sem gravá-los no arquivo ou promover o convidado a execução.
-Essa cópia também é mapeada em memória UWP com proteção por segmento: os
-segmentos `PF_W` recebem cópias graváveis isoladas e código/read-only continuam
-sem permissão de execução, mesmo quando o ELF compartilha páginas.
+Essa cópia também é mapeada de forma coerente no endereço virtual validado: HLE
+e instruções x86-64 passam a observar os mesmos bytes. Segmentos `PF_W` ficam
+graváveis e código/read-only continua sem permissão de execução nesta etapa.
 O probe chama `clock_gettime` por um thunk com ponteiro SysV e valida o
 `timespec` escrito em uma faixa `PF_W`.
 O dispatcher também reconhece `sceKernelMprotect`, mas só altera proteção de
-faixas `PF_W` isoladas e rejeita qualquer pedido de execução; isso permite
+faixas `PF_W` coerentes e rejeita qualquer pedido de execução; isso permite
 exercitar a semântica de proteção sem abrir uma transição para código convidado.
 As operações básicas `memcpy`, `memmove`, `memset`, `memcmp` e `strlen` também
 validam os ponteiros contra o mapa convidado antes de acessar memória. Elas são
