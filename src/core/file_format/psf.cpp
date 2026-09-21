@@ -5,9 +5,19 @@
 #include <cstring>
 #include <ranges>
 
+#if defined(SHADPS4_XBOX_UWP)
+#include <cstdlib>
+// The vector encoder/decoder is platform-neutral. File I/O and the desktop logging
+// stack are supplied by a UWP adapter later, so keep this small codec usable now.
+#define LOG_ERROR(...) ((void)0)
+#define ASSERT(condition) do { if (!(condition)) std::abort(); } while (false)
+#define ASSERT_MSG(condition, ...) ASSERT(condition)
+#define UNREACHABLE_MSG(...) std::abort()
+#else
 #include "common/assert.h"
 #include "common/io_file.h"
 #include "common/logging/log.h"
+#endif
 #include "core/file_format/psf.h"
 
 static const std::unordered_map<std::string_view, u32> psf_known_max_sizes = {
@@ -22,6 +32,7 @@ static inline u32 get_max_size(std::string_view key, u32 default_value) {
     return default_value;
 }
 
+#if !defined(SHADPS4_XBOX_UWP)
 bool PSF::Open(const std::filesystem::path& filepath) {
     using namespace std::chrono;
     if (std::filesystem::exists(filepath)) {
@@ -45,6 +56,7 @@ bool PSF::Open(const std::filesystem::path& filepath) {
     file.Close();
     return Open(psf);
 }
+#endif
 
 bool PSF::Open(const std::vector<u8>& psf_buffer) {
     const u8* psf_data = psf_buffer.data();
@@ -101,6 +113,7 @@ bool PSF::Open(const std::vector<u8>& psf_buffer) {
     return true;
 }
 
+#if !defined(SHADPS4_XBOX_UWP)
 bool PSF::Encode(const std::filesystem::path& filepath) const {
     Common::FS::IOFile file(filepath, Common::FS::FileAccessMode::Create);
     if (!file.IsOpen()) {
@@ -118,6 +131,7 @@ bool PSF::Encode(const std::filesystem::path& filepath) const {
     file.Close();
     return written == psf_buffer.size();
 }
+#endif
 
 std::vector<u8> PSF::Encode() const {
     std::vector<u8> psf_buffer;

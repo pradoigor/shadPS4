@@ -11,6 +11,8 @@ struct CoreProbeResult {
     std::uint32_t psf_entry_size{};
     std::uint32_t decoded_magic{};
     std::uint32_t stored_magic{};
+    std::uint32_t encoded_size{};
+    std::int32_t decoded_integer{};
 };
 
 CoreProbeResult ProbeUpstreamCoreTypes();

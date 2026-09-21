@@ -96,8 +96,10 @@ void RunProbe(Test& t, std::wstring const& directory) {
         Number(t, L"psf_entry_size", result.psf_entry_size);
         Number(t, L"decoded_magic", result.decoded_magic);
         Number(t, L"stored_magic", result.stored_magic);
+        Number(t, L"encoded_size", result.encoded_size);
+        Number(t, L"decoded_integer", result.decoded_integer);
         if (!result.passed) throw hresult_error(E_FAIL, L"Tipos do núcleo divergiram no alvo UWP.");
-        t.detail = L"Headers originais common/endian.h e core/file_format/psf.h compilaram no APPX; tamanhos e representação big-endian foram validados no console.";
+        t.detail = L"Codec PSF original do shadPS4 compilou no APPX; codificou e decodificou TITLE_ID e APP_VER, além de validar tamanhos e big-endian no console.";
     } else if (t.id == L"budget") {
         Number(t, L"app_memory_usage_bytes", static_cast<double>(Windows::System::MemoryManager::AppMemoryUsage()));
         Number(t, L"app_memory_limit_bytes", static_cast<double>(Windows::System::MemoryManager::AppMemoryUsageLimit()));

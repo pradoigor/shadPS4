@@ -16,7 +16,7 @@ equivale a aprovação do subsistema completo do emulador.
 | Execução | Mesmo arquivo: PAGE_EXECUTE_READWRITE; `src/core/linker.cpp`: carregamento/execução | Seis bytes x64 próprios, RW para RX, retorno 42 | ABI, relocação, TLS, instruções, bibliotecas e execução de homebrew |
 | Exceções | `src/core/signals.cpp`: AddVectoredExceptionHandler | Interrupções detectadas por journal persistente | Compatibilidade do mecanismo de tratamento de exceções do núcleo; journal não substitui um handler |
 | Sistema/arquivos | Dependências desktop, bibliotecas e caminhos do núcleo | LocalState, persistência e áudio UWP | Adaptar acesso ao conteúdo e módulos, threads e dependências |
-| Formatos do núcleo | `common/endian.h` e `core/file_format/psf.h` | Compilação no alvo UWP e validação em runtime dos tamanhos PSF e big-endian | Integrar implementação PSF, SELF/ELF e fontes com dependências de logging/assert |
+| Formatos do núcleo | `common/endian.h`, `core/file_format/psf.h` e `psf.cpp` | Codec PSF original codifica e decodifica metadados em memória no Xbox | Adaptador de arquivo UWP para PSF, SELF/ELF e fontes com dependências de logging/assert |
 
 ## Bloqueios confirmados do núcleo
 
