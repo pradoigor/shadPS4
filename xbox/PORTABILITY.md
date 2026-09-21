@@ -11,8 +11,9 @@ mantém somente uma operação diagnóstica ativa: carregamento controlado de EL
 O aplicativo lê o cabeçalho original `core/loader/elf.h`, verifica a identidade
 PS4, limita a quantidade de program headers, valida cada `PT_LOAD`, confere
 offsets, tamanhos, alinhamento e ponto de entrada, e copia os bytes para um
-buffer privado sem permissão de execução. O checksum e as medidas são gravados
-no `report.json`.
+buffer privado sem permissão de execução. Para SELF sem proteção, ele também
+resolve os `PT_LOAD` do ELF interno através dos segmentos SELF. O checksum e as
+medidas são gravados no `report.json`.
 
 Para SELF, o aplicativo valida a tabela de segmentos e detecta criptografia ou
 compressão. O conteúdo protegido permanece bloqueado; esta etapa não tenta

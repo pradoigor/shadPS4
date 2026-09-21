@@ -12,6 +12,8 @@ struct ControlledLoadResult {
     bool self{};
     bool validated{};
     bool mapped{};
+    bool inner_elf{};
+    bool inner_mapped{};
     bool protected_segments{};
     std::uint64_t file_size{};
     std::uint64_t segment_count{};
@@ -21,6 +23,11 @@ struct ControlledLoadResult {
     std::uint64_t min_virtual_address{};
     std::uint64_t max_virtual_address{};
     std::uint64_t checksum{};
+    std::uint64_t inner_segment_count{};
+    std::uint64_t inner_load_segments{};
+    std::uint64_t inner_entry{};
+    std::uint64_t inner_mapped_bytes{};
+    std::uint64_t inner_checksum{};
     std::wstring detail;
 };
 

@@ -6,8 +6,10 @@
 #include <algorithm>
 #include <array>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace Lab {
@@ -97,7 +99,10 @@ void ValidateElfIdentity(elf_header const& header) {
             "Quantidade de program headers ELF inválida.");
 }
 
-ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint64_t headerOffset) {
+using LogicalRead = std::function<void(std::uint64_t, void*, std::size_t)>;
+
+ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint64_t headerOffset,
+                             LogicalRead logicalRead) {
     ValidateElfIdentity(header);
     auto tableBytes = AddChecked(0, static_cast<std::uint64_t>(header.e_phnum) * sizeof(elf_program_header),
                                  "Tabela de program headers ELF excede o limite.");
@@ -124,8 +129,7 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
         ++result.load_segments;
         Require(program.p_filesz <= program.p_memsz, "Segmento ELF tem filesz maior que memsz.");
         Require(program.p_memsz > 0, "Segmento ELF vazio.");
-        Require(program.p_offset <= reader.size && program.p_filesz <= reader.size - program.p_offset,
-                "Dados do segmento ELF fora do arquivo.");
+        Require(program.p_filesz <= MaxMappedBytes, "Segmento ELF excede o limite seguro.");
         auto end = AddChecked(program.p_vaddr, program.p_memsz, "Endereço virtual ELF excede o limite.");
         if (program.p_align > 1)
             Require((program.p_align & (program.p_align - 1)) == 0 && program.p_align <= 64ull * 1024ull * 1024ull,
@@ -152,7 +156,7 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
         auto const& program = load.header;
         if (program.p_filesz == 0) continue;
         std::vector<std::uint8_t> bytes(static_cast<std::size_t>(program.p_filesz));
-        reader.Read(program.p_offset, bytes.data(), bytes.size());
+        logicalRead(program.p_offset, bytes.data(), bytes.size());
         auto target = static_cast<std::size_t>(program.p_vaddr - result.min_virtual_address);
         std::copy(bytes.begin(), bytes.end(), mapped.begin() + target);
     }
@@ -192,10 +196,71 @@ ControlledLoadResult LoadSelf(Reader& reader, self_header const& header) {
         if (segment.IsEncrypted() || segment.IsCompressed()) result.protected_segments = true;
     }
     Require(result.mapped_bytes <= MaxMappedBytes, "Mapa SELF excede o limite seguro.");
-    result.detail = result.protected_segments
-        ? L"SELF reconhecido e limites dos segmentos validados; conteúdo protegido ou comprimido. "
-          L"O mapa executável fica bloqueado até existir descriptografia compatível."
-        : L"SELF reconhecido e segmentos validados; o mapa executável não foi ativado nesta etapa.";
+    if (result.protected_segments) {
+        result.detail = L"SELF reconhecido e limites dos segmentos validados; conteúdo protegido ou comprimido. "
+                        L"O mapa executável fica bloqueado até existir descriptografia compatível.";
+        return result;
+    }
+
+    const auto elfOffset = sizeof(self_header) + tableBytes;
+    auto innerHeader = reader.Object<elf_header>(elfOffset);
+    Require(IsElf(innerHeader), "SELF não contém um ELF interno no offset esperado.");
+
+    std::vector<elf_program_header> programs;
+    if (innerHeader.e_phnum > 0 && innerHeader.e_phnum <= MaxProgramHeaders &&
+        innerHeader.e_phentsize == sizeof(elf_program_header)) {
+        const auto programBytes = static_cast<std::uint64_t>(innerHeader.e_phnum) * sizeof(elf_program_header);
+        const auto programOffset = AddChecked(elfOffset, innerHeader.e_phoff,
+                                              "Tabela ELF interna excede o limite.");
+        Require(programBytes <= reader.size && programOffset <= reader.size - programBytes,
+                "Tabela ELF interna fora do arquivo.");
+        programs.resize(innerHeader.e_phnum);
+        reader.Read(programOffset, programs.data(), static_cast<std::size_t>(programBytes));
+    }
+    Require(!programs.empty(), "Tabela ELF interna inválida.");
+
+    LogicalRead selfRead = [&](std::uint64_t offset, void* destination, std::size_t count) {
+        auto* output = static_cast<std::uint8_t*>(destination);
+        while (count != 0) {
+            const self_segment_header* selected = nullptr;
+            const elf_program_header* selectedProgram = nullptr;
+            for (std::size_t index = 0; index < segments.size(); ++index) {
+                const auto& segment = segments[index];
+                if (!segment.IsBlocked() || segment.GetId() >= programs.size()) continue;
+                const auto& program = programs[segment.GetId()];
+                if (offset >= program.p_offset && offset < program.p_offset + program.p_filesz) {
+                    selected = &segment;
+                    selectedProgram = &program;
+                    break;
+                }
+            }
+            Require(selected && selectedProgram, "Segmento ELF interno não possui correspondência SELF.");
+            const auto delta = offset - selectedProgram->p_offset;
+            const auto available = selectedProgram->p_filesz - delta;
+            const auto part = (std::min<std::uint64_t>)(available, count);
+            Require(delta <= selected->file_size && part <= selected->file_size - delta,
+                    "Dados do segmento SELF interno fora dos limites.");
+            reader.Read(selected->file_offset + delta, output, static_cast<std::size_t>(part));
+            offset += part;
+            output += part;
+            count -= static_cast<std::size_t>(part);
+        }
+    };
+    auto inner = LoadElf(reader, innerHeader, elfOffset, std::move(selfRead));
+    result.inner_elf = inner.recognized;
+    result.inner_mapped = inner.mapped;
+    result.inner_segment_count = inner.segment_count;
+    result.inner_load_segments = inner.load_segments;
+    result.inner_entry = inner.entry;
+    result.inner_mapped_bytes = inner.mapped_bytes;
+    result.inner_checksum = inner.checksum;
+    result.entry = inner.entry;
+    result.load_segments = inner.load_segments;
+    result.mapped = inner.mapped;
+    result.mapped_bytes = inner.mapped_bytes;
+    result.checksum = inner.checksum;
+    result.detail = L"SELF e ELF interno validados; segmentos PT_LOAD mapeados em buffer privado não executável. "
+                    L"Nenhum byte do arquivo recebeu controle de fluxo.";
     return result;
 }
 
@@ -209,7 +274,9 @@ ControlledLoadResult LoadControlled(std::filesystem::path const& path) {
 
     if (magic == std::array<std::uint8_t, 4>{ELFMAG0, ELFMAG1, ELFMAG2, ELFMAG3}) {
         auto header = reader.Object<elf_header>(0);
-        return LoadElf(reader, header, 0);
+        return LoadElf(reader, header, 0, [&](std::uint64_t offset, void* destination, std::size_t count) {
+            reader.Read(offset, destination, count);
+        });
     }
     auto selfMagic = self_header::signature;
     std::array<std::uint8_t, 4> selfBytes{

@@ -21,6 +21,8 @@ void RunProbe(Test& test, std::wstring const& executablePath) {
     test.measurements.Insert(L"self", JsonValue::CreateBooleanValue(result.self));
     test.measurements.Insert(L"validated", JsonValue::CreateBooleanValue(result.validated));
     test.measurements.Insert(L"mapped", JsonValue::CreateBooleanValue(result.mapped));
+    test.measurements.Insert(L"inner_elf", JsonValue::CreateBooleanValue(result.inner_elf));
+    test.measurements.Insert(L"inner_mapped", JsonValue::CreateBooleanValue(result.inner_mapped));
     test.measurements.Insert(L"protected_segments", JsonValue::CreateBooleanValue(result.protected_segments));
     test.measurements.Insert(L"segment_count", JsonValue::CreateNumberValue(static_cast<double>(result.segment_count)));
     test.measurements.Insert(L"load_segments", JsonValue::CreateNumberValue(static_cast<double>(result.load_segments)));
@@ -29,6 +31,11 @@ void RunProbe(Test& test, std::wstring const& executablePath) {
     test.measurements.Insert(L"min_virtual_address", JsonValue::CreateNumberValue(static_cast<double>(result.min_virtual_address)));
     test.measurements.Insert(L"max_virtual_address", JsonValue::CreateNumberValue(static_cast<double>(result.max_virtual_address)));
     test.measurements.Insert(L"checksum_fnv1a", JsonValue::CreateNumberValue(static_cast<double>(result.checksum)));
+    test.measurements.Insert(L"inner_segment_count", JsonValue::CreateNumberValue(static_cast<double>(result.inner_segment_count)));
+    test.measurements.Insert(L"inner_load_segments", JsonValue::CreateNumberValue(static_cast<double>(result.inner_load_segments)));
+    test.measurements.Insert(L"inner_entry", JsonValue::CreateNumberValue(static_cast<double>(result.inner_entry)));
+    test.measurements.Insert(L"inner_mapped_bytes", JsonValue::CreateNumberValue(static_cast<double>(result.inner_mapped_bytes)));
+    test.measurements.Insert(L"inner_checksum_fnv1a", JsonValue::CreateNumberValue(static_cast<double>(result.inner_checksum)));
     test.status = L"passed";
     test.detail = result.detail + L"\nArquivo: " + executablePath;
 }
