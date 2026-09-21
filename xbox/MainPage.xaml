@@ -21,24 +21,23 @@
         </Grid>
         <TextBlock x:Name="LibraryStatus" Grid.Row="3" Text="Pronto para importar conteúdo." FontSize="14" TextWrapping="Wrap" Margin="0,14,0,0" Foreground="#D4E7FF"/>
       </Grid>
-      <Grid x:Name="DiagnosticsView" Visibility="Collapsed"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+      <Grid x:Name="DiagnosticsView" Visibility="Collapsed"><Grid.ColumnDefinitions><ColumnDefinition Width="5*"/><ColumnDefinition Width="6*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
       <TextBlock x:Name="DeviceInfo" Grid.ColumnSpan="2" FontSize="13" TextWrapping="Wrap"/>
       <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="10" Margin="0,12,0,16">      <Button x:Name="RunAll" Visibility="Collapsed" Content="Executar testes automáticos" Padding="16,10"/>
       <Button x:Name="RunSelected" Visibility="Collapsed" Content="Executar selecionado" Padding="16,10"/>
       <Button x:Name="Export" Content="Exportar JSON" Padding="16,10"/>
 </StackPanel>
-      <Grid.ColumnDefinitions><ColumnDefinition Width="5*"/><ColumnDefinition Width="6*"/></Grid.ColumnDefinitions>
-      <ListView Grid.Row="2" x:Name="Tests" SelectionMode="Single" IsItemClickEnabled="False" Margin="0,0,24,0"/>
-      <ScrollViewer Grid.Row="2" Grid.Column="1" VerticalScrollBarVisibility="Auto">
+      <ListView Grid.Row="2" x:Name="Tests" Visibility="Collapsed" SelectionMode="Single" IsItemClickEnabled="False" Margin="0,0,24,0"/>
+      <ScrollViewer Grid.Row="2" Grid.ColumnSpan="2" VerticalScrollBarVisibility="Auto">
         <StackPanel Spacing="12">
           <TextBlock x:Name="Details" Text="Nesta versão, a validação é a extração do PKG na Biblioteca. O relatório fica em LocalState/extraction-report.json. Os testes anteriores foram retirados." FontSize="18" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
-          <SwapChainPanel x:Name="GpuPanel" Height="180" HorizontalAlignment="Stretch"/>
-          <MediaElement x:Name="Audio" AutoPlay="False" AreTransportControlsEnabled="False" Volume="1" Height="1"/>
+          <SwapChainPanel x:Name="GpuPanel" Visibility="Collapsed" Height="180" HorizontalAlignment="Stretch"/>
+          <MediaElement x:Name="Audio" Visibility="Collapsed" AutoPlay="False" AreTransportControlsEnabled="False" Volume="1" Height="1"/>
           <StackPanel Orientation="Horizontal" Spacing="10">
-            <Button x:Name="Confirm" Content="Confirmar imagem / áudio"/>
-            <Button x:Name="Reject" Content="Imagem / áudio não funcionou"/>
+            <Button x:Name="Confirm" Visibility="Collapsed" Content="Confirmar imagem / áudio"/>
+            <Button x:Name="Reject" Visibility="Collapsed" Content="Imagem / áudio não funcionou"/>
           </StackPanel>
-          <TextBlock Text="Controle: direcional move o foco; A seleciona. Para suspensão, execute o teste e saia para o painel do Xbox, depois retorne." FontSize="15" Foreground="#B9D9FF" TextWrapping="Wrap"/>
+          <TextBlock Text="Exporte o relatório após a extração. Importar um pacote não inicia o executável." FontSize="15" Foreground="#B9D9FF" TextWrapping="Wrap"/>
         </StackPanel>
       </ScrollViewer>
       </Grid>

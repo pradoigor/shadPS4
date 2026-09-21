@@ -144,7 +144,7 @@ class Extractor {
         for (const auto& entry : Directory(inode)) {
             Cancel();
             Require(entry.inode < nodes.size(), "Inode de arquivo fora dos limites.");
-            auto path = directory / std::filesystem::u8path(entry.name);
+            auto path = directory / std::filesystem::path(std::u8string(entry.name.begin(), entry.name.end()));
             const auto& node = nodes[entry.inode];
             if (entry.type == 3) {
                 Require(!std::filesystem::exists(path), "Diretorio duplicado no pacote.");
