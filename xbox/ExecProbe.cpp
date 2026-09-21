@@ -6,8 +6,8 @@
 
 #include <array>
 #include <cstring>
-#include <memoryapi.h>
 #include <windows.h>
+#include <memoryapi.h>
 #include <fileapifromapp.h>
 #include <vector>
 #include <winrt/base.h>
