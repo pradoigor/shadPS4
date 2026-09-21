@@ -24,7 +24,7 @@ que o carregador tenha uma ponte ABI SysV compatível, endereços HLE reais e um
 renderer UWP para Piglet. O aplicativo deve manter essa barreira e nunca saltar
 para o `e_entry` enquanto algum desses requisitos faltar.
 
-A build `0.32.0.0` corrige o alocador de thunks SysV→Windows para preservar os
+A build `0.33.0.0` corrige o alocador de thunks SysV→Windows para preservar os
 seis registradores inteiros, a pilha convidada e os registradores XMM em uma área
 separada do shadow space exigido pelo ABI Windows. Um chamador de máquina gerado
 pelo projeto injeta padrões distintos em registradores e argumentos de pilha e
@@ -32,6 +32,12 @@ impede o avanço se a captura divergir. Handlers que apenas retornam constantes,
 como EGL/GL, rede, versão e identidade, permanecem classificados como stubs; eles
 não contam mais como suporte implementado. Imports ausentes retornam o valor
 Orbis correto de `ENOSYS` (`0x8002004E`).
+O núcleo compartilhado ganhou `Core::PlatformMemory`: em AppContainer ele usa as
+variantes `FromApp`, preserva placeholders e views coerentes e aplica a política
+RW→RX exigida por `codeGeneration`. `Core::AddressSpace` passou a consumir essa
+camada sem alterar o caminho Win32 desktop. A construção completa do espaço PS4
+ainda depende de substituir a reserva física monolítica por compromisso sob demanda,
+pois reservar e confirmar toda a memória do PS4 excede o orçamento prático do UWP.
 O probe agora cria e conta thunks para todos os imports do ELF e aplica
 os endereços em uma cópia privada não executável e mapeia essa cópia como somente
 leitura com proteção por segmento para validar a faixa de memória. Segmentos

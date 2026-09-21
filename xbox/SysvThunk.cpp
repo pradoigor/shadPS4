@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "SysvThunk.h"
+#include "core/platform_memory.h"
 
 #include <windows.h>
 #include <memoryapi.h>
@@ -77,13 +78,14 @@ std::uint64_t ValidateDispatch(void*, std::uint64_t slot, GuestCallFrame const* 
 } // namespace
 
 SysvThunkArena::~SysvThunkArena() {
-    for (auto* page : pages_) VirtualFree(page, 0, MEM_RELEASE);
+    for (auto* page : pages_)
+        Core::PlatformMemory::Free(GetCurrentProcess(), page, 0, MEM_RELEASE);
 }
 
 void* SysvThunkArena::Create(void* context, std::uint64_t slot, SysvDispatch dispatch) {
     if (!dispatch) throw std::invalid_argument("SysV thunk sem dispatcher.");
-    auto* page = static_cast<std::uint8_t*>(
-        VirtualAllocFromApp(nullptr, PageSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+    auto* page = static_cast<std::uint8_t*>(Core::PlatformMemory::Allocate(
+        GetCurrentProcess(), nullptr, PageSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
     if (!page) throw std::runtime_error("Não foi possível reservar a página do thunk SysV.");
 
     std::size_t offset = 0;
@@ -120,12 +122,13 @@ void* SysvThunkArena::Create(void* context, std::uint64_t slot, SysvDispatch dis
     Byte(page, offset, 0xC3); // ret
 
     DWORD previous{};
-    if (!VirtualProtectFromApp(page, PageSize, PAGE_EXECUTE_READ, &previous)) {
-        VirtualFree(page, 0, MEM_RELEASE);
+    if (!Core::PlatformMemory::Protect(GetCurrentProcess(), page, PageSize, PAGE_EXECUTE_READ,
+                                       &previous)) {
+        Core::PlatformMemory::Free(GetCurrentProcess(), page, 0, MEM_RELEASE);
         throw std::runtime_error("Não foi possível proteger o thunk SysV como RX.");
     }
     if (!FlushInstructionCache(GetCurrentProcess(), page, offset)) {
-        VirtualFree(page, 0, MEM_RELEASE);
+        Core::PlatformMemory::Free(GetCurrentProcess(), page, 0, MEM_RELEASE);
         throw std::runtime_error("Não foi possível limpar o cache de instruções do thunk SysV.");
     }
     pages_.push_back(page);
@@ -135,8 +138,8 @@ void* SysvThunkArena::Create(void* context, std::uint64_t slot, SysvDispatch dis
 SysvAbiValidation ValidateSysvThunkAbi() {
     SysvThunkArena arena;
     auto* thunk = arena.Create(nullptr, 0, &ValidateDispatch);
-    auto* caller = static_cast<std::uint8_t*>(
-        VirtualAllocFromApp(nullptr, PageSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+    auto* caller = static_cast<std::uint8_t*>(Core::PlatformMemory::Allocate(
+        GetCurrentProcess(), nullptr, PageSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
     if (!caller) throw std::runtime_error("Não foi possível reservar o validador da ABI SysV.");
 
     std::size_t offset = 0;
@@ -173,13 +176,14 @@ SysvAbiValidation ValidateSysvThunkAbi() {
     Byte(caller, offset, 0x5E); Byte(caller, offset, 0x5F); Byte(caller, offset, 0xC3);
 
     DWORD previous{};
-    if (!VirtualProtectFromApp(caller, PageSize, PAGE_EXECUTE_READ, &previous) ||
+    if (!Core::PlatformMemory::Protect(GetCurrentProcess(), caller, PageSize, PAGE_EXECUTE_READ,
+                                       &previous) ||
         !FlushInstructionCache(GetCurrentProcess(), caller, offset)) {
-        VirtualFree(caller, 0, MEM_RELEASE);
+        Core::PlatformMemory::Free(GetCurrentProcess(), caller, 0, MEM_RELEASE);
         throw std::runtime_error("Não foi possível ativar o validador da ABI SysV.");
     }
     const auto value = reinterpret_cast<std::uint64_t (*)()>(caller)();
-    VirtualFree(caller, 0, MEM_RELEASE);
+    Core::PlatformMemory::Free(GetCurrentProcess(), caller, 0, MEM_RELEASE);
     return SysvAbiValidation{value == ValidationReturn, value};
 }
 

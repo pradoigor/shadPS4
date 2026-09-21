@@ -11,6 +11,7 @@
 #include "core/emulator_settings.h"
 #include "core/libraries/kernel/memory.h"
 #include "core/memory.h"
+#include "core/platform_memory.h"
 #include "libraries/error_codes.h"
 
 #ifdef _WIN32
@@ -77,7 +78,13 @@ static u64 BackingSize = ORBIS_KERNEL_TOTAL_MEM_DEV_PRO + ORBIS_KERNEL_FLEXIBLE_
     // All cases involving execute permissions have separate permissions.
     if (execute) {
         if (write) {
+#ifdef SHADPS4_XBOX_UWP
+            // AppContainer JIT forbids W+X. Keep the page writable until the
+            // guest explicitly transitions it to an executable protection.
+            return PAGE_READWRITE;
+#else
             return PAGE_EXECUTE_READWRITE;
+#endif
         } else if (read && !write) {
             return PAGE_EXECUTE_READ;
         } else {
@@ -110,6 +117,14 @@ struct AddressSpace::Impl {
         GetSystemInfo(&sys_info);
         u64 alignment = sys_info.dwAllocationGranularity;
 
+        u64 supported_user_max = USER_MAX;
+        // Higher PS4 firmware versions prevent higher address mappings too.
+        const s32 sdk_ver = Common::ElfInfo::Instance().CompiledSdkVer();
+#ifdef SHADPS4_XBOX_UWP
+        // RtlGetVersion is outside the AppContainer API surface. Xbox uses the
+        // conservative range already required by affected desktop builds.
+        supported_user_max = 0x10000000000ULL;
+#else
         // Older Windows builds have a severe performance issue with VirtualAlloc2.
         // We need to get the host's Windows version, then determine if it needs a workaround.
         auto ntdll_handle = GetModuleHandleW(L"ntdll.dll");
@@ -124,12 +139,9 @@ struct AddressSpace::Impl {
         RTL_OSVERSIONINFOW os_version_info{};
         RtlGetVersion(&os_version_info);
 
-        u64 supported_user_max = USER_MAX;
         // This is the build number for Windows 11 22H2
         static constexpr s32 AffectedBuildNumber = 22621;
 
-        // Higher PS4 firmware versions prevent higher address mappings too.
-        s32 sdk_ver = Common::ElfInfo::Instance().CompiledSdkVer();
         if (os_version_info.dwBuildNumber <= AffectedBuildNumber ||
             sdk_ver >= Common::ElfInfo::FW_300) {
             supported_user_max = 0x10000000000ULL;
@@ -142,6 +154,7 @@ struct AddressSpace::Impl {
                     supported_user_max);
             }
         }
+#endif
 
         // Determine the free address ranges we can access.
         VAddr next_addr = SYSTEM_MANAGED_MIN;
@@ -172,9 +185,9 @@ struct AddressSpace::Impl {
 
         // Reserve all detected free regions.
         for (auto region : regions) {
-            auto addr = static_cast<u8*>(VirtualAlloc2(
+            auto addr = static_cast<u8*>(PlatformMemory::Allocate(
                 process, reinterpret_cast<PVOID>(region.second.base), region.second.size,
-                MEM_RESERVE | MEM_RESERVE_PLACEHOLDER, PAGE_NOACCESS, NULL, 0));
+                MEM_RESERVE | MEM_RESERVE_PLACEHOLDER, PAGE_NOACCESS));
             // All marked regions should reserve fine since they're free.
             ASSERT_MSG(addr, "Unable to reserve virtual address space: {}",
                        Common::GetLastErrorMsg());
@@ -194,21 +207,20 @@ struct AddressSpace::Impl {
                        EmulatorSettings.GetExtraFmemInMBytes() * 1_MB;
 
         // Allocate backing file that represents the total physical memory.
-        backing_handle = CreateFileMapping2(INVALID_HANDLE_VALUE, nullptr, FILE_MAP_ALL_ACCESS,
-                                            PAGE_EXECUTE_READWRITE, SEC_COMMIT, BackingSize,
-                                            nullptr, nullptr, 0);
+        backing_handle = PlatformMemory::CreateBacking(
+            INVALID_HANDLE_VALUE, nullptr, FILE_MAP_ALL_ACCESS, PAGE_EXECUTE_READWRITE,
+            SEC_COMMIT, BackingSize);
 
         ASSERT_MSG(backing_handle, "{}", Common::GetLastErrorMsg());
         // Allocate a virtual memory for the backing file map as placeholder
-        backing_base = static_cast<u8*>(VirtualAlloc2(process, nullptr, BackingSize,
-                                                      MEM_RESERVE | MEM_RESERVE_PLACEHOLDER,
-                                                      PAGE_NOACCESS, nullptr, 0));
+        backing_base = static_cast<u8*>(PlatformMemory::Allocate(
+            process, nullptr, BackingSize, MEM_RESERVE | MEM_RESERVE_PLACEHOLDER, PAGE_NOACCESS));
         ASSERT_MSG(backing_base, "{}", Common::GetLastErrorMsg());
 
         // Map backing placeholder. This will commit the pages
         void* const ret =
-            MapViewOfFile3(backing_handle, process, backing_base, 0, BackingSize,
-                           MEM_REPLACE_PLACEHOLDER, PAGE_EXECUTE_READWRITE, nullptr, 0);
+            PlatformMemory::MapView(backing_handle, process, backing_base, 0, BackingSize,
+                                    MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE);
         ASSERT_MSG(ret == backing_base, "{}", Common::GetLastErrorMsg());
     }
 
@@ -219,10 +231,10 @@ struct AddressSpace::Impl {
             }
         }
         if (backing_base) {
-            if (!UnmapViewOfFile2(process, backing_base, MEM_PRESERVE_PLACEHOLDER)) {
+            if (!PlatformMemory::UnmapView(process, backing_base, MEM_PRESERVE_PLACEHOLDER)) {
                 LOG_CRITICAL(Core, "Failed to unmap backing memory placeholder");
             }
-            if (!VirtualFreeEx(process, backing_base, 0, MEM_RELEASE)) {
+            if (!PlatformMemory::Free(process, backing_base, 0, MEM_RELEASE)) {
                 LOG_CRITICAL(Core, "Failed to free backing memory");
             }
         }
@@ -244,9 +256,9 @@ struct AddressSpace::Impl {
             if (fd != -1 && prot == PAGE_READONLY) {
                 // Allocate the memory for the mapping
                 DWORD resultvar;
-                ptr = VirtualAlloc2(process, reinterpret_cast<PVOID>(virtual_addr), size,
-                                    MEM_RESERVE | MEM_COMMIT | MEM_REPLACE_PLACEHOLDER,
-                                    PAGE_READWRITE, nullptr, 0);
+                ptr = PlatformMemory::Allocate(
+                    process, reinterpret_cast<PVOID>(virtual_addr), size,
+                    MEM_RESERVE | MEM_COMMIT | MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE);
 
                 // Use ReadFile to read file contents into the memory area.
                 // Create an OVERLAPPED with the file offset, then supply that to ReadFile
@@ -264,28 +276,28 @@ struct AddressSpace::Impl {
                 ret = SetFilePointer(backing, size_low, &size_high, FILE_CURRENT);
 
                 // Protect the memory area appropriately
-                ret = VirtualProtect(ptr, size, prot, &resultvar);
+                ret = PlatformMemory::Protect(process, ptr, size, prot, &resultvar);
                 ASSERT_MSG(ret, "VirtualProtect failed. {}", Common::GetLastErrorMsg());
             } else {
                 if (prot == PAGE_NOACCESS) {
                     DWORD resultvar;
-                    ptr = MapViewOfFile3(backing, process, reinterpret_cast<PVOID>(virtual_addr),
-                                         phys_addr, size, MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE,
-                                         nullptr, 0);
+                    ptr = PlatformMemory::MapView(
+                        backing, process, reinterpret_cast<PVOID>(virtual_addr), phys_addr, size,
+                        MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE);
                     ASSERT_MSG(ptr, "MapViewOfFile3 failed. {}", Common::GetLastErrorMsg());
-                    bool ret = VirtualProtect(ptr, size, prot, &resultvar);
+                    bool ret = PlatformMemory::Protect(process, ptr, size, prot, &resultvar);
                     ASSERT_MSG(ret, "VirtualProtect failed. {}", Common::GetLastErrorMsg());
                 } else {
-                    ptr =
-                        MapViewOfFile3(backing, process, reinterpret_cast<PVOID>(virtual_addr),
-                                       phys_addr, size, MEM_REPLACE_PLACEHOLDER, prot, nullptr, 0);
+                    ptr = PlatformMemory::MapView(
+                        backing, process, reinterpret_cast<PVOID>(virtual_addr), phys_addr, size,
+                        MEM_REPLACE_PLACEHOLDER, prot);
                     ASSERT_MSG(ptr, "MapViewOfFile3 failed. {}", Common::GetLastErrorMsg());
                 }
             }
         } else {
-            ptr =
-                VirtualAlloc2(process, reinterpret_cast<PVOID>(virtual_addr), size,
-                              MEM_RESERVE | MEM_COMMIT | MEM_REPLACE_PLACEHOLDER, prot, nullptr, 0);
+            ptr = PlatformMemory::Allocate(
+                process, reinterpret_cast<PVOID>(virtual_addr), size,
+                MEM_RESERVE | MEM_COMMIT | MEM_REPLACE_PLACEHOLDER, prot);
         }
         ASSERT_MSG(ptr, "{}", Common::GetLastErrorMsg());
         return ptr;
@@ -300,11 +312,11 @@ struct AddressSpace::Impl {
 
         bool ret = false;
         if ((fd != -1 && prot != PAGE_READONLY) || (fd == -1 && phys_base != -1)) {
-            ret = UnmapViewOfFile2(process, reinterpret_cast<PVOID>(virtual_addr),
-                                   MEM_PRESERVE_PLACEHOLDER);
+            ret = PlatformMemory::UnmapView(process, reinterpret_cast<PVOID>(virtual_addr),
+                                            MEM_PRESERVE_PLACEHOLDER);
         } else {
-            ret = VirtualFreeEx(process, reinterpret_cast<PVOID>(virtual_addr), size,
-                                MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER);
+            ret = PlatformMemory::Free(process, reinterpret_cast<PVOID>(virtual_addr), size,
+                                       MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER);
         }
         ASSERT_MSG(ret, "Unmap on virtual_addr {:#x}, size {:#x} failed: {}", virtual_addr, size,
                    Common::GetLastErrorMsg());
@@ -340,8 +352,8 @@ struct AddressSpace::Impl {
             region.size = base_offset;
 
             // Use VirtualFreeEx to create the split.
-            if (!VirtualFreeEx(process, LPVOID(region.base), region.size,
-                               MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER)) {
+            if (!PlatformMemory::Free(process, LPVOID(region.base), region.size,
+                                      MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER)) {
                 UNREACHABLE_MSG("Region splitting failed: {}", Common::GetLastErrorMsg());
             }
 
@@ -379,8 +391,8 @@ struct AddressSpace::Impl {
                                               region.is_mapped));
 
             // Use VirtualFreeEx to create the split.
-            if (!VirtualFreeEx(process, LPVOID(region.base), region.size,
-                               MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER)) {
+            if (!PlatformMemory::Free(process, LPVOID(region.base), region.size,
+                                      MEM_RELEASE | MEM_PRESERVE_PLACEHOLDER)) {
                 UNREACHABLE_MSG("Region splitting failed: {}", Common::GetLastErrorMsg());
             }
 
@@ -458,8 +470,8 @@ struct AddressSpace::Impl {
 
         // If there are placeholders to coalesce, then coalesce them.
         if (can_coalesce) {
-            if (!VirtualFreeEx(process, LPVOID(it->first), it->second.size,
-                               MEM_RELEASE | MEM_COALESCE_PLACEHOLDERS)) {
+            if (!PlatformMemory::Free(process, LPVOID(it->first), it->second.size,
+                                      MEM_RELEASE | MEM_COALESCE_PLACEHOLDERS)) {
                 UNREACHABLE_MSG("Region coalescing failed: {}", Common::GetLastErrorMsg());
             }
         }
@@ -519,7 +531,13 @@ struct AddressSpace::Impl {
         if (execute) {
             // If there's some form of write protection requested, provide read-write permissions.
             if (write) {
+#ifdef SHADPS4_XBOX_UWP
+                // UWP codeGeneration enforces W^X. A subsequent execute-only
+                // protection request performs the transition to executable.
+                new_flags = PAGE_READWRITE;
+#else
                 new_flags = PAGE_EXECUTE_READWRITE;
+#endif
             } else if (read && !write) {
                 new_flags = PAGE_EXECUTE_READ;
             } else {
@@ -555,12 +573,15 @@ struct AddressSpace::Impl {
             const u64 range_addr = std::max(region.base, virtual_addr);
             const u64 range_size = std::min(region.base + region.size, virtual_end) - range_addr;
             DWORD old_flags{};
-            if (!VirtualProtectEx(process, LPVOID(range_addr), range_size, new_flags, &old_flags)) {
+            if (!PlatformMemory::Protect(process, LPVOID(range_addr), range_size, new_flags,
+                                         &old_flags)) {
                 UNREACHABLE_MSG(
                     "Failed to change virtual memory protection for address {:#x}, size "
                     "{:#x}, error {}",
                     virtual_addr, size, Common::GetLastErrorMsg());
             }
+            if (new_flags == PAGE_EXECUTE || new_flags == PAGE_EXECUTE_READ)
+                FlushInstructionCache(process, LPVOID(range_addr), range_size);
         }
     }
 
