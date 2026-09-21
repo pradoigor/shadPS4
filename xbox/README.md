@@ -5,7 +5,7 @@ shadPS4 ao Xbox Series X em Dev Mode. **Ainda não é um emulador PS4 no Xbox.**
 O alvo é independente do CMake e das dependências desktop do núcleo.
 
 A versão **0.3.2.0** inclui biblioteca horizontal inspirada no PS4, importação de
-PKG/ELF, importação local de chaves e extração experimental em segundo plano,
+PKG/ELF, keysets FPKG embutidos, importação de chaves personalizadas e extração experimental em segundo plano,
 com progresso, cancelamento e relatório. Consulte [EXTRACTION.md](EXTRACTION.md)
 para formatos suportados, instruções, testes e limites. Extrair não executa o jogo.
 
@@ -26,7 +26,8 @@ UWP, SDK 10.0.22621.0 e Python 3.12, então execute no PowerShell:
 O pacote declara `codeGeneration` para o teste de código próprio e não pede
 acesso à internet. Não inclui firmware, jogos nem chaves reais. O submódulo miniz já
 fixado no fork fornece descompressão; o artefato de teste usa apenas chaves
-RSA sintéticas geradas no CI. A interface carrega XAML sem tipos personalizados; o build
+RSA sintéticas geradas no CI. Não inclui firmware nem chaves de conteúdo retail; os
+keysets FPKG portados são os da referência GPL. A interface carrega XAML sem tipos personalizados; o build
 usa C++/WinRT 2.0.250303.1 e shaders HLSL pré-compilados, sem compilador no Xbox.
 
 ## Instalar

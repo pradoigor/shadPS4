@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "PkgExtractor.h"
+#include "PkgBuiltinKeys.h"
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -9,7 +10,7 @@ Bytes Read(const std::filesystem::path& path) {
 }
 int main(int argc, char** argv) {
     try {
-        if (argc != 2) throw std::runtime_error("fixture directory required");
+        if (argc < 2 || argc > 3) throw std::runtime_error("fixture directory required");
         std::filesystem::path root(argv[1]);
         PackageKeys keys;
         std::ifstream input(root / "keys.txt"); std::string set, field, hex;
@@ -18,6 +19,7 @@ int main(int argc, char** argv) {
             (set == "FakeKeyset" ? keys.fake : keys.derived)[field] = bytes;
         }
         ValidatePackageKeys(keys);
+        ValidatePackageKeys(BuiltinFpkgKeys());
         if (!PackageNeedsKeys(root / "valid.pkg")) throw std::runtime_error("valid fixture key entries not detected");
         unsigned passed{};
         for (auto name : {"valid", "traversal", "cycle", "bad_dirent", "bad_inode", "bad_zlib", "bad_map", "bad_table", "bad_rsa", "truncated", "missing_keys", "cancel"}) {
@@ -43,5 +45,16 @@ int main(int argc, char** argv) {
         }
         if (std::filesystem::exists(root / "outside")) throw std::runtime_error("path escaped staging");
         std::cout << passed << " extraction cases passed\n";
+        if (argc == 3) {
+            auto target = root / "output-apollo";
+            std::filesystem::remove_all(target);
+            std::filesystem::create_directory(target);
+            InstallProgress progress;
+            ExtractPackage(argv[2], target, BuiltinFpkgKeys(), progress);
+            if (!std::filesystem::is_regular_file(target / "eboot.bin") ||
+                !std::filesystem::is_regular_file(target / "sce_sys" / "param.sfo"))
+                throw std::runtime_error("Apollo PKG nao produziu eboot.bin/param.sfo");
+            std::cout << "Apollo PKG extraction passed\n";
+        }
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
 }

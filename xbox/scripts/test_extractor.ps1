@@ -12,9 +12,11 @@ try {
     if ($LASTEXITCODE) { throw 'Fixture dependency failed' }
     & python "$PSScriptRoot\make_pkg_fixtures.py" "$out\fixtures"
     if ($LASTEXITCODE) { throw 'Fixture generation failed' }
-    & cl /nologo /std:c++20 /EHsc /W4 /utf-8 /DNOMINMAX /DMINIZ_NO_ARCHIVE_APIS /DMINIZ_NO_DEFLATE_APIS /DMINIZ_NO_STDIO "/I$root\xbox" "/I$root\externals\miniz" "$root\xbox\tests\pkg_tests.cpp" "$root\xbox\PkgExtractor.cpp" "$root\xbox\PkgCrypto.cpp" "$root\externals\miniz\miniz.c" "$root\externals\miniz\miniz_tinfl.c" /Fe:pkg_tests.exe /link bcrypt.lib
+    & cl /nologo /std:c++20 /EHsc /W4 /utf-8 /DNOMINMAX /DMINIZ_NO_ARCHIVE_APIS /DMINIZ_NO_DEFLATE_APIS /DMINIZ_NO_STDIO "/I$root\xbox" "/I$root\externals\miniz" "$root\xbox\tests\pkg_tests.cpp" "$root\xbox\PkgExtractor.cpp" "$root\xbox\PkgCrypto.cpp" "$root\xbox\PkgBuiltinKeys.cpp" "$root\externals\miniz\miniz.c" "$root\externals\miniz\miniz_tinfl.c" /Fe:pkg_tests.exe /link bcrypt.lib
     if ($LASTEXITCODE) { throw 'Extractor test build failed' }
-    & .\pkg_tests.exe "$out\fixtures" | Tee-Object "$root\xbox\artifacts\extractor-tests.txt"
+    $apollo = "$out\apollo-2.3.2.pkg"
+    Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/bucanero/apollo-ps4/releases/download/v2.3.2/IV0000-APOL00004_00-APOLLO0000000PS4.pkg' -OutFile $apollo
+    & .\pkg_tests.exe "$out\fixtures" $apollo | Tee-Object "$root\xbox\artifacts\extractor-tests.txt"
     if ($LASTEXITCODE) { throw 'Extractor tests failed' }
     $fixtureArtifact = "$root\xbox\artifacts\synthetic-test"
     New-Item $fixtureArtifact -ItemType Directory -Force | Out-Null

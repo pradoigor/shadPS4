@@ -4,6 +4,7 @@
 #include "BuildInfo.h"
 #include "PkgProbe.h"
 #include "PkgExtractor.h"
+#include "PkgBuiltinKeys.h"
 #include <winrt/Windows.UI.Xaml.Media.Imaging.h>
 #include <winrt/Windows.Data.Json.h>
 #include <winrt/Windows.System.Display.h>
@@ -65,7 +66,7 @@ struct App : ApplicationT<App> {
 
     Lab::PackageKeys LoadKeys() {
         auto path = std::filesystem::path(Windows::Storage::ApplicationData::Current().LocalFolder().Path().c_str()) / L"keys.json";
-        if (!std::filesystem::exists(path)) throw std::runtime_error("Este PKG usa chaves locais. Importe keys.json antes de extrair.");
+        if (!std::filesystem::exists(path)) return Lab::BuiltinFpkgKeys();
         return ParseKeys(path);
     }
     static Lab::PackageKeys ParseKeys(std::filesystem::path const& path) {
@@ -103,7 +104,7 @@ struct App : ApplicationT<App> {
                 try {
                     ParseKeys(std::filesystem::path(pendingKey.Path().c_str()));
                     co_await pendingKey.RenameAsync(L"keys.json", Windows::Storage::NameCollisionOption::ReplaceExisting);
-                    libraryStatus.Text(L"Chaves importadas neste Xbox. A compatibilidade será verificada durante a extração.");
+                    libraryStatus.Text(L"Chaves personalizadas importadas. O keyset FPKG embutido será substituído nesta extração.");
                 } catch (...) {
                     std::error_code ignored; std::filesystem::remove(std::filesystem::path(pendingKey.Path().c_str()), ignored); throw;
                 }

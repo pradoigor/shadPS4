@@ -8,16 +8,18 @@ inspirados no PS4, sem recursos gráficos da Sony.
 ## Uso
 
 1. Atualize o APPX, preservando LocalState.
-2. Importe `keys.json` pelo botão **Importar chaves**, caso o pacote use o caminho
-   RSA/PFS suportado. São necessários `PkgDerivedKey3Keyset` e `FakeKeyset`, com
+2. O aplicativo usa por padrão os keysets FPKG portados do fluxo do shadPS4,
+   sem pedir arquivo adicional. Importe `keys.json` pelo botão **Importar chaves**
+   para substituir o padrão quando um pacote exigir outro conjunto. São necessários
+   `PkgDerivedKey3Keyset` e `FakeKeyset`, com
    `PublicExponent` (4 bytes), `Modulus`, `PrivateExponent` (256 cada) e
    `Prime1`, `Prime2`, `Exponent1`, `Exponent2`, `Coefficient` (128 cada), em
    hexadecimal. O aplicativo valida todos os componentes antes da operação RSA.
    O aplicativo lê o modo do cabeçalho PFS antes de pedir chaves: imagens sem o
-bit de criptografia seguem o caminho sem chaves; imagens XTS exigem os conjuntos
-RSA. A presença isolada de `entry_keys`/`image_key` não dispara mais um pedido
-falso. O PKG do Apollo v2.3.2 foi confirmado como XTS-criptografado (modo PFS
-0x000D), portanto ele realmente entra no caminho que solicita `keys.json`.
+   bit de criptografia seguem o caminho sem chaves; imagens XTS exigem os conjuntos
+   RSA. A presença isolada de `entry_keys`/`image_key` não dispara mais um pedido
+   falso. O PKG do Apollo v2.3.2 foi confirmado como XTS-criptografado (modo PFS
+   0x000D), portanto ele usa os keysets FPKG embutidos nesta versão.
 3. Importe ou selecione o PKG já existente e pressione **Extrair pacote**.
 4. Acompanhe arquivos/MiB; **Cancelar extração** interrompe entre blocos.
 5. Após terminar, confira o cartão **EXTRAÍDO**, feche e reabra o aplicativo.
@@ -29,7 +31,8 @@ Se o seletor de arquivos não estiver disponível no console, envie o PKG para
 então reabra a Biblioteca. Preserve qualquer keys.json anterior antes de trocar
 o conjunto por chaves sintéticas de teste.
 
-As chaves reais ficam somente em LocalState, não entram no relatório. A importação
+Os keysets portados fazem parte do código GPL de referência; chaves personalizadas
+ficam somente em LocalState e não entram no relatório. A importação
 valida tamanho/formato; a operação RSA verifica a compatibilidade com o pacote.
 O artefato contém `synthetic-test/valid.pkg` e `synthetic-test/keys.json`, produzidos
 com chaves aleatórias de teste. Não são chaves de PS4 e não servem para jogos.
