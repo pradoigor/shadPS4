@@ -42,7 +42,7 @@ bool ReadAt(std::ifstream& input, std::uint64_t offset, void* destination, std::
     return input.gcount() == static_cast<std::streamsize>(size);
 }
 
-std::wstring Hex(std::uint32_t value) {
+std::wstring Hex(std::uint64_t value) {
     std::wstringstream stream;
     stream << std::hex << std::uppercase << value;
     return stream.str();
@@ -148,15 +148,15 @@ PkgProbeResult ProbePkg(std::filesystem::path const& path) {
     }
 
     std::wstringstream detail;
-    detail << L"PKG PS4 válido para leitura de contêiner · " << fileSize << L" bytes\n"
+    detail << L"PKG PS4 reconhecido · " << fileSize << L" bytes\n"
            << L"Content ID: " << std::wstring(contentId.begin(), contentId.end()) << L"\n";
     if (!titleId.empty())
         detail << L"Title ID: " << std::wstring(titleId.begin(), titleId.end()) << L"\n";
     detail << L"Tipo: 0x" << Hex(packageType) << L" · Entradas declaradas: " << fileCount
            << L" · Tabela: " << tableCount << L"\n"
-           << L"Body: " << bodySize << L" bytes em 0x" << Hex(static_cast<std::uint32_t>(bodyOffset))
+           << L"Body: " << bodySize << L" bytes em 0x" << Hex(bodyOffset)
            << L" · Conteúdo: " << contentSize << L" bytes em 0x"
-           << Hex(static_cast<std::uint32_t>(contentOffset)) << L"\n"
+           << Hex(contentOffset) << L"\n"
            << L"Flags de conteúdo: 0x" << Hex(contentFlags) << L"\n";
     if (!tableFits)
         detail << L"Tabela de entradas fora dos limites do arquivo ou grande demais.\n";

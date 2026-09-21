@@ -248,10 +248,14 @@ struct App : ApplicationT<App> {
                 art.Background(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 12, 75, 167)));
                 TextBlock glyph; glyph.Text(installed ? L"\xE7FC" : L"\xE8B7"); glyph.FontFamily(Media::FontFamily(L"Segoe MDL2 Assets"));
                 glyph.FontSize(64); glyph.HorizontalAlignment(HorizontalAlignment::Center); glyph.VerticalAlignment(VerticalAlignment::Center); art.Child(glyph);
-                if (installed && std::filesystem::is_regular_file(std::filesystem::path(path) / L"sce_sys" / L"icon0.png")) {
+                auto iconPath = std::filesystem::path(path) / L"sce_sys" / L"icon0.png";
+                if (installed && std::filesystem::is_regular_file(iconPath) && std::filesystem::file_size(iconPath) <= 8 * 1024 * 1024) {
                     Image image;
                     auto folderName = std::filesystem::path(path).filename().wstring();
-                    image.Source(Media::Imaging::BitmapImage(Uri(L"ms-appdata:///local/Installed/" + folderName + L"/sce_sys/icon0.png")));
+                    Media::Imaging::BitmapImage cover;
+                    cover.DecodePixelWidth(416); cover.DecodePixelHeight(348);
+                    cover.UriSource(Uri(L"ms-appdata:///local/Installed/" + folderName + L"/sce_sys/icon0.png"));
+                    image.Source(cover);
                     image.Stretch(Media::Stretch::UniformToFill); art.Child(image);
                 }
                 card.Children().Append(art);
@@ -378,7 +382,7 @@ struct App : ApplicationT<App> {
                 }
             });
             timer.Start();
-            Refresh(); list.SelectedIndex(0);
+            Refresh();
             if (!report->recoveryNotice.empty()) status.Text(report->recoveryNotice);
             Save();
             Window::Current().Content(root); Window::Current().Activate();
@@ -418,7 +422,7 @@ struct App : ApplicationT<App> {
             text.TextWrapping(TextWrapping::Wrap); text.FontSize(16); text.Margin({0, 6, 0, 6});
             list.Items().Append(text);
         }
-        list.SelectedIndex(index < 0 ? 0 : index); refreshing = false; ShowDetails();
+        list.SelectedIndex(report->tests.empty() ? -1 : (index < 0 ? 0 : index)); refreshing = false; ShowDetails();
     }
     void ShowDetails() {
         auto i = list.SelectedIndex(); if (i < 0) return;

@@ -18,6 +18,11 @@ inspirados no PS4, sem recursos gráficos da Sony.
 6. Baixe `LocalState/extraction-report.json` pelo portal ou use **Diagnóstico →
    Exportar JSON**. A versão, commit, resultado e contadores ficam registrados.
 
+Se o seletor de arquivos não estiver disponível no console, envie o PKG para
+`LocalState/Library` e as chaves para `LocalState/keys.json` pelo Device Portal,
+então reabra a Biblioteca. Preserve qualquer keys.json anterior antes de trocar
+o conjunto por chaves sintéticas de teste.
+
 As chaves reais ficam somente em LocalState, não entram no relatório. A importação
 valida tamanho/formato; a operação RSA verifica a compatibilidade com o pacote.
 O artefato contém `synthetic-test/valid.pkg` e `synthetic-test/keys.json`, produzidos
