@@ -67,6 +67,12 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sceRegMgrGetStr") use(&RegMgrGetStr);
     if (name == "sceRegMgrSetStr") use(&RegMgrSetStr);
     if (name == "sceRegMgrSetInt") use(&RegMgrSetInt);
+    if (name == "sceKernelOpen") use(&KernelOpen);
+    if (name == "sceKernelClose") use(&KernelClose);
+    if (name == "sceKernelRead") use(&KernelRead);
+    if (name == "sceKernelWrite") use(&KernelWrite);
+    if (name == "sceKernelLseek") use(&KernelLseek);
+    if (name == "sceKernelFsync") use(&KernelFsync);
 
     const auto slot = static_cast<std::uint64_t>(entries_.size());
     entries_.push_back(Entry{encoded, nid, implemented, handler, nullptr});
@@ -90,6 +96,13 @@ void* HleDispatcher::AddressFor(std::string_view encodedSymbol) const noexcept {
     for (auto const& entry : entries_)
         if (entry.encoded == encodedSymbol) return entry.address;
     return nullptr;
+}
+
+void HleDispatcher::ConfigureFileSystem(std::filesystem::path appRoot,
+                                        std::filesystem::path dataRoot) {
+    appRoot_ = std::filesystem::weakly_canonical(std::move(appRoot));
+    dataRoot_ = std::filesystem::weakly_canonical(std::move(dataRoot));
+    std::filesystem::create_directories(dataRoot_);
 }
 
 std::size_t HleDispatcher::implementedCount() const noexcept {
@@ -462,6 +475,158 @@ std::uint64_t HleDispatcher::RegMgrSetInt(HleDispatcher& dispatcher,
     dispatcher.registry_[static_cast<std::uint32_t>(frame.gpr[0])] =
         std::vector<std::uint8_t>(bytes, bytes + sizeof(value));
     return 0;
+}
+
+bool HleDispatcher::ReadGuestString(std::uint64_t address, std::string& value,
+                                    std::size_t limit) const noexcept {
+    value.clear();
+    if (!memory_ || address == 0) return false;
+    for (std::size_t index = 0; index < limit; ++index) {
+        if (address > UINT64_MAX - index) return false;
+        auto* byte = static_cast<char*>(memory_->Translate(address + index, 1));
+        if (!byte) return false;
+        if (*byte == '\0') return true;
+        value.push_back(*byte);
+    }
+    return false;
+}
+
+bool HleDispatcher::ResolveGuestPath(std::string const& guestPath, bool write,
+                                     std::filesystem::path& hostPath) const noexcept {
+    try {
+        if (guestPath.empty() || guestPath.find('\\') != std::string::npos)
+            return false;
+        std::filesystem::path root;
+        std::string relative;
+        if (guestPath == "/app0" || guestPath.starts_with("/app0/")) {
+            if (write) return false;
+            root = appRoot_;
+            relative = guestPath.size() > 6 ? guestPath.substr(6) : "";
+        } else if (guestPath == "/data" || guestPath.starts_with("/data/")) {
+            root = dataRoot_ / L"data";
+            relative = guestPath.size() > 6 ? guestPath.substr(6) : "";
+        } else if (guestPath == "/savedata0" || guestPath.starts_with("/savedata0/")) {
+            root = dataRoot_ / L"savedata0";
+            relative = guestPath.size() > 11 ? guestPath.substr(11) : "";
+        } else if (guestPath.starts_with("/user/")) {
+            root = dataRoot_ / L"user";
+            relative = guestPath.substr(6);
+        } else {
+            return false;
+        }
+        auto relativePath = std::filesystem::path(relative).lexically_normal();
+        if (relativePath.is_absolute()) return false;
+        for (auto const& component : relativePath)
+            if (component == L"..") return false;
+        hostPath = (root / relativePath).lexically_normal();
+        return !root.empty();
+    } catch (...) {
+        return false;
+    }
+}
+
+std::uint64_t HleDispatcher::KernelOpen(HleDispatcher& dispatcher,
+                                        GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEacces = 0x8002000Dull;
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    constexpr std::uint64_t OrbisEinval = 0x80020016ull;
+    try {
+        std::string guestPath;
+        if (!dispatcher.ReadGuestString(frame.gpr[0], guestPath)) return OrbisEfault;
+        const auto flags = static_cast<std::uint32_t>(frame.gpr[1]);
+        const bool writable = (flags & 0x3u) != 0;
+        std::filesystem::path hostPath;
+        if (!dispatcher.ResolveGuestPath(guestPath, writable, hostPath)) return OrbisEacces;
+        if (writable) std::filesystem::create_directories(hostPath.parent_path());
+        std::ios::openmode mode = std::ios::binary;
+        if ((flags & 0x3u) == 0) mode |= std::ios::in;
+        else if ((flags & 0x3u) == 1) mode |= std::ios::out;
+        else mode |= std::ios::in | std::ios::out;
+        if ((flags & 0x400u) != 0) mode |= std::ios::trunc;
+        if ((flags & 0x8u) != 0) mode |= std::ios::app;
+        if ((flags & 0x200u) != 0 && !std::filesystem::exists(hostPath)) {
+            std::ofstream create(hostPath, std::ios::binary);
+            if (!create) return OrbisEacces;
+        }
+        GuestFile file;
+        file.writable = writable;
+        file.stream.open(hostPath, mode);
+        if (!file.stream) return OrbisEinval;
+        const auto descriptor = dispatcher.nextFileDescriptor_++;
+        dispatcher.files_.emplace(descriptor, std::move(file));
+        return static_cast<std::uint64_t>(descriptor);
+    } catch (...) {
+        return OrbisEinval;
+    }
+}
+
+std::uint64_t HleDispatcher::KernelClose(HleDispatcher& dispatcher,
+                                         GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEbadf = 0x80020009ull;
+    const auto descriptor = static_cast<std::int32_t>(frame.gpr[0]);
+    auto found = dispatcher.files_.find(descriptor);
+    if (found == dispatcher.files_.end()) return OrbisEbadf;
+    found->second.stream.close();
+    dispatcher.files_.erase(found);
+    return 0;
+}
+
+std::uint64_t HleDispatcher::KernelRead(HleDispatcher& dispatcher,
+                                        GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEbadf = 0x80020009ull;
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    const auto size = static_cast<std::size_t>(frame.gpr[2]);
+    auto found = dispatcher.files_.find(static_cast<std::int32_t>(frame.gpr[0]));
+    if (found == dispatcher.files_.end()) return OrbisEbadf;
+    auto* output = dispatcher.memory_ ? dispatcher.memory_->TranslateWritable(frame.gpr[1], size)
+                                      : nullptr;
+    if (size != 0 && !output) return OrbisEfault;
+    found->second.stream.read(static_cast<char*>(output), static_cast<std::streamsize>(size));
+    return static_cast<std::uint64_t>(found->second.stream.gcount());
+}
+
+std::uint64_t HleDispatcher::KernelWrite(HleDispatcher& dispatcher,
+                                         GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEbadf = 0x80020009ull;
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    const auto size = static_cast<std::size_t>(frame.gpr[2]);
+    auto found = dispatcher.files_.find(static_cast<std::int32_t>(frame.gpr[0]));
+    if (found == dispatcher.files_.end() || !found->second.writable) return OrbisEbadf;
+    auto* input = dispatcher.memory_ ? dispatcher.memory_->Translate(frame.gpr[1], size) : nullptr;
+    if (size != 0 && !input) return OrbisEfault;
+    found->second.stream.write(static_cast<char const*>(input),
+                               static_cast<std::streamsize>(size));
+    return found->second.stream ? frame.gpr[2] : OrbisEbadf;
+}
+
+std::uint64_t HleDispatcher::KernelLseek(HleDispatcher& dispatcher,
+                                         GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEbadf = 0x80020009ull;
+    constexpr std::uint64_t OrbisEinval = 0x80020016ull;
+    auto found = dispatcher.files_.find(static_cast<std::int32_t>(frame.gpr[0]));
+    if (found == dispatcher.files_.end()) return OrbisEbadf;
+    std::ios::seekdir direction;
+    if (frame.gpr[2] == 0) direction = std::ios::beg;
+    else if (frame.gpr[2] == 1) direction = std::ios::cur;
+    else if (frame.gpr[2] == 2) direction = std::ios::end;
+    else return OrbisEinval;
+    found->second.stream.clear();
+    found->second.stream.seekg(static_cast<std::int64_t>(frame.gpr[1]), direction);
+    const auto position = found->second.stream.tellg();
+    if (found->second.writable) {
+        found->second.stream.clear();
+        found->second.stream.seekp(static_cast<std::int64_t>(frame.gpr[1]), direction);
+    }
+    return position < 0 ? OrbisEinval : static_cast<std::uint64_t>(position);
+}
+
+std::uint64_t HleDispatcher::KernelFsync(HleDispatcher& dispatcher,
+                                         GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEbadf = 0x80020009ull;
+    auto found = dispatcher.files_.find(static_cast<std::int32_t>(frame.gpr[0]));
+    if (found == dispatcher.files_.end()) return OrbisEbadf;
+    found->second.stream.flush();
+    return found->second.stream ? 0 : OrbisEbadf;
 }
 
 } // namespace Lab

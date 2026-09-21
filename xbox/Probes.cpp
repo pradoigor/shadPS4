@@ -9,6 +9,7 @@
 #include <cstring>
 #include <filesystem>
 #include <string_view>
+#include <unordered_map>
 #include <windows.h>
 #include <winrt/Windows.Data.Json.h>
 #include <winrt/base.h>
@@ -26,6 +27,9 @@ void RunProbe(Test &test, std::wstring const &executablePath,
 
   auto result = LoadControlled(executablePath);
   HleDispatcher hleDispatcher;
+  const auto executable = std::filesystem::path(executablePath);
+  hleDispatcher.ConfigureFileSystem(executable.parent_path(),
+                                    executable.parent_path() / L"RuntimeData");
   const auto hleBindings = hleDispatcher.Bind(result.pending_symbol_names);
   result.hle_addresses_created = hleBindings.executable_addresses;
   result.hle_handlers_implemented = hleBindings.implemented_handlers;
@@ -193,6 +197,51 @@ void RunProbe(Test &test, std::wstring const &executablePath,
           setResult == 0 && getResult == 0 && restored == pattern;
     }
   }
+  std::unordered_map<std::string, std::string> fileSymbols;
+  for (auto const &mapping : result.hle_symbol_mappings) {
+    for (auto const &name : {"sceKernelOpen", "sceKernelClose", "sceKernelRead",
+                             "sceKernelWrite", "sceKernelLseek", "sceKernelFsync"}) {
+      const auto suffix = std::string("=") + name;
+      if (mapping.size() > suffix.size() &&
+          mapping.compare(mapping.size() - suffix.size(), suffix.size(), suffix) == 0)
+        fileSymbols[name] = mapping.substr(0, mapping.size() - suffix.size());
+    }
+  }
+  if (fileSymbols.size() == 6 && result.guest_memory_writable_bytes >= 128) {
+    std::uint64_t guestAddress = 0;
+    for (auto const &segment : result.guest_segments) {
+      if ((segment.flags & 0x2u) != 0 && segment.size >= 128) {
+        guestAddress = guestMemory.RuntimeAddress(segment.address);
+        break;
+      }
+    }
+    auto *memory = static_cast<std::uint8_t *>(
+        guestMemory.TranslateWritable(guestAddress, 128));
+    if (memory) {
+      constexpr char path[] = "/data/shadps4-fs-probe.bin";
+      constexpr std::uint64_t pattern = 0x1029384756AABBCCull;
+      std::memcpy(memory, path, sizeof(path));
+      std::memcpy(memory + 64, &pattern, sizeof(pattern));
+      std::memset(memory + 80, 0, sizeof(pattern));
+      auto thunk = [&](char const *name) {
+        return hleDispatcher.AddressFor(fileSymbols.at(name));
+      };
+      const auto descriptor = InvokeSysv3(
+          thunk("sceKernelOpen"), guestAddress, 0x2u | 0x200u | 0x400u, 0600);
+      const auto wrote = InvokeSysv3(thunk("sceKernelWrite"), descriptor,
+                                     guestAddress + 64, sizeof(pattern));
+      const auto synced = InvokeSysv2(thunk("sceKernelFsync"), descriptor, 0);
+      const auto sought = InvokeSysv3(thunk("sceKernelLseek"), descriptor, 0, 0);
+      const auto read = InvokeSysv3(thunk("sceKernelRead"), descriptor,
+                                    guestAddress + 80, sizeof(pattern));
+      const auto closed = InvokeSysv2(thunk("sceKernelClose"), descriptor, 0);
+      std::uint64_t restored{};
+      std::memcpy(&restored, memory + 80, sizeof(restored));
+      result.hle_filesystem_probe_passed =
+          descriptor < 0x80000000ull && wrote == sizeof(pattern) && synced == 0 &&
+          sought == 0 && read == sizeof(pattern) && closed == 0 && restored == pattern;
+    }
+  }
   auto gate = EvaluateRuntimeGate(result);
   result.runtime_preflight_ready = gate.ready;
   result.runtime_blockers = gate.blockers;
@@ -346,6 +395,9 @@ void RunProbe(Test &test, std::wstring const &executablePath,
   test.measurements.Insert(
       L"hle_regmgr_probe_passed",
       JsonValue::CreateBooleanValue(result.hle_regmgr_probe_passed));
+  test.measurements.Insert(
+      L"hle_filesystem_probe_passed",
+      JsonValue::CreateBooleanValue(result.hle_filesystem_probe_passed));
   test.measurements.Insert(L"hle_pointer_probe_return",
                            JsonValue::CreateNumberValue(static_cast<double>(
                                result.hle_pointer_probe_return)));
@@ -474,6 +526,8 @@ void RunProbe(Test &test, std::wstring const &executablePath,
       (result.hle_service_probe_passed ? L"aprovado" : L"pendente") +
       L", serviço RegMgr=" +
       (result.hle_regmgr_probe_passed ? L"aprovado" : L"pendente") +
+      L", sistema de arquivos HLE=" +
+      (result.hle_filesystem_probe_passed ? L"aprovado" : L"pendente") +
       L", TLS pending=" + std::to_wstring(result.tls_relocations_pending) +
       std::wstring(L". Gate de runtime=") +
       (result.runtime_preflight_ready ? L"pronto" : L"bloqueado") +

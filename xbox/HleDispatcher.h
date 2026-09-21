@@ -6,6 +6,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -44,6 +46,8 @@ public:
     HleBindingSummary Bind(std::vector<std::string> const& encodedSymbols);
     void* AddressFor(std::string_view encodedSymbol) const noexcept;
     void AttachGuestMemory(GuestMemory* memory) noexcept { memory_ = memory; }
+    void ConfigureFileSystem(std::filesystem::path appRoot,
+                             std::filesystem::path dataRoot);
 
     std::size_t implementedCount() const noexcept;
     std::size_t unresolvedCount() const noexcept;
@@ -98,11 +102,30 @@ private:
     static std::uint64_t RegMgrGetStr(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t RegMgrSetStr(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t RegMgrSetInt(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelOpen(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelClose(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelRead(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelWrite(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelLseek(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelFsync(HleDispatcher&, GuestCallFrame const&) noexcept;
+
+    bool ReadGuestString(std::uint64_t address, std::string& value,
+                         std::size_t limit = 1024) const noexcept;
+    bool ResolveGuestPath(std::string const& guestPath, bool write,
+                          std::filesystem::path& hostPath) const noexcept;
 
     SysvThunkArena thunks_;
     std::vector<Entry> entries_;
     GuestMemory* memory_{};
     std::unordered_map<std::uint32_t, std::vector<std::uint8_t>> registry_;
+    struct GuestFile {
+        std::fstream stream;
+        bool writable{};
+    };
+    std::filesystem::path appRoot_;
+    std::filesystem::path dataRoot_;
+    std::unordered_map<std::int32_t, GuestFile> files_;
+    std::int32_t nextFileDescriptor_{3};
 };
 
 } // namespace Lab
