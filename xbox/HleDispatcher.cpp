@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <string>
 #include <thread>
 
 namespace Lab {
@@ -41,6 +42,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sceNetCtlInit") handler = &NetCtlInit;
     if (name == "sceNetCtlTerm") handler = &NetCtlTerm;
     if (name == "sceSystemServiceHideSplashScreen") handler = &HideSplashScreen;
+    if (name == "sceKernelDebugOutText") handler = &KernelDebugOutText;
 
     const auto slot = static_cast<std::uint64_t>(entries_.size());
     entries_.push_back(Entry{encoded, nid, handler != &Unimplemented, handler, nullptr});
@@ -80,14 +82,14 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
     auto* self = static_cast<HleDispatcher*>(context);
     if (!self || !frame || slot >= self->entries_.size()) return OrbisEnosys;
     const auto& entry = self->entries_[static_cast<std::size_t>(slot)];
-    return entry.handler ? entry.handler(*frame) : OrbisEnosys;
+    return entry.handler ? entry.handler(*self, *frame) : OrbisEnosys;
 }
 
-std::uint64_t HleDispatcher::Unimplemented(GuestCallFrame const&) noexcept {
+std::uint64_t HleDispatcher::Unimplemented(HleDispatcher&, GuestCallFrame const&) noexcept {
     return OrbisEnosys;
 }
 
-std::uint64_t HleDispatcher::KernelUsleep(GuestCallFrame const& frame) noexcept {
+std::uint64_t HleDispatcher::KernelUsleep(HleDispatcher&, GuestCallFrame const& frame) noexcept {
     // The PS4 argument is microseconds in RDI. Cap the host sleep so a guest
     // cannot make the UWP process unresponsive through one import call.
     const auto microseconds = (std::min<std::uint64_t>)(frame.gpr[0], 2'000'000ull);
@@ -95,55 +97,72 @@ std::uint64_t HleDispatcher::KernelUsleep(GuestCallFrame const& frame) noexcept 
     return 0;
 }
 
-std::uint64_t HleDispatcher::KernelGetUpdVersion(GuestCallFrame const&) noexcept {
+std::uint64_t HleDispatcher::KernelGetUpdVersion(HleDispatcher&, GuestCallFrame const&) noexcept {
     return 0;
 }
 
-std::uint64_t HleDispatcher::KernelGetLowerLimitUpdVersion(GuestCallFrame const&) noexcept {
+std::uint64_t HleDispatcher::KernelGetLowerLimitUpdVersion(HleDispatcher&, GuestCallFrame const&) noexcept {
     return 0;
 }
 
-std::uint64_t HleDispatcher::KernelGetPid(GuestCallFrame const&) noexcept {
+std::uint64_t HleDispatcher::KernelGetPid(HleDispatcher&, GuestCallFrame const&) noexcept {
     return 1;
 }
 
-std::uint64_t HleDispatcher::KernelGetEuid(GuestCallFrame const&) noexcept {
+std::uint64_t HleDispatcher::KernelGetEuid(HleDispatcher&, GuestCallFrame const&) noexcept {
     return 0;
 }
 
-std::uint64_t HleDispatcher::KernelSchedYield(GuestCallFrame const&) noexcept {
+std::uint64_t HleDispatcher::KernelSchedYield(HleDispatcher&, GuestCallFrame const&) noexcept {
     SwitchToThread();
     return 0;
 }
 
-std::uint64_t HleDispatcher::KernelThreadSelf(GuestCallFrame const&) noexcept {
+std::uint64_t HleDispatcher::KernelThreadSelf(HleDispatcher&, GuestCallFrame const&) noexcept {
     return static_cast<std::uint64_t>(GetCurrentThreadId());
 }
 
-std::uint64_t HleDispatcher::EglGetError(GuestCallFrame const&) noexcept {
+std::uint64_t HleDispatcher::EglGetError(HleDispatcher&, GuestCallFrame const&) noexcept {
     constexpr std::uint64_t EglSuccess = 0x3000;
     return EglSuccess;
 }
 
-std::uint64_t HleDispatcher::EglQueryApi(GuestCallFrame const&) noexcept {
+std::uint64_t HleDispatcher::EglQueryApi(HleDispatcher&, GuestCallFrame const&) noexcept {
     constexpr std::uint64_t EglOpenGlEsApi = 0x30A0;
     return EglOpenGlEsApi;
 }
 
-std::uint64_t HleDispatcher::GlGetError(GuestCallFrame const&) noexcept {
+std::uint64_t HleDispatcher::GlGetError(HleDispatcher&, GuestCallFrame const&) noexcept {
     return 0;
 }
 
-std::uint64_t HleDispatcher::NetCtlInit(GuestCallFrame const&) noexcept {
+std::uint64_t HleDispatcher::NetCtlInit(HleDispatcher&, GuestCallFrame const&) noexcept {
     return 0;
 }
 
-std::uint64_t HleDispatcher::NetCtlTerm(GuestCallFrame const&) noexcept {
+std::uint64_t HleDispatcher::NetCtlTerm(HleDispatcher&, GuestCallFrame const&) noexcept {
     return 0;
 }
 
-std::uint64_t HleDispatcher::HideSplashScreen(GuestCallFrame const&) noexcept {
+std::uint64_t HleDispatcher::HideSplashScreen(HleDispatcher&, GuestCallFrame const&) noexcept {
     return 0;
+}
+
+std::uint64_t HleDispatcher::KernelDebugOutText(HleDispatcher& dispatcher,
+                                                GuestCallFrame const& frame) noexcept {
+    constexpr std::size_t MaxText = 4096;
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    if (!dispatcher.memory_) return OrbisEfault;
+    std::string text;
+    text.reserve(MaxText);
+    for (std::size_t index = 0; index < MaxText; ++index) {
+        auto* byte = static_cast<char*>(dispatcher.memory_->Translate(frame.gpr[0] + index, 1));
+        if (!byte) return OrbisEfault;
+        if (*byte == '\0') break;
+        text.push_back(*byte);
+    }
+    OutputDebugStringA(text.c_str());
+    return static_cast<std::uint64_t>(text.size());
 }
 
 } // namespace Lab

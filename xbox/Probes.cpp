@@ -50,6 +50,7 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
         result.guest_memory_bytes = guestMemory.size();
         result.guest_memory_host_address = guestMemory.hostAddress();
     }
+    hleDispatcher.AttachGuestMemory(&guestMemory);
     auto gate = EvaluateRuntimeGate(result);
     result.runtime_preflight_ready = gate.ready;
     result.runtime_blockers = gate.blockers;

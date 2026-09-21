@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
 
+#include "GuestMemory.h"
 #include "SysvThunk.h"
 
 #include <cstddef>
@@ -25,6 +26,9 @@ struct HleBindingSummary {
     std::size_t unimplemented_handlers{};
 };
 
+class HleDispatcher;
+using HleHandler = std::uint64_t (*)(HleDispatcher&, GuestCallFrame const&) noexcept;
+
 class HleDispatcher {
 public:
     HleDispatcher() = default;
@@ -38,6 +42,7 @@ public:
     HleResolution Resolve(std::string_view encodedSymbol);
     HleBindingSummary Bind(std::vector<std::string> const& encodedSymbols);
     void* AddressFor(std::string_view encodedSymbol) const noexcept;
+    void AttachGuestMemory(GuestMemory* memory) noexcept { memory_ = memory; }
 
     std::size_t implementedCount() const noexcept;
     std::size_t unresolvedCount() const noexcept;
@@ -47,29 +52,31 @@ private:
         std::string encoded;
         std::string nid;
         bool implemented{};
-        std::uint64_t (*handler)(GuestCallFrame const&){};
+        HleHandler handler{};
         void* address{};
     };
 
     static std::uint64_t Dispatch(void* context, std::uint64_t slot,
                                   GuestCallFrame const* frame, void* guestStack) noexcept;
-    static std::uint64_t Unimplemented(GuestCallFrame const&) noexcept;
-    static std::uint64_t KernelUsleep(GuestCallFrame const&) noexcept;
-    static std::uint64_t KernelGetUpdVersion(GuestCallFrame const&) noexcept;
-    static std::uint64_t KernelGetLowerLimitUpdVersion(GuestCallFrame const&) noexcept;
-    static std::uint64_t KernelGetPid(GuestCallFrame const&) noexcept;
-    static std::uint64_t KernelGetEuid(GuestCallFrame const&) noexcept;
-    static std::uint64_t KernelSchedYield(GuestCallFrame const&) noexcept;
-    static std::uint64_t KernelThreadSelf(GuestCallFrame const&) noexcept;
-    static std::uint64_t EglGetError(GuestCallFrame const&) noexcept;
-    static std::uint64_t EglQueryApi(GuestCallFrame const&) noexcept;
-    static std::uint64_t GlGetError(GuestCallFrame const&) noexcept;
-    static std::uint64_t NetCtlInit(GuestCallFrame const&) noexcept;
-    static std::uint64_t NetCtlTerm(GuestCallFrame const&) noexcept;
-    static std::uint64_t HideSplashScreen(GuestCallFrame const&) noexcept;
+    static std::uint64_t Unimplemented(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelUsleep(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelGetUpdVersion(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelGetLowerLimitUpdVersion(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelGetPid(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelGetEuid(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelSchedYield(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelThreadSelf(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t EglGetError(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t EglQueryApi(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t GlGetError(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t NetCtlInit(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t NetCtlTerm(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t HideSplashScreen(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelDebugOutText(HleDispatcher&, GuestCallFrame const&) noexcept;
 
     SysvThunkArena thunks_;
     std::vector<Entry> entries_;
+    GuestMemory* memory_{};
 };
 
 } // namespace Lab
