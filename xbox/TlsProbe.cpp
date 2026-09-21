@@ -8,7 +8,11 @@
 #include <fileapifromapp.h>
 #include <winrt/base.h>
 
-#include "common/arch.h"
+#include "common/types.h"
+#ifdef _MSC_VER
+#undef PS4_SYSV_ABI
+#define PS4_SYSV_ABI
+#endif
 #include "core/tls.h"
 
 namespace Lab {
