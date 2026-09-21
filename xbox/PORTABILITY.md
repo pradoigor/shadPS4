@@ -24,6 +24,11 @@ que o carregador tenha uma ponte ABI SysV compatível, endereços HLE reais e um
 renderer UWP para Piglet. O aplicativo deve manter essa barreira e nunca saltar
 para o `e_entry` enquanto algum desses requisitos faltar.
 
+A build seguinte contém um alocador de thunks SysV→Windows que preserva os
+registradores inteiros, a pilha convidada e os registradores XMM antes de chamar
+um dispatcher Windows. Ele ainda não recebe imports nem possui dispatcher HLE;
+portanto é infraestrutura compilada, não uma autorização de execução.
+
 ## Carregamento controlado
 
 O aplicativo lê o cabeçalho original `core/loader/elf.h`, verifica a identidade
