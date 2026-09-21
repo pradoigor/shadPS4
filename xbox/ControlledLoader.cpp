@@ -160,6 +160,8 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
         std::uint64_t symbol_table_size{};
         std::uint64_t symbol_entry_size{sizeof(elf_symbol)};
     } dynamicTables;
+    std::vector<std::uint64_t> importDescriptors;
+    std::vector<std::uint64_t> moduleDescriptors;
     const elf_program_header* dynlibData = nullptr;
     for (auto const& program : programs)
         if (program.p_type == PT_SCE_DYNLIBDATA) dynlibData = &program;
@@ -219,12 +221,15 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
             case DT_SCE_IMPORT_LIB:
                 ++result.import_libraries;
                 result.import_library_ids.push_back(EncodeId((entry.d_un.d_val >> 48u) & 0xffffu));
+                importDescriptors.push_back(entry.d_un.d_val);
                 break;
             case DT_SCE_NEEDED_MODULE:
             case DT_NEEDED:
                 ++result.needed_modules;
                 if (entry.d_tag == DT_SCE_NEEDED_MODULE)
                     result.needed_module_ids.push_back(EncodeId((entry.d_un.d_val >> 48u) & 0xffffu));
+                if (entry.d_tag == DT_SCE_NEEDED_MODULE)
+                    moduleDescriptors.push_back(entry.d_un.d_val);
                 break;
             default:
                 break;
@@ -259,6 +264,36 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
     Require(result.max_virtual_address >= result.min_virtual_address &&
                 result.max_virtual_address - result.min_virtual_address <= MaxMappedBytes,
             "Mapa de segmentos ELF excede o limite seguro.");
+
+    auto readDynlibString = [&](std::uint32_t offset) {
+        if (!dynlibData || offset >= dynamicTables.string_table_size ||
+            offset >= dynlibData->p_filesz ||
+            dynamicTables.string_table_offset > dynlibData->p_filesz - offset)
+            return std::string{};
+        const auto available = (std::min<std::uint64_t>)(dynamicTables.string_table_size - offset,
+                                                         dynlibData->p_filesz - dynamicTables.string_table_offset - offset);
+        const auto probeSize = (std::min<std::uint64_t>)(available, 4096);
+        std::vector<char> bytes(static_cast<std::size_t>(probeSize));
+        const auto fileOffset = AddChecked(
+            dynlibData->p_offset,
+            AddChecked(dynamicTables.string_table_offset + offset,
+                       "Tabela de strings excede os dados ELF."),
+            "Tabela de strings excede o arquivo ELF.");
+        logicalRead(fileOffset, bytes.data(), bytes.size());
+        const auto terminator = std::find(bytes.begin(), bytes.end(), '\0');
+        return std::string(bytes.begin(), terminator == bytes.end() ? bytes.end() : terminator);
+    };
+    for (auto descriptor : importDescriptors) {
+        const auto name = readDynlibString(static_cast<std::uint32_t>(descriptor & 0xffffffffu));
+        result.import_library_names.push_back(EncodeId((descriptor >> 48u) & 0xffffu) + "=" + name +
+                                              "@" + std::to_string((descriptor >> 32u) & 0xffffu));
+    }
+    for (auto descriptor : moduleDescriptors) {
+        const auto name = readDynlibString(static_cast<std::uint32_t>(descriptor & 0xffffffffu));
+        result.needed_module_names.push_back(EncodeId((descriptor >> 48u) & 0xffffu) + "=" + name +
+                                             "@" + std::to_string((descriptor >> 40u) & 0xffu) +
+                                             "." + std::to_string((descriptor >> 32u) & 0xffu));
+    }
 
     auto targetIsMapped = [&](std::uint64_t address) {
         for (auto const& program : programs) {
@@ -512,6 +547,8 @@ ControlledLoadResult LoadSelf(Reader& reader, self_header const& header) {
     result.pending_symbol_names = std::move(inner.pending_symbol_names);
     result.import_library_ids = std::move(inner.import_library_ids);
     result.needed_module_ids = std::move(inner.needed_module_ids);
+    result.import_library_names = std::move(inner.import_library_names);
+    result.needed_module_names = std::move(inner.needed_module_names);
     result.has_dynamic = inner.has_dynamic;
     result.has_tls = inner.has_tls;
     result.has_relocations = inner.has_relocations;

@@ -1,4 +1,4 @@
-# Extração e execução controlada UWP 0.12.0
+# Extração e execução controlada UWP 0.13.0
 
 O aplicativo executa extração, inspeciona metadados e oferece carregamento controlado. A biblioteca
 abre ao iniciar, usa uma faixa horizontal navegável pelo controle e distingue
@@ -33,7 +33,8 @@ inspirados no PS4, sem recursos gráficos da Sony.
    são exercitadas em uma cópia privada não executável para medir o próximo bloqueio.
    Os símbolos usados por relocação também são conferidos nas tabelas de strings e símbolos,
    e seus nomes únicos e IDs de bibliotecas/módulos são exportados para preparar
-   o mapeamento HLE.
+   o mapeamento HLE. Nomes de bibliotecas, módulos e versões vêm da tabela de
+   strings e não são inferidos pelo aplicativo.
    Baixe `LocalState/report.json`
    ou use **Diagnóstico → Exportar JSON**.
 

@@ -48,6 +48,8 @@ struct ControlledLoadResult {
     std::vector<std::string> pending_symbol_names;
     std::vector<std::string> import_library_ids;
     std::vector<std::string> needed_module_ids;
+    std::vector<std::string> import_library_names;
+    std::vector<std::string> needed_module_names;
     bool has_dynamic{};
     bool has_tls{};
     bool has_relocations{};

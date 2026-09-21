@@ -60,10 +60,18 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
     for (auto const& id : result.import_library_ids)
         libraryIds.Append(JsonValue::CreateStringValue(winrt::to_hstring(id)));
     test.measurements.Insert(L"import_library_ids", libraryIds);
+    winrt::Windows::Data::Json::JsonArray libraryNames;
+    for (auto const& name : result.import_library_names)
+        libraryNames.Append(JsonValue::CreateStringValue(winrt::to_hstring(name)));
+    test.measurements.Insert(L"import_library_names", libraryNames);
     winrt::Windows::Data::Json::JsonArray moduleIds;
     for (auto const& id : result.needed_module_ids)
         moduleIds.Append(JsonValue::CreateStringValue(winrt::to_hstring(id)));
     test.measurements.Insert(L"needed_module_ids", moduleIds);
+    winrt::Windows::Data::Json::JsonArray moduleNames;
+    for (auto const& name : result.needed_module_names)
+        moduleNames.Append(JsonValue::CreateStringValue(winrt::to_hstring(name)));
+    test.measurements.Insert(L"needed_module_names", moduleNames);
     test.measurements.Insert(L"relocation_dry_run_checksum", JsonValue::CreateNumberValue(static_cast<double>(result.relocation_dry_run_checksum)));
     test.measurements.Insert(L"has_dynamic", JsonValue::CreateBooleanValue(result.has_dynamic));
     test.measurements.Insert(L"has_tls", JsonValue::CreateBooleanValue(result.has_tls));
