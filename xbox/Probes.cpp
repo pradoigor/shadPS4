@@ -51,6 +51,21 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
         result.guest_memory_bytes = guestMemory.size();
         result.guest_memory_host_address = guestMemory.hostAddress();
         result.guest_memory_writable_bytes = guestMemory.writableBytes();
+        std::uint64_t anonymousAddress = 0;
+        if (guestMemory.MapAnonymous(0x4000, 0x3, 0, false, anonymousAddress)) {
+            result.guest_memory_anonymous_probe_address = anonymousAddress;
+            auto* writable = static_cast<std::uint8_t*>(
+                guestMemory.TranslateWritable(anonymousAddress, 16));
+            if (writable) std::memset(writable, 0xA5, 16);
+            const auto protectedReadOnly = guestMemory.ProtectNoExecute(
+                anonymousAddress, 0x4000, 0x1);
+            auto* readable = guestMemory.Translate(anonymousAddress, 16);
+            const auto writeDenied = guestMemory.TranslateWritable(anonymousAddress, 16) == nullptr;
+            const auto unmapped = guestMemory.Unmap(anonymousAddress, 0x4000);
+            const auto noLongerMapped = guestMemory.Translate(anonymousAddress, 1) == nullptr;
+            result.guest_memory_anonymous_probe_passed = writable && protectedReadOnly &&
+                readable && writeDenied && unmapped && noLongerMapped;
+        }
     }
     hleDispatcher.AttachGuestMemory(&guestMemory);
     std::string clockSymbol;
@@ -137,6 +152,8 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
     test.measurements.Insert(L"guest_memory_bytes", JsonValue::CreateNumberValue(static_cast<double>(result.guest_memory_bytes)));
     test.measurements.Insert(L"guest_memory_writable_bytes", JsonValue::CreateNumberValue(static_cast<double>(result.guest_memory_writable_bytes)));
     test.measurements.Insert(L"guest_memory_host_address", JsonValue::CreateNumberValue(static_cast<double>(result.guest_memory_host_address)));
+    test.measurements.Insert(L"guest_memory_anonymous_probe_passed", JsonValue::CreateBooleanValue(result.guest_memory_anonymous_probe_passed));
+    test.measurements.Insert(L"guest_memory_anonymous_probe_address", JsonValue::CreateNumberValue(static_cast<double>(result.guest_memory_anonymous_probe_address)));
     test.measurements.Insert(L"hle_pointer_probe_passed", JsonValue::CreateBooleanValue(result.hle_pointer_probe_passed));
     test.measurements.Insert(L"hle_pointer_probe_return", JsonValue::CreateNumberValue(static_cast<double>(result.hle_pointer_probe_return)));
     test.measurements.Insert(L"hle_pointer_probe_guest_address", JsonValue::CreateNumberValue(static_cast<double>(result.hle_pointer_probe_guest_address)));
@@ -209,6 +226,7 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
                   L", relocations HLE sem resolução=" + std::to_wstring(result.hle_relocations_unresolved) +
                   L", memória convidada mapeada com proteção=" + (result.guest_memory_mapped ? L"sim" : L"não") +
                   L", bytes PF_W graváveis=" + std::to_wstring(result.guest_memory_writable_bytes) +
+                  L", probe mmap/mprotect/munmap=" + (result.guest_memory_anonymous_probe_passed ? L"aprovado" : L"pendente") +
                   L", smoke test de ponteiro clock_gettime=" + (result.hle_pointer_probe_passed ? L"aprovado" : L"pendente") +
                   L", TLS pending=" + std::to_wstring(result.tls_relocations_pending) +
                   std::wstring(L". Gate de runtime=") +

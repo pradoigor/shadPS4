@@ -69,6 +69,8 @@ struct ControlledLoadResult {
     std::uint64_t guest_memory_writable_bytes{};
     std::uint64_t guest_memory_host_address{};
     bool guest_memory_mapped{};
+    bool guest_memory_anonymous_probe_passed{};
+    std::uint64_t guest_memory_anonymous_probe_address{};
     bool hle_pointer_probe_passed{};
     std::uint64_t hle_pointer_probe_return{};
     std::uint64_t hle_pointer_probe_guest_address{};

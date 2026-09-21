@@ -4,7 +4,7 @@ Aplicativo **UWP x64 / C++/WinRT / XAML** para medir a viabilidade de portar
 shadPS4 ao Xbox Series X em Dev Mode. **Ainda não é um emulador PS4 no Xbox.**
 O alvo é independente do CMake e das dependências desktop do núcleo.
 
-A versão **0.30.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
+A versão **0.31.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
 PKG/ELF, keysets FPKG embutidos, importação de chaves personalizadas, extração em
 segundo plano e um probe de execução controlada com auditoria de requisitos runtime,
 relocação e inventário de NIDs HLE. O ELF/SELF selecionado é apenas
@@ -52,6 +52,9 @@ O mapa de memória agora possui alocações anônimas isoladas para `mmap`/`munm
 com endereços convidados sintéticos, proteção sem execução e liberação explícita.
 O caminho `sceKernelMmap` valida o ponteiro de saída na pilha convidada antes de
 publicar o endereço alocado.
+O diagnóstico inclui um probe isolado de `mmap`/`mprotect`/`munmap` que grava,
+protege, lê e libera uma página anônima antes de qualquer resultado ser marcado
+como evidência da camada UWP.
 O probe interno também chama o thunk sem argumentos e exige retorno `0`, sem
 envolver o ELF selecionado.
 

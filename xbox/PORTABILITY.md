@@ -24,7 +24,7 @@ que o carregador tenha uma ponte ABI SysV compatível, endereços HLE reais e um
 renderer UWP para Piglet. O aplicativo deve manter essa barreira e nunca saltar
 para o `e_entry` enquanto algum desses requisitos faltar.
 
-A build `0.30.0.0` contém um alocador de thunks SysV→Windows que preserva os
+A build `0.31.0.0` contém um alocador de thunks SysV→Windows que preserva os
 registradores inteiros, a pilha convidada e os registradores XMM antes de chamar
 um dispatcher Windows. O dispatcher possui somente dois handlers iniciais
 (`sceKernelUsleep` e `sysKernelGetUpdVersion`); todos os outros imports retornam
@@ -53,6 +53,10 @@ homebrew sem alterar APIs públicas do núcleo desktop.
 isolada: o host aloca páginas UWP, enquanto o dispatcher retorna um endereço
 convidado controlado. O suporte é limitado a mapas anônimos sem execução e não
 é uma implementação do espaço de endereços completo do PS4.
+O probe do diagnóstico exerce diretamente uma página anônima: grava enquanto
+`PAGE_READWRITE`, muda para somente leitura sem execução, confirma a leitura,
+confirma que novas escritas são recusadas e libera o mapa. Essa verificação é
+necessária no Xbox para validar as APIs UWP; ela não executa o ELF selecionado.
 O probe interno agora exerce um thunk sem argumentos para
 `sysKernelGetUpdVersion` e exige retorno zero. Essa chamada usa somente um
 handler do próprio aplicativo; ela não usa memória ELF nem executa o Apollo.
