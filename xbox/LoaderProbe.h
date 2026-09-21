@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 namespace Lab {
 
@@ -17,5 +18,14 @@ struct LoaderProbeResult {
 };
 
 LoaderProbeResult ProbeUpstreamLoaderStructures();
+
+struct LoaderFileProbeResult {
+    bool passed{};
+    std::uint32_t file_size{};
+    std::uint32_t segment_id{};
+    std::uint64_t elf_entry{};
+};
+
+LoaderFileProbeResult ProbeSelfElfFileAdapter(const std::wstring& directory);
 
 } // namespace Lab

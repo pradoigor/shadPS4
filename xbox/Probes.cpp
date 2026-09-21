@@ -118,6 +118,13 @@ void RunProbe(Test& t, std::wstring const& directory) {
         Number(t, L"segment_id", result.segment_id);
         if (!result.passed) throw hresult_error(E_FAIL, L"Estruturas ELF/SELF divergiram no alvo UWP.");
         t.detail = L"Cabeçalho original elf.h compilou no APPX; assinaturas ELF/SELF, tamanhos e flags de segmento foram validados. Não carrega ELF/SELF nem descriptografa SELF.";
+    } else if (t.id == L"loader_file_adapter") {
+        auto result = ProbeSelfElfFileAdapter(directory);
+        Number(t, L"file_size", result.file_size);
+        Number(t, L"segment_id", result.segment_id);
+        Number(t, L"elf_entry", static_cast<double>(result.elf_entry));
+        if (!result.passed) throw hresult_error(E_FAIL, L"Contêiner SELF/ELF não foi relido ou validado no alvo UWP.");
+        t.detail = L"Cabeçalhos SELF e ELF sintéticos foram gravados, sincronizados, relidos e interpretados com as estruturas originais no LocalState UWP. Não descriptografa SELF nem executa segmentos.";
     } else if (t.id == L"budget") {
         Number(t, L"app_memory_usage_bytes", static_cast<double>(Windows::System::MemoryManager::AppMemoryUsage()));
         Number(t, L"app_memory_limit_bytes", static_cast<double>(Windows::System::MemoryManager::AppMemoryUsageLimit()));
