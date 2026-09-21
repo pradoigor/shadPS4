@@ -44,7 +44,7 @@ nunca remove aplicativos automaticamente.
 
 ## Testar
 
-- **Biblioteca:** seleciona extensões `.elf`, `.self`, `.bin` ou `.pkg` e copia o arquivo para `LocalState/Library`. Para PKG, a interface reconhece o magic PS4 `0x7F434E54` e o tamanho; não instala, descriptografa ou executa o conteúdo.
+- **Biblioteca:** seleciona extensões `.elf`, `.self`, `.bin` ou `.pkg` e copia o arquivo para `LocalState/Library`. Para PKG, a interface valida o magic, lê o cabeçalho e a tabela de entradas, mostra Content ID/Title ID, regiões declaradas e a presença de `param.sfo`; não instala, descriptografa ou executa o conteúdo.
 
 - **Executar testes automáticos:** armazenamento, orçamento, D3D11 com readback,
   dispositivo D3D12 e mapeamento RW pequeno. Sem resultados sintéticos.
