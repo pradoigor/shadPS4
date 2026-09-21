@@ -220,8 +220,9 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
             "Mapa de segmentos ELF excede o limite seguro.");
 
     auto targetIsMapped = [&](std::uint64_t address) {
-        for (auto const& load : loads) {
-            auto const& segment = load.header;
+        for (auto const& program : programs) {
+            if (program.p_type != PT_LOAD && program.p_type != PT_SCE_RELRO) continue;
+            auto const& segment = program;
             auto end = AddChecked(segment.p_vaddr, segment.p_memsz,
                                   "Limite de segmento ELF excede o limite.");
             if (address >= segment.p_vaddr && address < end) return true;
@@ -240,7 +241,7 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
         std::vector<elf_relocation> relocations(static_cast<std::size_t>(size / sizeof(elf_relocation)));
         logicalRead(fileOffset, relocations.data(), static_cast<std::size_t>(size));
         for (auto const& relocation : relocations) {
-            if (!targetIsMapped(relocation.rel_offset)) ++result.relocation_targets_outside_loads;
+            if (!targetIsMapped(relocation.rel_offset)) ++result.relocation_targets_outside_segments;
             switch (relocation.GetType()) {
             case R_X86_64_64:
             case R_X86_64_GLOB_DAT:
@@ -381,7 +382,7 @@ ControlledLoadResult LoadSelf(Reader& reader, self_header const& header) {
     result.needed_modules = inner.needed_modules;
     result.supported_relocations = inner.supported_relocations;
     result.unsupported_relocations = inner.unsupported_relocations;
-    result.relocation_targets_outside_loads = inner.relocation_targets_outside_loads;
+    result.relocation_targets_outside_segments = inner.relocation_targets_outside_segments;
     result.has_dynamic = inner.has_dynamic;
     result.has_tls = inner.has_tls;
     result.has_relocations = inner.has_relocations;

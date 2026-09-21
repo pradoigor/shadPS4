@@ -46,7 +46,7 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
     test.measurements.Insert(L"needed_modules", JsonValue::CreateNumberValue(static_cast<double>(result.needed_modules)));
     test.measurements.Insert(L"supported_relocations", JsonValue::CreateNumberValue(static_cast<double>(result.supported_relocations)));
     test.measurements.Insert(L"unsupported_relocations", JsonValue::CreateNumberValue(static_cast<double>(result.unsupported_relocations)));
-    test.measurements.Insert(L"relocation_targets_outside_loads", JsonValue::CreateNumberValue(static_cast<double>(result.relocation_targets_outside_loads)));
+    test.measurements.Insert(L"relocation_targets_outside_segments", JsonValue::CreateNumberValue(static_cast<double>(result.relocation_targets_outside_segments)));
     test.measurements.Insert(L"has_dynamic", JsonValue::CreateBooleanValue(result.has_dynamic));
     test.measurements.Insert(L"has_tls", JsonValue::CreateBooleanValue(result.has_tls));
     test.measurements.Insert(L"has_relocations", JsonValue::CreateBooleanValue(result.has_relocations));
@@ -63,7 +63,7 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
                   L", TLS=" + std::to_wstring(result.tls_segments) +
                   L", relocation types supported=" + std::to_wstring(result.supported_relocations) +
                   L", unsupported=" + std::to_wstring(result.unsupported_relocations) +
-                  L", targets outside loads=" + std::to_wstring(result.relocation_targets_outside_loads) +
+                  L", targets outside mapped segments=" + std::to_wstring(result.relocation_targets_outside_segments) +
                   L". Aplicar relocação e resolver imports/TLS ainda é necessário antes de executar o homebrew.\n" +
                   execution.detail + L"\nArquivo: " + executablePath;
 }

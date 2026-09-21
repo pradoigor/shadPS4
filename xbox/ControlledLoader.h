@@ -37,7 +37,7 @@ struct ControlledLoadResult {
     std::uint64_t needed_modules{};
     std::uint64_t supported_relocations{};
     std::uint64_t unsupported_relocations{};
-    std::uint64_t relocation_targets_outside_loads{};
+    std::uint64_t relocation_targets_outside_segments{};
     bool has_dynamic{};
     bool has_tls{};
     bool has_relocations{};
