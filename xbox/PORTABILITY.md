@@ -24,12 +24,14 @@ que o carregador tenha uma ponte ABI SysV compatível, endereços HLE reais e um
 renderer UWP para Piglet. O aplicativo deve manter essa barreira e nunca saltar
 para o `e_entry` enquanto algum desses requisitos faltar.
 
-A build `0.31.0.0` contém um alocador de thunks SysV→Windows que preserva os
-registradores inteiros, a pilha convidada e os registradores XMM antes de chamar
-um dispatcher Windows. O dispatcher possui somente dois handlers iniciais
-(`sceKernelUsleep` e `sysKernelGetUpdVersion`); todos os outros imports retornam
-`ENOSYS`. Além dos dois handlers iniciais, há handlers sem acesso à memória para
-versão/identidade do processo, yield, estado EGL/GL, rede básica e tela inicial.
+A build `0.32.0.0` corrige o alocador de thunks SysV→Windows para preservar os
+seis registradores inteiros, a pilha convidada e os registradores XMM em uma área
+separada do shadow space exigido pelo ABI Windows. Um chamador de máquina gerado
+pelo projeto injeta padrões distintos em registradores e argumentos de pilha e
+impede o avanço se a captura divergir. Handlers que apenas retornam constantes,
+como EGL/GL, rede, versão e identidade, permanecem classificados como stubs; eles
+não contam mais como suporte implementado. Imports ausentes retornam o valor
+Orbis correto de `ENOSYS` (`0x8002004E`).
 O probe agora cria e conta thunks para todos os imports do ELF e aplica
 os endereços em uma cópia privada não executável e mapeia essa cópia como somente
 leitura com proteção por segmento para validar a faixa de memória. Segmentos

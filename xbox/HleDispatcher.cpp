@@ -14,7 +14,7 @@
 namespace Lab {
 namespace {
 
-constexpr std::uint64_t OrbisEnosys = 0x80020016ull;
+constexpr std::uint64_t OrbisEnosys = 0x8002004Eull;
 
 std::string BaseNid(std::string_view encoded) {
     const auto separator = encoded.find('#');
@@ -30,12 +30,14 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     const auto name = known ? std::string(known->name) : std::string{};
 
     auto handler = &Unimplemented;
-    if (name == "sceKernelUsleep") handler = &KernelUsleep;
+    bool implemented = false;
+    auto use = [&](HleHandler value) { handler = value; implemented = true; };
+    if (name == "sceKernelUsleep") use(&KernelUsleep);
     if (name == "sysKernelGetUpdVersion") handler = &KernelGetUpdVersion;
     if (name == "sysKernelGetLowerLimitUpdVersion") handler = &KernelGetLowerLimitUpdVersion;
     if (name == "getpid") handler = &KernelGetPid;
     if (name == "geteuid") handler = &KernelGetEuid;
-    if (name == "sched_yield") handler = &KernelSchedYield;
+    if (name == "sched_yield") use(&KernelSchedYield);
     if (name == "pthread_self") handler = &KernelThreadSelf;
     if (name == "eglGetError") handler = &EglGetError;
     if (name == "eglQueryAPI") handler = &EglQueryApi;
@@ -43,21 +45,21 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sceNetCtlInit") handler = &NetCtlInit;
     if (name == "sceNetCtlTerm") handler = &NetCtlTerm;
     if (name == "sceSystemServiceHideSplashScreen") handler = &HideSplashScreen;
-    if (name == "sceKernelDebugOutText") handler = &KernelDebugOutText;
-    if (name == "sceKernelMprotect") handler = &KernelMprotect;
-    if (name == "memcpy") handler = &MemoryMemcpy;
-    if (name == "memmove") handler = &MemoryMemmove;
-    if (name == "memset") handler = &MemoryMemset;
-    if (name == "memcmp") handler = &MemoryMemcmp;
-    if (name == "strlen") handler = &MemoryStrlen;
-    if (name == "mmap" || name == "mmap_np" || name == "__wrap_mmap") handler = &MemoryMmap;
-    if (name == "sceKernelMmap") handler = &KernelMmap;
-    if (name == "munmap") handler = &MemoryMunmap;
-    if (name == "sceKernelMunmap") handler = &KernelMunmap;
-    if (name == "clock_gettime") handler = &ClockGetTime;
+    if (name == "sceKernelDebugOutText") use(&KernelDebugOutText);
+    if (name == "sceKernelMprotect") use(&KernelMprotect);
+    if (name == "memcpy") use(&MemoryMemcpy);
+    if (name == "memmove") use(&MemoryMemmove);
+    if (name == "memset") use(&MemoryMemset);
+    if (name == "memcmp") use(&MemoryMemcmp);
+    if (name == "strlen") use(&MemoryStrlen);
+    if (name == "mmap" || name == "mmap_np" || name == "__wrap_mmap") use(&MemoryMmap);
+    if (name == "sceKernelMmap") use(&KernelMmap);
+    if (name == "munmap") use(&MemoryMunmap);
+    if (name == "sceKernelMunmap") use(&KernelMunmap);
+    if (name == "clock_gettime") use(&ClockGetTime);
 
     const auto slot = static_cast<std::uint64_t>(entries_.size());
-    entries_.push_back(Entry{encoded, nid, handler != &Unimplemented, handler, nullptr});
+    entries_.push_back(Entry{encoded, nid, implemented, handler, nullptr});
     entries_.back().address = thunks_.Create(this, slot, &Dispatch);
     return HleResolution{encoded, nid, entries_.back().implemented, entries_.back().address};
 }
@@ -90,9 +92,11 @@ std::size_t HleDispatcher::unresolvedCount() const noexcept {
 }
 
 std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
-                                       GuestCallFrame const* frame, void*) noexcept {
+                                       GuestCallFrame const* frame, void* guestStack) noexcept {
     auto* self = static_cast<HleDispatcher*>(context);
-    if (!self || !frame || slot >= self->entries_.size()) return OrbisEnosys;
+    if (!self || !frame || slot >= self->entries_.size() ||
+        frame->guest_stack != reinterpret_cast<std::uint64_t>(guestStack))
+        return OrbisEnosys;
     const auto& entry = self->entries_[static_cast<std::size_t>(slot)];
     return entry.handler ? entry.handler(*self, *frame) : OrbisEnosys;
 }

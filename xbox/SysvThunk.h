@@ -15,6 +15,11 @@ struct GuestCallFrame {
 using SysvDispatch = std::uint64_t (*)(void* context, std::uint64_t slot,
                                        GuestCallFrame const* frame, void* guestStack);
 
+struct SysvAbiValidation {
+    bool passed{};
+    std::uint64_t returned_value{};
+};
+
 // Allocates small executable thunks that convert the PS4 SysV register frame
 // into the Windows x64 call used by the UWP dispatcher. The thunks are not
 // guest entry points until a real HLE dispatcher is supplied.
@@ -32,5 +37,10 @@ public:
 private:
     std::vector<void*> pages_;
 };
+
+// Exercises the generated bridge with known SysV integer, vector and stack
+// arguments. This is an internal runtime invariant, not a guest compatibility
+// test: callers must refuse guest execution if it fails.
+SysvAbiValidation ValidateSysvThunkAbi();
 
 } // namespace Lab

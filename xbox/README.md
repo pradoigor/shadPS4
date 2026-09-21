@@ -4,7 +4,7 @@ Aplicativo **UWP x64 / C++/WinRT / XAML** para medir a viabilidade de portar
 shadPS4 ao Xbox Series X em Dev Mode. **Ainda não é um emulador PS4 no Xbox.**
 O alvo é independente do CMake e das dependências desktop do núcleo.
 
-A versão **0.31.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
+A versão **0.32.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
 PKG/ELF, keysets FPKG embutidos, importação de chaves personalizadas, extração em
 segundo plano e um probe de execução controlada com auditoria de requisitos runtime,
 relocação e inventário de NIDs HLE. O ELF/SELF selecionado é apenas
@@ -26,14 +26,16 @@ conteúdo.
 O probe também calcula um gate de runtime. Enquanto a ponte ABI, os endereços HLE
 e o renderer UWP não estiverem prontos, o gate permanece bloqueado e registra os
 motivos no relatório; nenhum `e_entry` recebido pode ser chamado.
-O código também contém o primeiro alocador de thunks SysV→Windows, protegido como
-RX e ainda sem dispatcher HLE; ele é uma fundação interna e não habilita execução.
-O dispatcher agora possui slots explícitos e duas operações de baixo risco
-(`sceKernelUsleep` e `sysKernelGetUpdVersion`). O probe cria um thunk temporário
-para cada import detectado, mede handlers implementados e mantém `ENOSYS` para os
-demais. O dispatcher agora também cobre handlers sem acesso à memória para
-versão do sistema, identidade do processo, yield, estado EGL/GL, rede básica e
-tela inicial. `sceKernelDebugOutText` agora traduz e valida um ponteiro de texto
+O código também contém um alocador de thunks SysV→Windows protegido como RX. A
+ponte preserva os seis argumentos inteiros, registradores XMM e o ponteiro da
+pilha convidada sem sobrepor o shadow space do ABI Windows. Uma chamada gerada
+internamente valida esses valores antes de qualquer avanço para código convidado.
+Ela é uma fundação interna e não habilita por si só a execução de um jogo.
+O dispatcher possui slots explícitos e cria um thunk temporário para cada import
+detectado. Somente handlers com comportamento efetivo contam como implementados;
+retornos provisórios de versão, identidade, EGL/GL, rede e tela inicial continuam
+classificados como stubs e bloqueiam o gate. Imports ausentes retornam o código
+Orbis correto de `ENOSYS`. `sceKernelDebugOutText` traduz e valida um ponteiro de texto
 contra a memória convidada somente leitura antes de enviá-lo ao log de depuração.
 O probe aplica os endereços em uma cópia privada não executável para
 validar as relocações, sem gravá-los no arquivo ou promover o convidado a execução.

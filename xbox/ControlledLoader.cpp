@@ -693,6 +693,11 @@ GeneratedExecutionResult ExecuteGeneratedProbe(std::filesystem::path const& dire
     result.executable_address = reinterpret_cast<std::uint64_t>(allocation.value);
     result.elf_file_size = image.size();
     result.passed = value == 42;
+    const auto abi = ValidateSysvThunkAbi();
+    result.sysv_abi_passed = abi.passed;
+    result.sysv_abi_returned_value = abi.returned_value;
+    if (!abi.passed)
+        throw std::runtime_error("Validação determinística da ABI SysV falhou.");
     HleDispatcher dispatcher;
     const auto hle = dispatcher.Resolve("1U-s6o8XOcE#B#B");
     if (!hle.address || !hle.implemented)
@@ -703,7 +708,8 @@ GeneratedExecutionResult ExecuteGeneratedProbe(std::filesystem::path const& dire
         throw std::runtime_error("Thunk HLE de smoke test retornou valor inesperado.");
     result.detail = result.passed
         ? L"ELF gerado pelo projeto foi validado, protegido como RX e retornou 42. "
-          L"O thunk HLE SysV→Windows também retornou 0. O eboot.bin selecionado não foi executado."
+          L"A ponte SysV→Windows preservou argumentos inteiros, XMM e pilha; o thunk HLE retornou 0. "
+          L"O eboot.bin selecionado não foi executado."
         : L"O ELF gerado pelo projeto retornou um valor inesperado. O eboot.bin selecionado não foi executado.";
     if (!result.passed) throw std::runtime_error("Probe de execução controlada retornou valor incorreto.");
     return result;
