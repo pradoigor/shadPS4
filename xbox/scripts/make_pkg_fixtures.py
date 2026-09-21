@@ -66,6 +66,7 @@ def pkg(kind):
     if kind == 'bad_map': struct.pack_into('<Q', pfsc, 56, 0)
     pfsc += b''.join(compressed)
     plain = bytearray(0x20000) + pfsc
+    struct.pack_into('<H', plain, 0x1c, 0x000c)
     plain += bytes((-len(plain)) % 4096)
     ekpfs = bytes(range(32)); dk3 = bytes(range(32,64)); seed = bytes(range(16))
     xtskeys = hmac.new(ekpfs, b'\x01\0\0\0'+seed, hashlib.sha256).digest()
