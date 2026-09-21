@@ -7,6 +7,23 @@ executada no Xbox e persistiu na biblioteca com capa e metadados. A versão atua
 mantém uma operação diagnóstica ativa: validação do ELF/SELF selecionado, auditoria
 de requisitos runtime e execução de um ELF mínimo gerado pelo próprio projeto.
 
+## Marco de execução do Apollo
+
+O relatório do Apollo na build `0.14.1.0` confirmou 265 relocações de símbolo
+válidas, 265 NIDs conhecidos pelo registro AeroLib, zero NIDs desconhecidos,
+8.005 relocações suportadas, zero alvos fora dos segmentos e nenhuma pendência
+TLS. Esse resultado encerra os probes estruturais obrigatórios; não há outro
+teste diagnóstico necessário antes do trabalho de runtime.
+
+O inventário delimitou o primeiro porte: 131 imports de `libkernel`, 76 funções
+EGL/OpenGL de `libScePigletv2VSH`, 7 funções FreeType, 5 de `libSceRegMgr` e os
+serviços de áudio, controle, usuário, sistema, rede, diálogos e salvamento. O
+registro de NIDs não é uma implementação: 107 desses símbolos ainda não têm
+registro `LIB_FUNCTION` no núcleo desktop. A execução permanece bloqueada até
+que o carregador tenha uma ponte ABI SysV compatível, endereços HLE reais e um
+renderer UWP para Piglet. O aplicativo deve manter essa barreira e nunca saltar
+para o `e_entry` enquanto algum desses requisitos faltar.
+
 ## Carregamento controlado
 
 O aplicativo lê o cabeçalho original `core/loader/elf.h`, verifica a identidade
