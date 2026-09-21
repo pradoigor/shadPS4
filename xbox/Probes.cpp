@@ -52,6 +52,10 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
     test.measurements.Insert(L"tls_relocations_pending", JsonValue::CreateNumberValue(static_cast<double>(result.tls_relocations_pending)));
     test.measurements.Insert(L"symbol_relocations_valid", JsonValue::CreateNumberValue(static_cast<double>(result.symbol_relocations_valid)));
     test.measurements.Insert(L"symbol_relocations_invalid", JsonValue::CreateNumberValue(static_cast<double>(result.symbol_relocations_invalid)));
+    winrt::Windows::Data::Json::JsonArray symbolNames;
+    for (auto const& name : result.pending_symbol_names)
+        symbolNames.Append(JsonValue::CreateStringValue(winrt::to_hstring(name)));
+    test.measurements.Insert(L"pending_symbol_names", symbolNames);
     test.measurements.Insert(L"relocation_dry_run_checksum", JsonValue::CreateNumberValue(static_cast<double>(result.relocation_dry_run_checksum)));
     test.measurements.Insert(L"has_dynamic", JsonValue::CreateBooleanValue(result.has_dynamic));
     test.measurements.Insert(L"has_tls", JsonValue::CreateBooleanValue(result.has_tls));

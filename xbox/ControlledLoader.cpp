@@ -11,6 +11,7 @@
 #include <fstream>
 #include <functional>
 #include <limits>
+#include <set>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -299,7 +300,7 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
         auto target = static_cast<std::size_t>(program.p_vaddr - result.min_virtual_address);
         std::copy(bytes.begin(), bytes.end(), mapped.begin() + target);
     }
-    auto symbolHasValidName = [&](std::uint32_t symbolIndex) {
+    auto symbolHasValidName = [&](std::uint32_t symbolIndex, std::string* outputName) {
         if (!dynlibData || dynamicTables.symbol_entry_size != sizeof(elf_symbol) ||
             dynamicTables.symbol_table_size == 0 || dynamicTables.string_table_size == 0 ||
             dynamicTables.symbol_table_size % dynamicTables.symbol_entry_size != 0 ||
@@ -333,8 +334,12 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
                        "Tabela de strings excede os dados ELF."),
             "Tabela de strings excede o arquivo ELF.");
         logicalRead(nameFileOffset, name.data(), name.size());
-        return std::find(name.begin(), name.end(), '\0') != name.end();
+        const auto terminator = std::find(name.begin(), name.end(), '\0');
+        if (terminator == name.end()) return false;
+        if (outputName) outputName->assign(name.begin(), terminator);
+        return true;
     };
+    std::set<std::string> seenSymbolNames;
     auto applyRelativeRelocations = [&](std::uint64_t offset, std::uint64_t size) {
         if (size == 0 || !dynlibData || dynamicTables.rela_entry_size != sizeof(elf_relocation) ||
             size % sizeof(elf_relocation) != 0 || offset > dynlibData->p_filesz ||
@@ -360,10 +365,14 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
                        relocation.GetType() == R_X86_64_GLOB_DAT ||
                        relocation.GetType() == R_X86_64_JUMP_SLOT) {
                 ++result.symbol_relocations_pending;
-                if (symbolHasValidName(relocation.GetSymbol()))
+                std::string symbolName;
+                if (symbolHasValidName(relocation.GetSymbol(), &symbolName)) {
                     ++result.symbol_relocations_valid;
-                else
+                    if (seenSymbolNames.insert(symbolName).second && result.pending_symbol_names.size() < 512)
+                        result.pending_symbol_names.push_back(std::move(symbolName));
+                } else {
                     ++result.symbol_relocations_invalid;
+                }
             }
         }
     };
@@ -480,6 +489,7 @@ ControlledLoadResult LoadSelf(Reader& reader, self_header const& header) {
     result.symbol_relocations_valid = inner.symbol_relocations_valid;
     result.symbol_relocations_invalid = inner.symbol_relocations_invalid;
     result.relocation_dry_run_checksum = inner.relocation_dry_run_checksum;
+    result.pending_symbol_names = std::move(inner.pending_symbol_names);
     result.has_dynamic = inner.has_dynamic;
     result.has_tls = inner.has_tls;
     result.has_relocations = inner.has_relocations;

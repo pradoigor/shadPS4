@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace Lab {
 
@@ -44,6 +45,7 @@ struct ControlledLoadResult {
     std::uint64_t symbol_relocations_valid{};
     std::uint64_t symbol_relocations_invalid{};
     std::uint64_t relocation_dry_run_checksum{};
+    std::vector<std::string> pending_symbol_names;
     bool has_dynamic{};
     bool has_tls{};
     bool has_relocations{};
