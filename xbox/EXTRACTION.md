@@ -1,4 +1,4 @@
-# Extração e execução controlada UWP 0.14.1
+# Extração e execução controlada UWP 0.15.0
 
 O aplicativo executa extração, inspeciona metadados e oferece carregamento controlado. A biblioteca
 abre ao iniciar, usa uma faixa horizontal navegável pelo controle e distingue

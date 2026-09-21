@@ -50,8 +50,8 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="PkgCrypto.cpp" /><ClCompile Include="PkgExtractor.cpp" /><ClCompile Include="PkgBuiltinKeys.cpp" /><ClCompile Include="..\externals\miniz\miniz_tinfl.c" /><ClCompile Include="..\externals\miniz\miniz.c" /><ClCompile Include="App.cpp" /><ClCompile Include="ControlledLoader.cpp" /><ClCompile Include="..\src\core\aerolib\aerolib.cpp" /><ClCompile Include="PkgProbe.cpp" /><ClCompile Include="Probes.cpp" /><ClCompile Include="Report.cpp" />
-    <ClInclude Include="ControlledLoader.h" /><ClInclude Include="PkgProbe.h" /><ClInclude Include="Probes.h" /><ClInclude Include="Report.h" /><ClInclude Include="BuildInfo.h" />
+    <ClCompile Include="PkgCrypto.cpp" /><ClCompile Include="PkgExtractor.cpp" /><ClCompile Include="PkgBuiltinKeys.cpp" /><ClCompile Include="..\externals\miniz\miniz_tinfl.c" /><ClCompile Include="..\externals\miniz\miniz.c" /><ClCompile Include="App.cpp" /><ClCompile Include="ControlledLoader.cpp" /><ClCompile Include="RuntimeGate.cpp" /><ClCompile Include="..\src\core\aerolib\aerolib.cpp" /><ClCompile Include="PkgProbe.cpp" /><ClCompile Include="Probes.cpp" /><ClCompile Include="Report.cpp" />
+    <ClInclude Include="ControlledLoader.h" /><ClInclude Include="RuntimeGate.h" /><ClInclude Include="PkgProbe.h" /><ClInclude Include="Probes.h" /><ClInclude Include="Report.h" /><ClInclude Include="BuildInfo.h" />
     <AppxManifest Include="Package.appxmanifest" />
     <None Include="MainPage.xaml"><DeploymentContent>true</DeploymentContent></None>
     <Image Include="Assets\*.png" />

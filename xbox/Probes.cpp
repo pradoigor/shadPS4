@@ -2,6 +2,7 @@
 #include "Probes.h"
 
 #include "ControlledLoader.h"
+#include "RuntimeGate.h"
 
 #include <windows.h>
 #include <filesystem>
@@ -17,6 +18,9 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
         throw winrt::hresult_error(E_INVALIDARG, L"Selecione um ELF/SELF ou extraia um PKG antes de validar.");
 
     auto result = LoadControlled(executablePath);
+    auto gate = EvaluateRuntimeGate(result);
+    result.runtime_preflight_ready = gate.ready;
+    result.runtime_blockers = gate.blockers;
     using winrt::Windows::Data::Json::JsonValue;
     test.measurements.Insert(L"file_size", JsonValue::CreateNumberValue(static_cast<double>(result.file_size)));
     test.measurements.Insert(L"self", JsonValue::CreateBooleanValue(result.self));
@@ -54,6 +58,7 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
     test.measurements.Insert(L"symbol_relocations_invalid", JsonValue::CreateNumberValue(static_cast<double>(result.symbol_relocations_invalid)));
     test.measurements.Insert(L"hle_symbols_known", JsonValue::CreateNumberValue(static_cast<double>(result.hle_symbols_known)));
     test.measurements.Insert(L"hle_symbols_unknown", JsonValue::CreateNumberValue(static_cast<double>(result.hle_symbols_unknown)));
+    test.measurements.Insert(L"runtime_preflight_ready", JsonValue::CreateBooleanValue(result.runtime_preflight_ready));
     winrt::Windows::Data::Json::JsonArray symbolNames;
     for (auto const& name : result.pending_symbol_names)
         symbolNames.Append(JsonValue::CreateStringValue(winrt::to_hstring(name)));
@@ -66,6 +71,10 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
     for (auto const& name : result.hle_unmapped_symbols)
         hleUnmapped.Append(JsonValue::CreateStringValue(winrt::to_hstring(name)));
     test.measurements.Insert(L"hle_unmapped_symbols", hleUnmapped);
+    winrt::Windows::Data::Json::JsonArray runtimeBlockers;
+    for (auto const& blocker : result.runtime_blockers)
+        runtimeBlockers.Append(JsonValue::CreateStringValue(winrt::to_hstring(blocker)));
+    test.measurements.Insert(L"runtime_blockers", runtimeBlockers);
     winrt::Windows::Data::Json::JsonArray libraryIds;
     for (auto const& id : result.import_library_ids)
         libraryIds.Append(JsonValue::CreateStringValue(winrt::to_hstring(id)));
@@ -93,6 +102,10 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
     test.measurements.Insert(L"execution_address", JsonValue::CreateNumberValue(static_cast<double>(execution.executable_address)));
     test.measurements.Insert(L"execution_elf_file_size", JsonValue::CreateNumberValue(static_cast<double>(execution.elf_file_size)));
     test.status = L"passed";
+    std::wstring gateDetail = L"\nGate de runtime: ";
+    gateDetail += result.runtime_preflight_ready ? L"pronto." : L"bloqueado.";
+    for (auto const& blocker : result.runtime_blockers)
+        gateDetail += L"\n- " + blocker;
     test.detail = result.detail + L"\nMetadados runtime: dynamic=" + std::to_wstring(result.dynamic_entries) +
                   L", relocations=" + std::to_wstring(result.rela_entries + result.jmp_rela_entries) +
                   L", imports=" + std::to_wstring(result.import_libraries + result.needed_modules) +
@@ -107,7 +120,10 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
                   L", NIDs conhecidos no registro AeroLib=" + std::to_wstring(result.hle_symbols_known) +
                   L", NIDs sem correspondência=" + std::to_wstring(result.hle_symbols_unknown) +
                   L", TLS pending=" + std::to_wstring(result.tls_relocations_pending) +
+                  std::wstring(L". Gate de runtime=") +
+                  (result.runtime_preflight_ready ? L"pronto" : L"bloqueado") +
                   L". O inventário AeroLib identifica nomes conhecidos, mas ainda não fornece endereços HLE; o dry-run não altera o arquivo nem executa o homebrew.\n" +
+                  gateDetail + L"\n" +
                   execution.detail + L"\nArquivo: " + executablePath;
 }
 

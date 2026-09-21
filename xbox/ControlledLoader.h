@@ -56,6 +56,8 @@ struct ControlledLoadResult {
     std::vector<std::string> needed_module_ids;
     std::vector<std::string> import_library_names;
     std::vector<std::string> needed_module_names;
+    bool runtime_preflight_ready{};
+    std::vector<std::wstring> runtime_blockers;
     bool has_dynamic{};
     bool has_tls{};
     bool has_relocations{};
