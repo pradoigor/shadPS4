@@ -104,7 +104,7 @@ struct App : ApplicationT<App> {
             libraryList.Items().Clear();
             for (auto const& file : files) {
                 TextBlock item;
-                item.Text(std::wstring(file.Name()) + L"\n" + DescribeContent(file.Path()));
+                item.Text(std::wstring(file.Name()) + L"\n" + DescribeContent(std::wstring(file.Path())));
                 item.TextWrapping(TextWrapping::Wrap);
                 item.FontSize(16);
                 item.Margin({0, 6, 0, 6});
@@ -130,7 +130,8 @@ struct App : ApplicationT<App> {
             auto local = Windows::Storage::ApplicationData::Current().LocalFolder();
             auto folder = co_await local.CreateFolderAsync(L"Library", Windows::Storage::CreationCollisionOption::OpenIfExists);
             co_await file.CopyAsync(folder, file.Name(), Windows::Storage::NameCollisionOption::ReplaceExisting);
-            libraryStatus.Text(L"Arquivo copiado: " + std::wstring(file.Name()) + L"\n" + DescribeContent(file.Path()));
+            libraryStatus.Text(std::wstring(L"Arquivo copiado: ") + std::wstring(file.Name()) +
+                L"\n" + DescribeContent(std::wstring(file.Path())));
             PopulateLibrary();
         } catch (hresult_error const& e) {
             libraryStatus.Text(L"Falha ao selecionar conteúdo: " + e.message());
