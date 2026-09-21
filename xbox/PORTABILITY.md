@@ -3,10 +3,11 @@
 Base analisada: `42c555b7ab5d0678f531a7e4d505560ccc0f8add`.
 
 Este alvo é um laboratório UWP dentro do fork. Ele já compila diretamente os
-headers originais `common/endian.h`, `core/file_format/psf.h` e `core/loader/elf.h`,
-além do codec original `src/core/file_format/psf.cpp`. Os probes também gravam e
-releem PSF e um contêiner SELF/ELF sintético no `LocalState` usando `CreateFile2`,
-mas ainda não ligam o
+headers originais `common/endian.h`, `core/file_format/psf.h`, `core/loader/elf.h`
+e `core/file_sys/ifile.h`, além do codec original `src/core/file_format/psf.cpp`.
+O probe ativo deriva `IFile` com APIs UWP e usa o `FileReader` original para ler
+um contêiner SELF/ELF sintético no `LocalState`; os probes anteriores ficam apenas
+nas evidências históricas. Ainda não liga o
 núcleo completo, não carrega ELF/PKG e não executa jogos. Resultado aprovado em um teste não
 equivale a aprovação do subsistema completo do emulador.
 
@@ -19,7 +20,7 @@ equivale a aprovação do subsistema completo do emulador.
 | Execução | Mesmo arquivo: PAGE_EXECUTE_READWRITE; `src/core/linker.cpp`: carregamento/execução | Seis bytes x64 próprios, RW para RX, retorno 42 | ABI, relocação, TLS, instruções, bibliotecas e execução de homebrew |
 | Exceções | `src/core/signals.cpp`: AddVectoredExceptionHandler | Interrupções detectadas por journal persistente | Compatibilidade do mecanismo de tratamento de exceções do núcleo; journal não substitui um handler |
 | Sistema/arquivos | Dependências desktop, bibliotecas e caminhos do núcleo | LocalState, persistência e áudio UWP | Adaptar acesso ao conteúdo e módulos, threads e dependências |
-| Formatos do núcleo | `common/endian.h`, `core/file_format/psf.h`, `psf.cpp` e `core/loader/elf.h` | Codec PSF original, gravação/leitura UWP e estruturas ELF/SELF originais são exercitados no Xbox | Adaptador do `IFile` para o loader completo, SELF real/descriptografia e fontes com dependências de logging/assert |
+| Formatos do núcleo | `common/endian.h`, `core/file_format/psf.h`, `psf.cpp`, `core/loader/elf.h` e `core/file_sys/ifile.h` | Backend `IFile` UWP e `FileReader` original leem cabeçalhos SELF/ELF sintéticos no Xbox | Integração do `IFile` com o loader completo, SELF real/descriptografia e fontes com dependências de logging/assert |
 
 ## Bloqueios confirmados do núcleo
 

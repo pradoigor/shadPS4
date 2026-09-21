@@ -46,8 +46,7 @@ Report::Report() {
     auto add = [&](wchar_t const* id, wchar_t const* title, bool isolated = false) {
         Test t; t.id = id; t.title = title; t.isolated = isolated; tests.push_back(std::move(t));
     };
-    add(L"storage", L"Armazenamento · leitura e gravação");
-    add(L"loader_file_adapter", L"Loader · SELF/ELF via arquivo UWP");
+    add(L"ifile_adapter", L"Núcleo · backend IFile UWP");
     add(L"budget", L"Memória · orçamento do aplicativo");
     add(L"d3d11", L"GPU · Direct3D 11 e shader com leitura de volta");
     add(L"d3d12", L"GPU · dispositivo Direct3D 12");

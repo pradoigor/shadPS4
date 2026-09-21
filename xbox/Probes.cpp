@@ -2,6 +2,7 @@
 #include "Probes.h"
 #include "CoreProbe.h"
 #include "LoaderProbe.h"
+#include "IFileProbe.h"
 #include <d3d12.h>
 #include <memoryapi.h>
 #include <fileapifromapp.h>
@@ -91,6 +92,14 @@ void RunProbe(Test& t, std::wstring const& directory) {
         std::string read{std::istreambuf_iterator<char>(input), {}};
         if (read != payload) throw hresult_error(E_FAIL, L"Conteúdo lido difere do conteúdo gravado.");
         t.detail = L"Arquivo gravado, sincronizado e relido em LocalState.";
+    } else if (t.id == L"ifile_adapter") {
+        auto result = ProbeUwpIFileAdapter(directory);
+        Number(t, L"file_size", result.file_size);
+        Number(t, L"bytes_read", result.bytes_read);
+        Number(t, L"segment_id", result.segment_id);
+        Number(t, L"elf_entry", static_cast<double>(result.elf_entry));
+        if (!result.passed) throw hresult_error(E_FAIL, L"Backend IFile UWP não leu os cabeçalhos do loader.");
+        t.detail = L"Backend UWP derivado de IFile e FileReader original leram cabeçalhos SELF/ELF sequencialmente. Não carrega ELF/SELF real nem executa segmentos.";
     } else if (t.id == L"core_types") {
         auto result = ProbeUpstreamCoreTypes();
         Number(t, L"psf_header_size", result.psf_header_size);
