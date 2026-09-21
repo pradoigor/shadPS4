@@ -4,6 +4,7 @@
 #include "LoaderProbe.h"
 #include "IFileProbe.h"
 #include "ElfProbe.h"
+#include "SegmentProbe.h"
 #include <d3d12.h>
 #include <memoryapi.h>
 #include <fileapifromapp.h>
@@ -93,6 +94,14 @@ void RunProbe(Test& t, std::wstring const& directory) {
         std::string read{std::istreambuf_iterator<char>(input), {}};
         if (read != payload) throw hresult_error(E_FAIL, L"Conteúdo lido difere do conteúdo gravado.");
         t.detail = L"Arquivo gravado, sincronizado e relido em LocalState.";
+    } else if (t.id == L"elf_load_segment") {
+        auto result = ProbeOriginalElfLoadSegment(directory);
+        Number(t, L"file_size", result.file_size);
+        Number(t, L"payload_size", result.payload_size);
+        Number(t, L"checksum", result.checksum);
+        Number(t, L"virtual_address", static_cast<double>(result.virtual_address));
+        if (!result.passed) throw hresult_error(E_FAIL, L"LoadSegment original não transferiu o payload esperado.");
+        t.detail = L"LoadSegment original localizou o program header, leu o payload pelo IFile UWP e transferiu os bytes para memória. Não executa o segmento nem valida relocação.";
     } else if (t.id == L"elf_open") {
         auto result = ProbeOriginalElfOpen(directory);
         Number(t, L"file_size", result.file_size);
