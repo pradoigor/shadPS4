@@ -108,6 +108,13 @@ private:
     static std::uint64_t KernelWrite(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelLseek(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelFsync(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t FileAccess(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t FileMkdir(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t FileRmdir(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t FileRename(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t FileUnlink(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t FileChmod(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t FileFlock(HleDispatcher&, GuestCallFrame const&) noexcept;
 
     bool ReadGuestString(std::uint64_t address, std::string& value,
                          std::size_t limit = 1024) const noexcept;

@@ -207,16 +207,16 @@ void RunProbe(Test &test, std::wstring const &executablePath,
         fileSymbols[name] = mapping.substr(0, mapping.size() - suffix.size());
     }
   }
-  if (fileSymbols.size() == 6 && result.guest_memory_writable_bytes >= 128) {
+  if (fileSymbols.size() == 6 && result.guest_memory_writable_bytes >= 256) {
     std::uint64_t guestAddress = 0;
     for (auto const &segment : result.guest_segments) {
-      if ((segment.flags & 0x2u) != 0 && segment.size >= 128) {
+      if ((segment.flags & 0x2u) != 0 && segment.size >= 256) {
         guestAddress = guestMemory.RuntimeAddress(segment.address);
         break;
       }
     }
     auto *memory = static_cast<std::uint8_t *>(
-        guestMemory.TranslateWritable(guestAddress, 128));
+        guestMemory.TranslateWritable(guestAddress, 256));
     if (memory) {
       constexpr char path[] = "/data/shadps4-fs-probe.bin";
       constexpr std::uint64_t pattern = 0x1029384756AABBCCull;
@@ -240,6 +240,41 @@ void RunProbe(Test &test, std::wstring const &executablePath,
       result.hle_filesystem_probe_passed =
           descriptor < 0x80000000ull && wrote == sizeof(pattern) && synced == 0 &&
           sought == 0 && read == sizeof(pattern) && closed == 0 && restored == pattern;
+      std::unordered_map<std::string, void *> operations;
+      for (auto const &name : {"access", "mkdir", "rmdir", "rename", "unlink",
+                               "chmod"}) {
+        for (auto const &mapping : result.hle_symbol_mappings) {
+          const auto suffix = std::string("=") + name;
+          if (mapping.size() > suffix.size() &&
+              mapping.compare(mapping.size() - suffix.size(), suffix.size(),
+                              suffix) == 0)
+            operations[name] = hleDispatcher.AddressFor(
+                mapping.substr(0, mapping.size() - suffix.size()));
+        }
+      }
+      if (operations.size() == 6) {
+        constexpr char target[] = "/data/shadps4-fs-renamed.bin";
+        constexpr char directory[] = "/data/shadps4-fs-directory";
+        std::memcpy(memory + 128, target, sizeof(target));
+        std::memcpy(memory + 192, directory, sizeof(directory));
+        const auto renamed = InvokeSysv2(operations["rename"], guestAddress,
+                                         guestAddress + 128);
+        const auto accessed = InvokeSysv2(operations["access"],
+                                          guestAddress + 128, 0);
+        const auto chmodded = InvokeSysv2(operations["chmod"],
+                                          guestAddress + 128, 0600);
+        const auto unlinked =
+            InvokeSysv2(operations["unlink"], guestAddress + 128, 0);
+        const auto made =
+            InvokeSysv2(operations["mkdir"], guestAddress + 192, 0700);
+        const auto directoryAccessed =
+            InvokeSysv2(operations["access"], guestAddress + 192, 0);
+        const auto removed =
+            InvokeSysv2(operations["rmdir"], guestAddress + 192, 0);
+        result.hle_directory_probe_passed =
+            renamed == 0 && accessed == 0 && chmodded == 0 && unlinked == 0 &&
+            made == 0 && directoryAccessed == 0 && removed == 0;
+      }
     }
   }
   auto gate = EvaluateRuntimeGate(result);
@@ -398,6 +433,9 @@ void RunProbe(Test &test, std::wstring const &executablePath,
   test.measurements.Insert(
       L"hle_filesystem_probe_passed",
       JsonValue::CreateBooleanValue(result.hle_filesystem_probe_passed));
+  test.measurements.Insert(
+      L"hle_directory_probe_passed",
+      JsonValue::CreateBooleanValue(result.hle_directory_probe_passed));
   test.measurements.Insert(L"hle_pointer_probe_return",
                            JsonValue::CreateNumberValue(static_cast<double>(
                                result.hle_pointer_probe_return)));
@@ -528,6 +566,8 @@ void RunProbe(Test &test, std::wstring const &executablePath,
       (result.hle_regmgr_probe_passed ? L"aprovado" : L"pendente") +
       L", sistema de arquivos HLE=" +
       (result.hle_filesystem_probe_passed ? L"aprovado" : L"pendente") +
+      L", diretórios e manutenção HLE=" +
+      (result.hle_directory_probe_passed ? L"aprovado" : L"pendente") +
       L", TLS pending=" + std::to_wstring(result.tls_relocations_pending) +
       std::wstring(L". Gate de runtime=") +
       (result.runtime_preflight_ready ? L"pronto" : L"bloqueado") +

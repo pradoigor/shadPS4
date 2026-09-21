@@ -74,6 +74,19 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sceKernelWrite") use(&KernelWrite);
     if (name == "sceKernelLseek") use(&KernelLseek);
     if (name == "sceKernelFsync") use(&KernelFsync);
+    if (name == "_open") use(&KernelOpen);
+    if (name == "close") use(&KernelClose);
+    if (name == "read" || name == "_read") use(&KernelRead);
+    if (name == "write" || name == "_write") use(&KernelWrite);
+    if (name == "lseek") use(&KernelLseek);
+    if (name == "fsync") use(&KernelFsync);
+    if (name == "access") use(&FileAccess);
+    if (name == "mkdir") use(&FileMkdir);
+    if (name == "rmdir") use(&FileRmdir);
+    if (name == "rename") use(&FileRename);
+    if (name == "unlink") use(&FileUnlink);
+    if (name == "chmod") use(&FileChmod);
+    if (name == "flock") use(&FileFlock);
 
     const auto slot = static_cast<std::uint64_t>(entries_.size());
     entries_.push_back(Entry{encoded, nid, implemented, handler, nullptr});
@@ -635,6 +648,103 @@ std::uint64_t HleDispatcher::KernelFsync(HleDispatcher& dispatcher,
     if (found == dispatcher.files_.end()) return OrbisEbadf;
     found->second.stream.flush();
     return found->second.stream ? 0 : OrbisEbadf;
+}
+
+std::uint64_t HleDispatcher::FileAccess(HleDispatcher& dispatcher,
+                                        GuestCallFrame const& frame) noexcept {
+    try {
+        std::string guestPath;
+        if (!dispatcher.ReadGuestString(frame.gpr[0], guestPath)) return UINT64_MAX;
+        std::filesystem::path hostPath;
+        const bool write = (frame.gpr[1] & 0x2u) != 0;
+        if (!dispatcher.ResolveGuestPath(guestPath, write, hostPath)) return UINT64_MAX;
+        return std::filesystem::exists(hostPath) ? 0 : UINT64_MAX;
+    } catch (...) {
+        return UINT64_MAX;
+    }
+}
+
+std::uint64_t HleDispatcher::FileMkdir(HleDispatcher& dispatcher,
+                                       GuestCallFrame const& frame) noexcept {
+    try {
+        std::string guestPath;
+        if (!dispatcher.ReadGuestString(frame.gpr[0], guestPath)) return UINT64_MAX;
+        std::filesystem::path hostPath;
+        if (!dispatcher.ResolveGuestPath(guestPath, true, hostPath)) return UINT64_MAX;
+        std::error_code error;
+        if (std::filesystem::exists(hostPath, error))
+            return std::filesystem::is_directory(hostPath, error) ? 0 : UINT64_MAX;
+        return std::filesystem::create_directories(hostPath, error) && !error ? 0
+                                                                             : UINT64_MAX;
+    } catch (...) {
+        return UINT64_MAX;
+    }
+}
+
+std::uint64_t HleDispatcher::FileRmdir(HleDispatcher& dispatcher,
+                                       GuestCallFrame const& frame) noexcept {
+    try {
+        std::string guestPath;
+        if (!dispatcher.ReadGuestString(frame.gpr[0], guestPath)) return UINT64_MAX;
+        std::filesystem::path hostPath;
+        if (!dispatcher.ResolveGuestPath(guestPath, true, hostPath)) return UINT64_MAX;
+        std::error_code error;
+        return std::filesystem::remove(hostPath, error) && !error ? 0 : UINT64_MAX;
+    } catch (...) {
+        return UINT64_MAX;
+    }
+}
+
+std::uint64_t HleDispatcher::FileRename(HleDispatcher& dispatcher,
+                                        GuestCallFrame const& frame) noexcept {
+    try {
+        std::string sourceGuest;
+        std::string targetGuest;
+        if (!dispatcher.ReadGuestString(frame.gpr[0], sourceGuest) ||
+            !dispatcher.ReadGuestString(frame.gpr[1], targetGuest))
+            return UINT64_MAX;
+        std::filesystem::path source;
+        std::filesystem::path target;
+        if (!dispatcher.ResolveGuestPath(sourceGuest, true, source) ||
+            !dispatcher.ResolveGuestPath(targetGuest, true, target))
+            return UINT64_MAX;
+        std::filesystem::create_directories(target.parent_path());
+        std::error_code error;
+        std::filesystem::rename(source, target, error);
+        return error ? UINT64_MAX : 0;
+    } catch (...) {
+        return UINT64_MAX;
+    }
+}
+
+std::uint64_t HleDispatcher::FileUnlink(HleDispatcher& dispatcher,
+                                        GuestCallFrame const& frame) noexcept {
+    try {
+        std::string guestPath;
+        if (!dispatcher.ReadGuestString(frame.gpr[0], guestPath)) return UINT64_MAX;
+        std::filesystem::path hostPath;
+        if (!dispatcher.ResolveGuestPath(guestPath, true, hostPath)) return UINT64_MAX;
+        std::error_code error;
+        if (std::filesystem::is_directory(hostPath, error)) return UINT64_MAX;
+        return std::filesystem::remove(hostPath, error) && !error ? 0 : UINT64_MAX;
+    } catch (...) {
+        return UINT64_MAX;
+    }
+}
+
+std::uint64_t HleDispatcher::FileChmod(HleDispatcher& dispatcher,
+                                       GuestCallFrame const& frame) noexcept {
+    std::string guestPath;
+    if (!dispatcher.ReadGuestString(frame.gpr[0], guestPath)) return UINT64_MAX;
+    std::filesystem::path hostPath;
+    if (!dispatcher.ResolveGuestPath(guestPath, true, hostPath)) return UINT64_MAX;
+    return std::filesystem::exists(hostPath) ? 0 : UINT64_MAX;
+}
+
+std::uint64_t HleDispatcher::FileFlock(HleDispatcher& dispatcher,
+                                       GuestCallFrame const& frame) noexcept {
+    return dispatcher.files_.contains(static_cast<std::int32_t>(frame.gpr[0])) ? 0
+                                                                               : UINT64_MAX;
 }
 
 } // namespace Lab
