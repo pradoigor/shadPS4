@@ -5,6 +5,7 @@
 #include "IFileProbe.h"
 #include "ElfProbe.h"
 #include "SegmentProbe.h"
+#include "ExecProbe.h"
 #include <d3d12.h>
 #include <memoryapi.h>
 #include <fileapifromapp.h>
@@ -94,6 +95,14 @@ void RunProbe(Test& t, std::wstring const& directory) {
         std::string read{std::istreambuf_iterator<char>(input), {}};
         if (read != payload) throw hresult_error(E_FAIL, L"Conteúdo lido difere do conteúdo gravado.");
         t.detail = L"Arquivo gravado, sincronizado e relido em LocalState.";
+    } else if (t.id == L"elf_execute_segment") {
+        auto result = ProbeOriginalElfExecuteSegment(directory);
+        Number(t, L"file_size", result.file_size);
+        Number(t, L"payload_size", result.payload_size);
+        Number(t, L"returned_value", result.returned_value);
+        Number(t, L"executable_address", static_cast<double>(result.executable_address));
+        if (!result.passed) throw hresult_error(E_FAIL, L"Segmento ELF não executou o código carregado.");
+        t.detail = L"LoadSegment original transferiu código gerado pelo projeto para memória UWP, a proteção virou RX e a função retornou 42. Não valida ABI, relocação ou código de jogo.";
     } else if (t.id == L"elf_load_segment") {
         auto result = ProbeOriginalElfLoadSegment(directory);
         Number(t, L"file_size", result.file_size);
