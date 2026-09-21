@@ -260,6 +260,7 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
                     "Alinhamento de segmento ELF inválido.");
         result.min_virtual_address = (std::min)(result.min_virtual_address, program.p_vaddr);
         result.max_virtual_address = (std::max)(result.max_virtual_address, end);
+        result.guest_segments.push_back(GuestSegmentInfo{program.p_vaddr, program.p_memsz, program.p_flags});
         loads.push_back({program});
     }
     Require(!loads.empty(), "ELF não possui segmento PT_LOAD.");
@@ -576,6 +577,7 @@ ControlledLoadResult LoadSelf(Reader& reader, self_header const& header) {
     result.hle_symbols_known = inner.hle_symbols_known;
     result.hle_symbols_unknown = inner.hle_symbols_unknown;
     result.pending_symbol_relocations = std::move(inner.pending_symbol_relocations);
+    result.guest_segments = std::move(inner.guest_segments);
     result.private_image = std::move(inner.private_image);
     result.relocation_dry_run_checksum = inner.relocation_dry_run_checksum;
     result.pending_symbol_names = std::move(inner.pending_symbol_names);

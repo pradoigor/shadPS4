@@ -9,6 +9,7 @@
 #include <chrono>
 #include <string>
 #include <thread>
+#include <cstring>
 
 namespace Lab {
 namespace {
@@ -43,6 +44,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sceNetCtlTerm") handler = &NetCtlTerm;
     if (name == "sceSystemServiceHideSplashScreen") handler = &HideSplashScreen;
     if (name == "sceKernelDebugOutText") handler = &KernelDebugOutText;
+    if (name == "clock_gettime") handler = &ClockGetTime;
 
     const auto slot = static_cast<std::uint64_t>(entries_.size());
     entries_.push_back(Entry{encoded, nid, handler != &Unimplemented, handler, nullptr});
@@ -163,6 +165,26 @@ std::uint64_t HleDispatcher::KernelDebugOutText(HleDispatcher& dispatcher,
     }
     OutputDebugStringA(text.c_str());
     return static_cast<std::uint64_t>(text.size());
+}
+
+std::uint64_t HleDispatcher::ClockGetTime(HleDispatcher& dispatcher,
+                                          GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    struct Timespec {
+        std::int64_t seconds;
+        std::int64_t nanoseconds;
+    } value{};
+    if (!dispatcher.memory_) return OrbisEfault;
+    auto* output = static_cast<Timespec*>(
+        dispatcher.memory_->TranslateWritable(frame.gpr[1], sizeof(Timespec)));
+    if (!output) return OrbisEfault;
+    const auto now = std::chrono::system_clock::now().time_since_epoch();
+    const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(now);
+    const auto nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(now - seconds);
+    value.seconds = seconds.count();
+    value.nanoseconds = nanos.count();
+    std::memcpy(output, &value, sizeof(value));
+    return 0;
 }
 
 } // namespace Lab

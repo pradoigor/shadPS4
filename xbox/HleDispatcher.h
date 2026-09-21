@@ -73,6 +73,7 @@ private:
     static std::uint64_t NetCtlTerm(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t HideSplashScreen(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelDebugOutText(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t ClockGetTime(HleDispatcher&, GuestCallFrame const&) noexcept;
 
     SysvThunkArena thunks_;
     std::vector<Entry> entries_;

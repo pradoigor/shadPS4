@@ -14,6 +14,12 @@ struct PendingSymbolRelocation {
     std::string symbol;
 };
 
+struct GuestSegmentInfo {
+    std::uint64_t address{};
+    std::uint64_t size{};
+    std::uint32_t flags{};
+};
+
 struct ControlledLoadResult {
     bool recognized{};
     bool self{};
@@ -60,6 +66,7 @@ struct ControlledLoadResult {
     std::uint64_t hle_relocations_applied{};
     std::uint64_t hle_relocations_unresolved{};
     std::uint64_t guest_memory_bytes{};
+    std::uint64_t guest_memory_writable_bytes{};
     std::uint64_t guest_memory_host_address{};
     bool guest_memory_mapped{};
     std::uint64_t relocation_dry_run_checksum{};
@@ -71,6 +78,7 @@ struct ControlledLoadResult {
     std::vector<std::string> import_library_names;
     std::vector<std::string> needed_module_names;
     std::vector<PendingSymbolRelocation> pending_symbol_relocations;
+    std::vector<GuestSegmentInfo> guest_segments;
     // Private, non-executable image used only for relocation dry-runs.
     std::vector<std::uint8_t> private_image;
     bool runtime_preflight_ready{};

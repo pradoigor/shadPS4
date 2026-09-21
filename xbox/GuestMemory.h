@@ -5,10 +5,12 @@
 #include <cstdint>
 #include <vector>
 
+#include "ControlledLoader.h"
+
 namespace Lab {
 
-// Owns a private UWP allocation for a validated image. The allocation is
-// copied while writable and then changed to read-only; it is never executable.
+// Owns a private UWP allocation for a validated image. Code and read-only
+// ranges remain non-executable; only page-aligned PF_W ranges are writable.
 class GuestMemory {
 public:
     GuestMemory() = default;
@@ -17,10 +19,13 @@ public:
     GuestMemory(GuestMemory const&) = delete;
     GuestMemory& operator=(GuestMemory const&) = delete;
 
-    bool MapReadOnly(std::vector<std::uint8_t> const& image, std::uint64_t guestBase);
+    bool MapValidated(std::vector<std::uint8_t> const& image, std::uint64_t guestBase,
+                      std::vector<GuestSegmentInfo> const& segments);
     void* Translate(std::uint64_t guestAddress, std::size_t bytes) const noexcept;
+    void* TranslateWritable(std::uint64_t guestAddress, std::size_t bytes) const noexcept;
     bool mapped() const noexcept { return base_ != nullptr; }
     std::size_t size() const noexcept { return size_; }
+    std::size_t writableBytes() const noexcept;
     std::uint64_t guestBase() const noexcept { return guestBase_; }
     std::uint64_t hostAddress() const noexcept {
         return reinterpret_cast<std::uint64_t>(base_);
@@ -30,6 +35,11 @@ private:
     void* base_{};
     std::size_t size_{};
     std::uint64_t guestBase_{};
+    struct WritableRange {
+        std::uint64_t address{};
+        std::uint64_t size{};
+    };
+    std::vector<WritableRange> writable_;
 };
 
 } // namespace Lab

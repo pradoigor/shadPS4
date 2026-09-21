@@ -44,11 +44,12 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
         ++result.hle_relocations_applied;
     }
     GuestMemory guestMemory;
-    result.guest_memory_mapped = guestMemory.MapReadOnly(
-        result.private_image, result.min_virtual_address);
+    result.guest_memory_mapped = guestMemory.MapValidated(
+        result.private_image, result.min_virtual_address, result.guest_segments);
     if (result.guest_memory_mapped) {
         result.guest_memory_bytes = guestMemory.size();
         result.guest_memory_host_address = guestMemory.hostAddress();
+        result.guest_memory_writable_bytes = guestMemory.writableBytes();
     }
     hleDispatcher.AttachGuestMemory(&guestMemory);
     auto gate = EvaluateRuntimeGate(result);
@@ -98,6 +99,7 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
     test.measurements.Insert(L"hle_relocations_unresolved", JsonValue::CreateNumberValue(static_cast<double>(result.hle_relocations_unresolved)));
     test.measurements.Insert(L"guest_memory_mapped", JsonValue::CreateBooleanValue(result.guest_memory_mapped));
     test.measurements.Insert(L"guest_memory_bytes", JsonValue::CreateNumberValue(static_cast<double>(result.guest_memory_bytes)));
+    test.measurements.Insert(L"guest_memory_writable_bytes", JsonValue::CreateNumberValue(static_cast<double>(result.guest_memory_writable_bytes)));
     test.measurements.Insert(L"guest_memory_host_address", JsonValue::CreateNumberValue(static_cast<double>(result.guest_memory_host_address)));
     test.measurements.Insert(L"runtime_preflight_ready", JsonValue::CreateBooleanValue(result.runtime_preflight_ready));
     winrt::Windows::Data::Json::JsonArray symbolNames;
@@ -166,7 +168,8 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
                   L", handlers pendentes=" + std::to_wstring(result.hle_handlers_unimplemented) +
                   L", relocations HLE aplicadas em cópia privada=" + std::to_wstring(result.hle_relocations_applied) +
                   L", relocations HLE sem resolução=" + std::to_wstring(result.hle_relocations_unresolved) +
-                  L", memória convidada somente leitura=" + (result.guest_memory_mapped ? L"sim" : L"não") +
+                  L", memória convidada mapeada com proteção=" + (result.guest_memory_mapped ? L"sim" : L"não") +
+                  L", bytes PF_W graváveis=" + std::to_wstring(result.guest_memory_writable_bytes) +
                   L", TLS pending=" + std::to_wstring(result.tls_relocations_pending) +
                   std::wstring(L". Gate de runtime=") +
                   (result.runtime_preflight_ready ? L"pronto" : L"bloqueado") +
