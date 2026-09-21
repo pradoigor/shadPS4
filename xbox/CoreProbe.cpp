@@ -7,8 +7,8 @@
 
 #include <bit>
 #include <cstring>
-#include <fileapifromapp.h>
 #include <windows.h>
+#include <fileapifromapp.h>
 #include <winrt/base.h>
 
 namespace Lab {
