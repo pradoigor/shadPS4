@@ -2,7 +2,7 @@
 #pragma once
 #include "Report.h"
 namespace Lab {
-// Runs the single user-facing loader validation. The path must point to a
-// selected ELF/SELF or to an extracted eboot.bin. No input code is executed.
-void RunProbe(Test& test, std::wstring const& executablePath);
+// Runs the single user-facing execution gate. The selected ELF/SELF is only
+// validated; execution is limited to a project-generated return-42 ELF.
+void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const& directory);
 }

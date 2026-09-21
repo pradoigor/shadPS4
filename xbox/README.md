@@ -4,10 +4,11 @@ Aplicativo **UWP x64 / C++/WinRT / XAML** para medir a viabilidade de portar
 shadPS4 ao Xbox Series X em Dev Mode. **Ainda não é um emulador PS4 no Xbox.**
 O alvo é independente do CMake e das dependências desktop do núcleo.
 
-A versão **0.4.1.0** inclui biblioteca horizontal inspirada no PS4, importação de
+A versão **0.5.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
 PKG/ELF, keysets FPKG embutidos, importação de chaves personalizadas, extração em
-segundo plano e validação controlada de ELF/SELF. A validação mapeia somente bytes
-validados em buffer não executável; extrair ou validar não executa o jogo.
+segundo plano e um probe de execução controlada. O ELF/SELF selecionado é apenas
+validado e mapeado em buffer não executável; o único código executado é um ELF
+mínimo gerado pelo próprio projeto, com retorno esperado `42`.
 
 ## Compilar
 
@@ -36,7 +37,7 @@ usa C++/WinRT 2.0.250303.1 e shaders HLSL pré-compilados, sem compilador no Xbo
 4. Em **Home → My games & apps → Add**, selecione `ShadPS4Xbox.appx`.
 5. Selecione as dependências **x64** da pasta `Dependencies` e conclua.
 6. Inicie **shadPS4 · Xbox Lab**. Use **Biblioteca** para selecionar conteúdo, extrair
-um PKG ou validar o `eboot.bin`/ELF/SELF. As etapas de inicialização ficam em
+um PKG ou executar o probe controlado sobre o `eboot.bin`/ELF/SELF. As etapas de inicialização ficam em
 `LocalState/startup.log`, inclusive erros anteriores à criação do relatório.
 
 A assinatura é de desenvolvimento. Builds seguintes usam certificado temporário
@@ -47,8 +48,9 @@ nunca remove aplicativos automaticamente.
 ## Testar
 
 Use **Biblioteca → Importar PKG / ELF → Extrair pacote**. Depois, selecione o cartão
-extraído e pressione **Validar ELF / SELF**. O resultado da única validação ativa e
-os limites do fluxo estão documentados em [EXTRACTION.md](EXTRACTION.md).
+extraído e pressione **Executar probe controlado**. O relatório combina a validação
+do arquivo selecionado com a execução do ELF mínimo do projeto; os limites estão
+documentados em [EXTRACTION.md](EXTRACTION.md).
 
 O relatório `extraction-report.json` contém versão/commit, duração, estado,
 contadores e erro; pode ser exportado pela área Diagnóstico. O PKG original é
@@ -56,8 +58,8 @@ preservado. Falhas não promovem a pasta temporária a conteúdo instalado.
 
 ## Aceitação no console
 
-Registrar: versão instalada, captura da abertura, relatório JSON, validação
-individual do ELF/SELF, navegação pelo controle, suspensão/retomada e uma segunda
+Registrar: versão instalada, captura da abertura, relatório JSON, probe individual
+do ELF/SELF, navegação pelo controle, suspensão/retomada e uma segunda
 abertura com resultados preservados. Resultado “aprovado” significa somente que a
 operação descrita naquela validação funcionou.
 

@@ -124,7 +124,7 @@ struct App : ApplicationT<App> {
                 selectedLoaderPath = item.path;
         }
         Find<TextBlock>(L"ContentTitle").Text(item.name);
-        Find<TextBlock>(L"ContentDetails").Text(item.installed ? L"Conteúdo extraído e persistido neste Xbox. A execução PS4 ainda não está disponível." : DescribeContent(item.path));
+        Find<TextBlock>(L"ContentDetails").Text(item.installed ? L"Conteúdo extraído e persistido neste Xbox. O probe controlado valida o arquivo e executa somente o ELF mínimo do projeto." : DescribeContent(item.path));
         auto extension = std::filesystem::path(item.path).extension().wstring();
         for (auto& c : extension) c = towlower(c);
         Find<Button>(L"ExtractContent").IsEnabled(!extraction && !importing && !item.installed && extension == L".pkg");
@@ -440,14 +440,14 @@ struct App : ApplicationT<App> {
             co_await resume_background();
             try {
                 Lab::Test result; result.id = id;
-                Lab::RunProbe(result, executablePath);
+                Lab::RunProbe(result, executablePath, report->directory);
                 serialized = result.measurements.Stringify(); probeStatus = result.status; probeDetail = result.detail;
             } catch (hresult_error const& e) {
                 auto hr = e.code();
                 probeStatus = (hr == E_ACCESSDENIED || hr == E_NOTIMPL ||
                     hr == HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED)) ? L"unavailable" : L"failed";
                 probeError = std::to_wstring(static_cast<uint32_t>(hr.value)) + L": " + std::wstring(e.message());
-                probeDetail = L"A validação não concluiu. O arquivo não foi executado.";
+                probeDetail = L"O probe não concluiu. O arquivo selecionado não foi executado.";
             } catch (std::exception const& e) {
                 probeStatus = L"failed"; probeError = to_hstring(e.what());
             }
@@ -474,7 +474,7 @@ struct App : ApplicationT<App> {
         try {
             for (size_t i = 0; i < report->tests.size() && !persistenceFailed; ++i)
                 if (!report->tests[i].isolated) co_await Run(static_cast<int>(i));
-            if (!persistenceFailed) status.Text(L"Validação concluída. O arquivo selecionado nunca foi executado.");
+            if (!persistenceFailed) status.Text(L"Probe concluído. O arquivo selecionado nunca foi executado.");
         } catch (hresult_error const& e) { status.Text(L"Erro: " + e.message()); }
         busy = false;
     }

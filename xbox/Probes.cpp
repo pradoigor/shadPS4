@@ -4,13 +4,14 @@
 #include "ControlledLoader.h"
 
 #include <windows.h>
+#include <filesystem>
 #include <winrt/Windows.Data.Json.h>
 #include <winrt/base.h>
 
 namespace Lab {
 
-void RunProbe(Test& test, std::wstring const& executablePath) {
-    if (test.id != L"controlled_loader")
+void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const& directory) {
+    if (test.id != L"controlled_execution")
         throw winrt::hresult_error(E_INVALIDARG, L"Teste automático desconhecido.");
     if (executablePath.empty())
         throw winrt::hresult_error(E_INVALIDARG, L"Selecione um ELF/SELF ou extraia um PKG antes de validar.");
@@ -36,8 +37,12 @@ void RunProbe(Test& test, std::wstring const& executablePath) {
     test.measurements.Insert(L"inner_entry", JsonValue::CreateNumberValue(static_cast<double>(result.inner_entry)));
     test.measurements.Insert(L"inner_mapped_bytes", JsonValue::CreateNumberValue(static_cast<double>(result.inner_mapped_bytes)));
     test.measurements.Insert(L"inner_checksum_fnv1a", JsonValue::CreateNumberValue(static_cast<double>(result.inner_checksum)));
+    auto execution = ExecuteGeneratedProbe(std::filesystem::path(directory));
+    test.measurements.Insert(L"execution_returned_value", JsonValue::CreateNumberValue(execution.returned_value));
+    test.measurements.Insert(L"execution_address", JsonValue::CreateNumberValue(static_cast<double>(execution.executable_address)));
+    test.measurements.Insert(L"execution_elf_file_size", JsonValue::CreateNumberValue(static_cast<double>(execution.elf_file_size)));
     test.status = L"passed";
-    test.detail = result.detail + L"\nArquivo: " + executablePath;
+    test.detail = result.detail + L"\n" + execution.detail + L"\nArquivo: " + executablePath;
 }
 
 } // namespace Lab

@@ -45,10 +45,9 @@ void WriteDurable(std::wstring const& path, std::string const& text) {
 Report::Report() {
     directory = Windows::Storage::ApplicationData::Current().LocalFolder().Path();
     Test loader;
-    loader.id = L"controlled_loader";
-    loader.title = L"Carregamento controlado ELF/SELF";
-    loader.detail = L"Selecione um eboot.bin, ELF ou SELF na Biblioteca e valide a estrutura. "
-                    L"O buffer resultante nunca é executável.";
+    loader.id = L"controlled_execution";
+    loader.title = L"Execução controlada de ELF";
+    loader.detail = L"O arquivo selecionado será validado, mas somente um ELF mínimo gerado pelo projeto será executado.";
     loader.isolated = false;
     loader.measurements = JsonObject{};
     tests.push_back(std::move(loader));

@@ -35,4 +35,16 @@ struct ControlledLoadResult {
 // non-executable buffer. It never transfers control to the input file.
 ControlledLoadResult LoadControlled(std::filesystem::path const& path);
 
+struct GeneratedExecutionResult {
+    bool passed{};
+    int returned_value{};
+    std::uint64_t executable_address{};
+    std::uint64_t elf_file_size{};
+    std::wstring detail;
+};
+
+// Builds an ELF containing a project-owned `return 42` stub, validates it with
+// the same loader, then executes only that known six-byte sequence.
+GeneratedExecutionResult ExecuteGeneratedProbe(std::filesystem::path const& directory);
+
 } // namespace Lab

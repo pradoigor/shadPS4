@@ -1,4 +1,4 @@
-# Extração e carregamento controlado UWP 0.4.1
+# Extração e execução controlada UWP 0.5.0
 
 O aplicativo executa extração, inspeciona metadados e oferece carregamento controlado. A biblioteca
 abre ao iniciar, usa uma faixa horizontal navegável pelo controle e distingue
@@ -23,9 +23,11 @@ inspirados no PS4, sem recursos gráficos da Sony.
 3. Importe ou selecione o PKG já existente e pressione **Extrair pacote**.
 4. Acompanhe arquivos/MiB; **Cancelar extração** interrompe entre blocos.
 5. Após terminar, confira o cartão **EXTRAÍDO**, feche e reabra o aplicativo.
-6. Se houver `eboot.bin`, pressione **Validar ELF / SELF**. A operação lê os
+6. Se houver `eboot.bin`, pressione **Executar probe controlado**. A operação lê os
    cabeçalhos, verifica limites dos segmentos e mapeia bytes em buffer privado não
-   executável. Baixe `LocalState/report.json` ou use **Diagnóstico → Exportar JSON**.
+   executável. Em seguida, executa somente um ELF mínimo gerado pelo projeto, que
+   retorna `42`; o arquivo selecionado nunca é chamado. Baixe `LocalState/report.json`
+   ou use **Diagnóstico → Exportar JSON**.
 
 Se o seletor de arquivos não estiver disponível no console, envie o PKG para
 `LocalState/Library` e as chaves para `LocalState/keys.json` pelo Device Portal,
@@ -73,5 +75,5 @@ decifradas. Ter chaves não garante suporte a qualquer pacote.
 
 O CI valida a estrutura do pacote APPX e audita APIs incompatíveis. A extração do
 Apollo foi validada no Xbox pelo usuário; essa evidência permanece no relatório de
-extração e na biblioteca persistida. A validação ELF/SELF desta versão ainda não
-é execução do conteúdo.
+extração e na biblioteca persistida. O probe de execução comprova apenas a transição
+controlada de memória do próprio projeto, não a execução do conteúdo recebido.

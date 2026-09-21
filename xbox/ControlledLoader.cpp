@@ -3,8 +3,11 @@
 
 #include "core/loader/elf.h"
 
+#include <windows.h>
+#include <memoryapi.h>
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <fstream>
 #include <functional>
 #include <limits>
@@ -66,6 +69,11 @@ std::uint64_t Fnv1a(std::vector<std::uint8_t> const& bytes) {
     }
     return hash;
 }
+
+struct Allocation {
+    void* value{};
+    ~Allocation() { if (value) VirtualFree(value, 0, MEM_RELEASE); }
+};
 
 bool IsElf(elf_header const& header) {
     return header.e_ident.magic[EI_MAG0] == ELFMAG0 &&
@@ -289,6 +297,78 @@ ControlledLoadResult LoadControlled(std::filesystem::path const& path) {
         return LoadSelf(reader, header);
     }
     throw std::runtime_error("Arquivo não é ELF ou SELF PS4.");
+}
+
+GeneratedExecutionResult ExecuteGeneratedProbe(std::filesystem::path const& directory) {
+    constexpr std::array<std::uint8_t, 6> code{0xB8, 0x2A, 0x00, 0x00, 0x00, 0xC3};
+    constexpr std::uint64_t payloadOffset = 0x1000;
+    const auto path = directory / L"controlled-execution-probe.elf";
+
+    elf_header header{};
+    header.e_ident.magic[EI_MAG0] = ELFMAG0;
+    header.e_ident.magic[EI_MAG1] = ELFMAG1;
+    header.e_ident.magic[EI_MAG2] = ELFMAG2;
+    header.e_ident.magic[EI_MAG3] = ELFMAG3;
+    header.e_ident.ei_class = ELF_CLASS_64;
+    header.e_ident.ei_data = ELF_DATA_2LSB;
+    header.e_ident.ei_version = ELF_VERSION_CURRENT;
+    header.e_ident.ei_osabi = ELF_OSABI_FREEBSD;
+    header.e_ident.ei_abiversion = ELF_ABI_VERSION_AMDGPU_HSA_V2;
+    header.e_type = ET_SCE_EXEC;
+    header.e_machine = EM_X86_64;
+    header.e_version = EV_CURRENT;
+    header.e_entry = 0x400000;
+    header.e_phoff = sizeof(elf_header);
+    header.e_ehsize = sizeof(elf_header);
+    header.e_phentsize = sizeof(elf_program_header);
+    header.e_phnum = 1;
+
+    elf_program_header program{};
+    program.p_type = PT_LOAD;
+    program.p_flags = PF_READ_EXEC;
+    program.p_offset = payloadOffset;
+    program.p_vaddr = header.e_entry;
+    program.p_filesz = code.size();
+    program.p_memsz = 0x1000;
+    program.p_align = 0x1000;
+
+    std::vector<std::uint8_t> image(static_cast<std::size_t>(payloadOffset + code.size()));
+    std::memcpy(image.data(), &header, sizeof(header));
+    std::memcpy(image.data() + sizeof(header), &program, sizeof(program));
+    std::memcpy(image.data() + payloadOffset, code.data(), code.size());
+    {
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        if (!output) throw std::runtime_error("Não foi possível criar o ELF de execução controlada.");
+        output.write(reinterpret_cast<char const*>(image.data()), static_cast<std::streamsize>(image.size()));
+        if (!output) throw std::runtime_error("Falha ao gravar o ELF de execução controlada.");
+    }
+
+    auto loaded = LoadControlled(path);
+    Require(loaded.mapped && loaded.load_segments == 1, "ELF de execução controlada não foi mapeado.");
+
+    Allocation allocation;
+    allocation.value = VirtualAllocFromApp(nullptr, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    if (!allocation.value) throw std::runtime_error("VirtualAllocFromApp falhou no probe controlado.");
+    std::memcpy(allocation.value, code.data(), code.size());
+    DWORD previous{};
+    if (!VirtualProtectFromApp(allocation.value, 4096, PAGE_EXECUTE_READ, &previous))
+        throw std::runtime_error("VirtualProtectFromApp falhou no probe controlado.");
+    if (!FlushInstructionCache(GetCurrentProcess(), allocation.value, code.size()))
+        throw std::runtime_error("FlushInstructionCache falhou no probe controlado.");
+    auto function = reinterpret_cast<int (*)()>(allocation.value);
+    const auto value = function();
+
+    GeneratedExecutionResult result;
+    result.returned_value = value;
+    result.executable_address = reinterpret_cast<std::uint64_t>(allocation.value);
+    result.elf_file_size = image.size();
+    result.passed = value == 42;
+    result.detail = result.passed
+        ? L"ELF gerado pelo projeto foi validado, protegido como RX e retornou 42. "
+          L"O eboot.bin selecionado não foi executado."
+        : L"O ELF gerado pelo projeto retornou um valor inesperado. O eboot.bin selecionado não foi executado.";
+    if (!result.passed) throw std::runtime_error("Probe de execução controlada retornou valor incorreto.");
+    return result;
 }
 
 } // namespace Lab

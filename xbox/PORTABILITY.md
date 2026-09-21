@@ -4,7 +4,8 @@ Base analisada: `42c555b7ab5d0678f531a7e4d505560ccc0f8add`.
 
 Este alvo é um laboratório UWP dentro do fork. A extração do PKG do Apollo foi
 executada no Xbox e persistiu na biblioteca com capa e metadados. A versão atual
-mantém somente uma operação diagnóstica ativa: carregamento controlado de ELF/SELF.
+mantém uma operação diagnóstica ativa: validação do ELF/SELF selecionado seguida
+de execução de um ELF mínimo gerado pelo próprio projeto.
 
 ## Carregamento controlado
 
@@ -20,8 +21,9 @@ compressão. O conteúdo protegido permanece bloqueado; esta etapa não tenta
 descriptografar SELF e nunca chama o ponto de entrada.
 
 Um resultado aprovado significa que a estrutura e os limites descritos foram
-aceitos. Não significa que o ABI, relocador, TLS, bibliotecas, renderer Vulkan ou
-o código do homebrew funcionem no Xbox.
+aceitos e que o probe próprio retornou `42`. O arquivo selecionado não é executado.
+Isso não significa que o ABI, relocador, TLS, bibliotecas, renderer Vulkan ou o
+código do homebrew funcionem no Xbox.
 
 ## Bloqueios ainda abertos
 
@@ -40,7 +42,7 @@ o código do homebrew funcionem no Xbox.
 2. Implementar relocação e TLS em estruturas já validadas, sem executar código
    recebido até haver isolamento e recuperação de falhas.
 3. Definir uma camada gráfica compatível com as capacidades reais do Dev Mode.
-4. Executar um homebrew mínimo sob limites de tempo e memória, registrando falhas.
+4. Ligar relocação/imports/TLS a um carregador seguro e executar um homebrew mínimo sob limites de tempo e memória.
 5. Só depois avaliar jogos e desempenho.
 
 ## Referências
