@@ -99,6 +99,7 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
     test.measurements.Insert(L"relocation_data_valid", JsonValue::CreateBooleanValue(result.relocation_data_valid));
     auto execution = ExecuteGeneratedProbe(std::filesystem::path(directory));
     test.measurements.Insert(L"execution_returned_value", JsonValue::CreateNumberValue(execution.returned_value));
+    test.measurements.Insert(L"hle_thunk_returned_value", JsonValue::CreateNumberValue(static_cast<double>(execution.hle_thunk_returned_value)));
     test.measurements.Insert(L"execution_address", JsonValue::CreateNumberValue(static_cast<double>(execution.executable_address)));
     test.measurements.Insert(L"execution_elf_file_size", JsonValue::CreateNumberValue(static_cast<double>(execution.elf_file_size)));
     test.status = L"passed";

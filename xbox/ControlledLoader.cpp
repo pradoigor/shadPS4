@@ -3,6 +3,7 @@
 
 #include "core/aerolib/aerolib.h"
 #include "core/loader/elf.h"
+#include "HleDispatcher.h"
 
 #include <windows.h>
 #include <memoryapi.h>
@@ -682,9 +683,17 @@ GeneratedExecutionResult ExecuteGeneratedProbe(std::filesystem::path const& dire
     result.executable_address = reinterpret_cast<std::uint64_t>(allocation.value);
     result.elf_file_size = image.size();
     result.passed = value == 42;
+    HleDispatcher dispatcher;
+    const auto hle = dispatcher.Resolve("1U-s6o8XOcE#B#B");
+    if (!hle.address || !hle.implemented)
+        throw std::runtime_error("Dispatcher HLE não criou o thunk de smoke test.");
+    using NoArgumentHle = std::uint64_t (*)();
+    result.hle_thunk_returned_value = reinterpret_cast<NoArgumentHle>(hle.address)();
+    if (result.hle_thunk_returned_value != 0)
+        throw std::runtime_error("Thunk HLE de smoke test retornou valor inesperado.");
     result.detail = result.passed
         ? L"ELF gerado pelo projeto foi validado, protegido como RX e retornou 42. "
-          L"O eboot.bin selecionado não foi executado."
+          L"O thunk HLE SysV→Windows também retornou 0. O eboot.bin selecionado não foi executado."
         : L"O ELF gerado pelo projeto retornou um valor inesperado. O eboot.bin selecionado não foi executado.";
     if (!result.passed) throw std::runtime_error("Probe de execução controlada retornou valor incorreto.");
     return result;

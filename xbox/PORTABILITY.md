@@ -31,6 +31,9 @@ um dispatcher Windows. O dispatcher possui somente dois handlers iniciais
 `ENOSYS`. Ele ainda não recebe os imports do ELF nem possui memória convidada
 executável, portanto continua sendo infraestrutura compilada, não uma autorização
 de execução.
+O probe interno agora exerce um thunk sem argumentos para
+`sysKernelGetUpdVersion` e exige retorno zero. Essa chamada usa somente um
+handler do próprio aplicativo; ela não usa memória ELF nem executa o Apollo.
 
 ## Carregamento controlado
 

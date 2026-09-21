@@ -73,6 +73,7 @@ ControlledLoadResult LoadControlled(std::filesystem::path const& path);
 struct GeneratedExecutionResult {
     bool passed{};
     int returned_value{};
+    std::uint64_t hle_thunk_returned_value{};
     std::uint64_t executable_address{};
     std::uint64_t elf_file_size{};
     std::wstring detail;
