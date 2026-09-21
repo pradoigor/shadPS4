@@ -44,6 +44,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sceNetCtlTerm") handler = &NetCtlTerm;
     if (name == "sceSystemServiceHideSplashScreen") handler = &HideSplashScreen;
     if (name == "sceKernelDebugOutText") handler = &KernelDebugOutText;
+    if (name == "sceKernelMprotect") handler = &KernelMprotect;
     if (name == "clock_gettime") handler = &ClockGetTime;
 
     const auto slot = static_cast<std::uint64_t>(entries_.size());
@@ -165,6 +166,24 @@ std::uint64_t HleDispatcher::KernelDebugOutText(HleDispatcher& dispatcher,
     }
     OutputDebugStringA(text.c_str());
     return static_cast<std::uint64_t>(text.size());
+}
+
+std::uint64_t HleDispatcher::KernelMprotect(HleDispatcher& dispatcher,
+                                            GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEacces = 0x8002000Dull;
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    constexpr std::uint64_t OrbisEinval = 0x80020016ull;
+    // PS4 PROT_READ/WRITE/EXEC are represented by bits 0/1/2. EXEC is
+    // deliberately rejected: guest code never becomes executable in UWP.
+    const auto address = frame.gpr[0];
+    const auto bytes = frame.gpr[1];
+    const auto prot = frame.gpr[2];
+    if (bytes == 0 || (prot & ~0x7ull) != 0) return OrbisEinval;
+    if ((prot & 0x4ull) != 0) return OrbisEacces;
+    if (!dispatcher.memory_ || address == 0) return OrbisEfault;
+    return dispatcher.memory_->ProtectNoExecute(address, bytes, prot)
+        ? 0
+        : OrbisEfault;
 }
 
 std::uint64_t HleDispatcher::ClockGetTime(HleDispatcher& dispatcher,

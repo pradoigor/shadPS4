@@ -88,4 +88,24 @@ void* GuestMemory::TranslateWritable(std::uint64_t guestAddress,
     return nullptr;
 }
 
+bool GuestMemory::ProtectNoExecute(std::uint64_t guestAddress, std::size_t bytes,
+                                   std::uint64_t prot) noexcept {
+    if (!base_ || guestAddress == 0 || bytes == 0 || (prot & ~0x7ull) != 0 ||
+        (prot & 0x4ull) != 0)
+        return false;
+    for (auto const& range : writable_) {
+        if (guestAddress < range.address || guestAddress - range.address > range.size)
+            continue;
+        const auto offset = guestAddress - range.address;
+        if (bytes > range.size - offset) return false;
+        auto* host = static_cast<std::uint8_t*>(range.host) + offset;
+        const DWORD protection = (prot & 0x2ull) != 0
+            ? PAGE_READWRITE
+            : ((prot & 0x1ull) != 0 ? PAGE_READONLY : PAGE_NOACCESS);
+        DWORD previous{};
+        return VirtualProtectFromApp(host, bytes, protection, &previous) != FALSE;
+    }
+    return false;
+}
+
 } // namespace Lab

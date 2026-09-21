@@ -24,6 +24,10 @@ public:
                       std::vector<GuestSegmentInfo> const& segments);
     void* Translate(std::uint64_t guestAddress, std::size_t bytes) const noexcept;
     void* TranslateWritable(std::uint64_t guestAddress, std::size_t bytes) const noexcept;
+    // Applies only non-executable page protection to an isolated PF_W range.
+    // The UWP image mapping and all code/read-only ranges remain unchanged.
+    bool ProtectNoExecute(std::uint64_t guestAddress, std::size_t bytes,
+                          std::uint64_t prot) noexcept;
     bool mapped() const noexcept { return base_ != nullptr; }
     std::size_t size() const noexcept { return size_; }
     std::size_t writableBytes() const noexcept;
