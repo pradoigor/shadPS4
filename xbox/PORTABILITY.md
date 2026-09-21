@@ -29,7 +29,10 @@ A auditoria registra a presença e os tamanhos dos metadados `PT_DYNAMIC` e `PT_
 as tabelas de relocação e as dependências declaradas. Ela classifica os tipos de
 relocação e verifica se os alvos ficam em `PT_LOAD` ou `PT_SCE_RELRO`. Um dry-run
 aplica apenas `R_X86_64_RELATIVE` em uma cópia privada não executável; ele não
-altera o arquivo, resolve imports ou chama inicializadores.
+altera o arquivo, resolve imports ou chama inicializadores. Os NIDs das
+relocações de símbolo são comparados com o registro AeroLib do núcleo para
+identificar nomes conhecidos e pendências. Essa comparação é um inventário
+estático: os registros conhecidos ainda não são endereços HLE válidos no UWP.
 
 ## Bloqueios ainda abertos
 

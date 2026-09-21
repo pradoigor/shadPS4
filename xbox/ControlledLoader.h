@@ -44,8 +44,14 @@ struct ControlledLoadResult {
     std::uint64_t tls_relocations_pending{};
     std::uint64_t symbol_relocations_valid{};
     std::uint64_t symbol_relocations_invalid{};
+    // Matches against the upstream AeroLib NID registry are inventory only:
+    // they do not provide an executable address or patch the guest image.
+    std::uint64_t hle_symbols_known{};
+    std::uint64_t hle_symbols_unknown{};
     std::uint64_t relocation_dry_run_checksum{};
     std::vector<std::string> pending_symbol_names;
+    std::vector<std::string> hle_symbol_mappings;
+    std::vector<std::string> hle_unmapped_symbols;
     std::vector<std::string> import_library_ids;
     std::vector<std::string> needed_module_ids;
     std::vector<std::string> import_library_names;

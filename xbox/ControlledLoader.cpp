@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "ControlledLoader.h"
 
+#include "core/aerolib/aerolib.h"
 #include "core/loader/elf.h"
 
 #include <windows.h>
@@ -395,6 +396,8 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
         return true;
     };
     std::set<std::string> seenSymbolNames;
+    std::set<std::string> seenHleMappings;
+    std::set<std::string> seenUnmappedSymbols;
     auto applyRelativeRelocations = [&](std::uint64_t offset, std::uint64_t size) {
         if (size == 0 || !dynlibData || dynamicTables.rela_entry_size != sizeof(elf_relocation) ||
             size % sizeof(elf_relocation) != 0 || offset > dynlibData->p_filesz ||
@@ -424,7 +427,27 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
                 if (symbolHasValidName(relocation.GetSymbol(), &symbolName)) {
                     ++result.symbol_relocations_valid;
                     if (seenSymbolNames.insert(symbolName).second && result.pending_symbol_names.size() < 512)
-                        result.pending_symbol_names.push_back(std::move(symbolName));
+                        result.pending_symbol_names.push_back(symbolName);
+                    // PS4 dynamic symbols carry the encoded NID followed by
+                    // the import library and module IDs (for example
+                    // "nid#E#E"). The upstream AeroLib table can identify
+                    // the original symbol name, but it is not an address
+                    // resolver and must not be used to execute guest code.
+                    const auto separator = symbolName.find('#');
+                    const auto nid = symbolName.substr(0, separator);
+                    const auto* entry = Core::AeroLib::FindByNid(nid.c_str());
+                    if (entry) {
+                        ++result.hle_symbols_known;
+                        if (seenHleMappings.insert(symbolName).second &&
+                            result.hle_symbol_mappings.size() < 512) {
+                            result.hle_symbol_mappings.push_back(symbolName + "=" + entry->name);
+                        }
+                    } else {
+                        ++result.hle_symbols_unknown;
+                        if (seenUnmappedSymbols.insert(symbolName).second &&
+                            result.hle_unmapped_symbols.size() < 512)
+                            result.hle_unmapped_symbols.push_back(symbolName);
+                    }
                 } else {
                     ++result.symbol_relocations_invalid;
                 }

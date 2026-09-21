@@ -52,10 +52,20 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
     test.measurements.Insert(L"tls_relocations_pending", JsonValue::CreateNumberValue(static_cast<double>(result.tls_relocations_pending)));
     test.measurements.Insert(L"symbol_relocations_valid", JsonValue::CreateNumberValue(static_cast<double>(result.symbol_relocations_valid)));
     test.measurements.Insert(L"symbol_relocations_invalid", JsonValue::CreateNumberValue(static_cast<double>(result.symbol_relocations_invalid)));
+    test.measurements.Insert(L"hle_symbols_known", JsonValue::CreateNumberValue(static_cast<double>(result.hle_symbols_known)));
+    test.measurements.Insert(L"hle_symbols_unknown", JsonValue::CreateNumberValue(static_cast<double>(result.hle_symbols_unknown)));
     winrt::Windows::Data::Json::JsonArray symbolNames;
     for (auto const& name : result.pending_symbol_names)
         symbolNames.Append(JsonValue::CreateStringValue(winrt::to_hstring(name)));
     test.measurements.Insert(L"pending_symbol_names", symbolNames);
+    winrt::Windows::Data::Json::JsonArray hleMappings;
+    for (auto const& mapping : result.hle_symbol_mappings)
+        hleMappings.Append(JsonValue::CreateStringValue(winrt::to_hstring(mapping)));
+    test.measurements.Insert(L"hle_symbol_mappings", hleMappings);
+    winrt::Windows::Data::Json::JsonArray hleUnmapped;
+    for (auto const& name : result.hle_unmapped_symbols)
+        hleUnmapped.Append(JsonValue::CreateStringValue(winrt::to_hstring(name)));
+    test.measurements.Insert(L"hle_unmapped_symbols", hleUnmapped);
     winrt::Windows::Data::Json::JsonArray libraryIds;
     for (auto const& id : result.import_library_ids)
         libraryIds.Append(JsonValue::CreateStringValue(winrt::to_hstring(id)));
@@ -94,8 +104,10 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
                   L", symbol pending=" + std::to_wstring(result.symbol_relocations_pending) +
                   L", symbol names valid=" + std::to_wstring(result.symbol_relocations_valid) +
                   L", invalid=" + std::to_wstring(result.symbol_relocations_invalid) +
+                  L", NIDs conhecidos no registro AeroLib=" + std::to_wstring(result.hle_symbols_known) +
+                  L", NIDs sem correspondência=" + std::to_wstring(result.hle_symbols_unknown) +
                   L", TLS pending=" + std::to_wstring(result.tls_relocations_pending) +
-                  L". O dry-run não altera o arquivo nem executa o homebrew; resolver imports/TLS ainda é necessário.\n" +
+                  L". O inventário AeroLib identifica nomes conhecidos, mas ainda não fornece endereços HLE; o dry-run não altera o arquivo nem executa o homebrew.\n" +
                   execution.detail + L"\nArquivo: " + executablePath;
 }
 

@@ -4,20 +4,24 @@ Aplicativo **UWP x64 / C++/WinRT / XAML** para medir a viabilidade de portar
 shadPS4 ao Xbox Series X em Dev Mode. **Ainda não é um emulador PS4 no Xbox.**
 O alvo é independente do CMake e das dependências desktop do núcleo.
 
-A versão **0.13.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
+A versão **0.14.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
 PKG/ELF, keysets FPKG embutidos, importação de chaves personalizadas, extração em
-segundo plano e um probe de execução controlada com auditoria de requisitos runtime e relocação. O ELF/SELF selecionado é apenas
+segundo plano e um probe de execução controlada com auditoria de requisitos runtime,
+relocação e inventário de NIDs HLE. O ELF/SELF selecionado é apenas
 validado e mapeado em buffer não executável; o único código executado é um ELF
 mínimo gerado pelo próprio projeto, com retorno esperado `42`. O relatório também
 conta segmentos dynamic/TLS, relocações e dependências importadas, valida os tipos
 e os alvos das relocações em `PT_LOAD` e `PT_SCE_RELRO`, mas ainda não as aplica
 nem resolve imports. As relocações relativas são aplicadas somente em uma cópia
 privada não executável durante o dry-run; o arquivo selecionado continua intocado.
-Os 265 símbolos pendentes também têm seus índices e nomes conferidos contra as
-tabelas internas antes de qualquer futuro resolver. O relatório também lista os
-nomes únicos dos símbolos pendentes e os IDs codificados das bibliotecas/módulos
-importados para montar a ponte HLE. Os nomes das bibliotecas e versões são lidos
-da tabela de strings do ELF, sem executar o conteúdo.
+Os símbolos pendentes também têm seus índices e nomes conferidos contra as
+tabelas internas. O relatório cruza cada NID com o registro AeroLib derivado do
+núcleo e registra o nome conhecido ou a ausência de correspondência. Esse
+inventário identifica símbolos, mas ainda não fornece endereços HLE, não altera
+relocações e não executa o conteúdo. O relatório também lista os IDs codificados
+das bibliotecas/módulos importados para montar a ponte HLE. Os nomes das
+bibliotecas e versões são lidos da tabela de strings do ELF, sem executar o
+conteúdo.
 
 ## Compilar
 
