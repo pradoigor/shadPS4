@@ -290,4 +290,53 @@ std::uint64_t InvokeSysv2(void *entry, std::uint64_t argument0,
   return value;
 }
 
+std::uint64_t InvokeSysv3(void *entry, std::uint64_t argument0,
+                          std::uint64_t argument1, std::uint64_t argument2) {
+  if (!entry)
+    throw std::invalid_argument("Entrada SysV ausente.");
+  auto *caller = static_cast<std::uint8_t *>(
+      Core::PlatformMemory::Allocate(GetCurrentProcess(), nullptr, PageSize,
+                                     MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+  if (!caller)
+    throw std::runtime_error("Não foi possível reservar o chamador SysV.");
+
+  std::size_t offset = 0;
+  Byte(caller, offset, 0x57);
+  Byte(caller, offset, 0x56);
+  Byte(caller, offset, 0x48);
+  Byte(caller, offset, 0x83);
+  Byte(caller, offset, 0xEC);
+  Byte(caller, offset, 0x28);
+  constexpr std::uint8_t opcodes[] = {0xBF, 0xBE, 0xBA};
+  const std::uint64_t arguments[] = {argument0, argument1, argument2};
+  for (std::size_t index = 0; index != 3; ++index) {
+    Byte(caller, offset, 0x48);
+    Byte(caller, offset, opcodes[index]);
+    U64(caller, offset, arguments[index]);
+  }
+  Byte(caller, offset, 0x48);
+  Byte(caller, offset, 0xB8);
+  U64(caller, offset, reinterpret_cast<std::uint64_t>(entry));
+  Byte(caller, offset, 0xFF);
+  Byte(caller, offset, 0xD0);
+  Byte(caller, offset, 0x48);
+  Byte(caller, offset, 0x83);
+  Byte(caller, offset, 0xC4);
+  Byte(caller, offset, 0x28);
+  Byte(caller, offset, 0x5E);
+  Byte(caller, offset, 0x5F);
+  Byte(caller, offset, 0xC3);
+
+  DWORD previous{};
+  if (!Core::PlatformMemory::Protect(GetCurrentProcess(), caller, PageSize,
+                                     PAGE_EXECUTE_READ, &previous) ||
+      !FlushInstructionCache(GetCurrentProcess(), caller, offset)) {
+    Core::PlatformMemory::Free(GetCurrentProcess(), caller, 0, MEM_RELEASE);
+    throw std::runtime_error("Não foi possível ativar o chamador SysV.");
+  }
+  const auto value = reinterpret_cast<std::uint64_t (*)()>(caller)();
+  Core::PlatformMemory::Free(GetCurrentProcess(), caller, 0, MEM_RELEASE);
+  return value;
+}
+
 } // namespace Lab

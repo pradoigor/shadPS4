@@ -49,5 +49,7 @@ SysvAbiValidation ValidateSysvThunkAbi();
 // directly with the SysV ABI.
 std::uint64_t InvokeSysv2(void *entry, std::uint64_t argument0,
                           std::uint64_t argument1);
+std::uint64_t InvokeSysv3(void *entry, std::uint64_t argument0,
+                          std::uint64_t argument1, std::uint64_t argument2);
 
 } // namespace Lab

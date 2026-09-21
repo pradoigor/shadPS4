@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace Lab {
@@ -92,10 +93,16 @@ private:
     static std::uint64_t UserServiceGetUserName(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t SystemServiceParamGetInt(HleDispatcher&,
                                                   GuestCallFrame const&) noexcept;
+    static std::uint64_t RegMgrGetBin(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t RegMgrSetBin(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t RegMgrGetStr(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t RegMgrSetStr(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t RegMgrSetInt(HleDispatcher&, GuestCallFrame const&) noexcept;
 
     SysvThunkArena thunks_;
     std::vector<Entry> entries_;
     GuestMemory* memory_{};
+    std::unordered_map<std::uint32_t, std::vector<std::uint8_t>> registry_;
 };
 
 } // namespace Lab

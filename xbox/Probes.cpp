@@ -154,6 +154,45 @@ void RunProbe(Test &test, std::wstring const &executablePath,
                                         values[1] == 1;
     }
   }
+  std::string regGetSymbol;
+  std::string regSetSymbol;
+  for (auto const &mapping : result.hle_symbol_mappings) {
+    constexpr std::string_view getSuffix = "=sceRegMgrGetBin";
+    constexpr std::string_view setSuffix = "=sceRegMgrSetBin";
+    if (mapping.size() > getSuffix.size() &&
+        mapping.compare(mapping.size() - getSuffix.size(), getSuffix.size(),
+                        getSuffix) == 0)
+      regGetSymbol = mapping.substr(0, mapping.size() - getSuffix.size());
+    if (mapping.size() > setSuffix.size() &&
+        mapping.compare(mapping.size() - setSuffix.size(), setSuffix.size(),
+                        setSuffix) == 0)
+      regSetSymbol = mapping.substr(0, mapping.size() - setSuffix.size());
+  }
+  if (!regGetSymbol.empty() && !regSetSymbol.empty() &&
+      result.guest_memory_writable_bytes >= 32) {
+    std::uint64_t guestAddress = 0;
+    for (auto const &segment : result.guest_segments) {
+      if ((segment.flags & 0x2u) != 0 && segment.size >= 32) {
+        guestAddress = guestMemory.RuntimeAddress(segment.address);
+        break;
+      }
+    }
+    auto *getThunk = hleDispatcher.AddressFor(regGetSymbol);
+    auto *setThunk = hleDispatcher.AddressFor(regSetSymbol);
+    auto *bytes = static_cast<std::uint8_t *>(
+        guestMemory.TranslateWritable(guestAddress, 16));
+    if (guestAddress && getThunk && setThunk && bytes) {
+      constexpr std::uint64_t pattern = 0xA5B6C7D8E9FA1021ull;
+      std::memcpy(bytes, &pattern, sizeof(pattern));
+      std::memset(bytes + 8, 0, 8);
+      const auto setResult = InvokeSysv3(setThunk, 0x1234, guestAddress, 8);
+      const auto getResult = InvokeSysv3(getThunk, 0x1234, guestAddress + 8, 8);
+      std::uint64_t restored{};
+      std::memcpy(&restored, bytes + 8, sizeof(restored));
+      result.hle_regmgr_probe_passed =
+          setResult == 0 && getResult == 0 && restored == pattern;
+    }
+  }
   auto gate = EvaluateRuntimeGate(result);
   result.runtime_preflight_ready = gate.ready;
   result.runtime_blockers = gate.blockers;
@@ -304,6 +343,9 @@ void RunProbe(Test &test, std::wstring const &executablePath,
   test.measurements.Insert(
       L"hle_service_probe_passed",
       JsonValue::CreateBooleanValue(result.hle_service_probe_passed));
+  test.measurements.Insert(
+      L"hle_regmgr_probe_passed",
+      JsonValue::CreateBooleanValue(result.hle_regmgr_probe_passed));
   test.measurements.Insert(L"hle_pointer_probe_return",
                            JsonValue::CreateNumberValue(static_cast<double>(
                                result.hle_pointer_probe_return)));
@@ -430,6 +472,8 @@ void RunProbe(Test &test, std::wstring const &executablePath,
       (result.hle_pointer_probe_passed ? L"aprovado" : L"pendente") +
       L", serviços de usuário/sistema=" +
       (result.hle_service_probe_passed ? L"aprovado" : L"pendente") +
+      L", serviço RegMgr=" +
+      (result.hle_regmgr_probe_passed ? L"aprovado" : L"pendente") +
       L", TLS pending=" + std::to_wstring(result.tls_relocations_pending) +
       std::wstring(L". Gate de runtime=") +
       (result.runtime_preflight_ready ? L"pronto" : L"bloqueado") +

@@ -4,7 +4,7 @@ Aplicativo **UWP x64 / C++/WinRT / XAML** para medir a viabilidade de portar
 shadPS4 ao Xbox Series X em Dev Mode. **Ainda não é um emulador PS4 no Xbox.**
 O alvo é independente do CMake e das dependências desktop do núcleo.
 
-A versão **0.38.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
+A versão **0.39.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
 PKG/ELF, keysets FPKG embutidos, importação de chaves personalizadas, extração em
 segundo plano e um probe de execução controlada com auditoria de requisitos runtime,
 relocação e inventário de NIDs HLE. O ELF/SELF selecionado é apenas
@@ -58,6 +58,9 @@ Os serviços iniciais de usuário e preferências do sistema agora escrevem por
 ponteiros convidados validados: usuário inicial/login, nome `Xbox` e idioma,
 data, hora, fuso, controle parental e botão de confirmação. O probe confere em
 conjunto o usuário inicial e o idioma antes de liberar esse bloco para o runtime.
+O subconjunto importado de `libSceRegMgr` mantém valores binários, strings e
+inteiros em um registro isolado por processo, com limite de tamanho e validação
+de ponteiros convidados. O probe confirma escrita e leitura binária pelo thunk.
 O dispatcher também reconhece `sceKernelMprotect`, mas só altera proteção de
 faixas `PF_W` coerentes e rejeita qualquer pedido de execução; isso permite
 exercitar a semântica de proteção sem abrir uma transição para código convidado.

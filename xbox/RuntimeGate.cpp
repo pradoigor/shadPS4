@@ -81,7 +81,7 @@ RuntimeGateResult EvaluateRuntimeGate(ControlledLoadResult const &load) {
       Add(unique, result.blockers,
           L"O backend FreeType importado pelo homebrew ainda não está ligado "
           L"ao UWP.");
-    else if (name == L"libSceRegMgr")
+    else if (name == L"libSceRegMgr" && !load.hle_regmgr_probe_passed)
       Add(unique, result.blockers,
           L"O serviço RegMgr ainda não possui uma implementação HLE UWP.");
   }

@@ -62,6 +62,11 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sceUserServiceGetLoginUserIdList") use(&UserServiceGetLoginUsers);
     if (name == "sceUserServiceGetUserName") use(&UserServiceGetUserName);
     if (name == "sceSystemServiceParamGetInt") use(&SystemServiceParamGetInt);
+    if (name == "sceRegMgrGetBin") use(&RegMgrGetBin);
+    if (name == "sceRegMgrSetBin") use(&RegMgrSetBin);
+    if (name == "sceRegMgrGetStr") use(&RegMgrGetStr);
+    if (name == "sceRegMgrSetStr") use(&RegMgrSetStr);
+    if (name == "sceRegMgrSetInt") use(&RegMgrSetInt);
 
     const auto slot = static_cast<std::uint64_t>(entries_.size());
     entries_.push_back(Entry{encoded, nid, implemented, handler, nullptr});
@@ -408,6 +413,54 @@ std::uint64_t HleDispatcher::SystemServiceParamGetInt(
     case 1000: *output = 1; break;
     default: *output = 0; break;
     }
+    return 0;
+}
+
+std::uint64_t HleDispatcher::RegMgrGetBin(HleDispatcher& dispatcher,
+                                          GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    constexpr std::uint64_t OrbisEinval = 0x80020016ull;
+    const auto size = static_cast<std::size_t>(frame.gpr[2]);
+    if (!dispatcher.memory_ || size == 0 || size > 4096) return OrbisEinval;
+    auto* output = dispatcher.memory_->TranslateWritable(frame.gpr[1], size);
+    if (!output) return OrbisEfault;
+    std::memset(output, 0, size);
+    const auto found = dispatcher.registry_.find(static_cast<std::uint32_t>(frame.gpr[0]));
+    if (found != dispatcher.registry_.end())
+        std::memcpy(output, found->second.data(),
+                    (std::min)(size, found->second.size()));
+    return 0;
+}
+
+std::uint64_t HleDispatcher::RegMgrSetBin(HleDispatcher& dispatcher,
+                                          GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    constexpr std::uint64_t OrbisEinval = 0x80020016ull;
+    const auto size = static_cast<std::size_t>(frame.gpr[2]);
+    if (!dispatcher.memory_ || size == 0 || size > 4096) return OrbisEinval;
+    auto* input = static_cast<std::uint8_t*>(dispatcher.memory_->Translate(frame.gpr[1], size));
+    if (!input) return OrbisEfault;
+    dispatcher.registry_[static_cast<std::uint32_t>(frame.gpr[0])] =
+        std::vector<std::uint8_t>(input, input + size);
+    return 0;
+}
+
+std::uint64_t HleDispatcher::RegMgrGetStr(HleDispatcher& dispatcher,
+                                          GuestCallFrame const& frame) noexcept {
+    return RegMgrGetBin(dispatcher, frame);
+}
+
+std::uint64_t HleDispatcher::RegMgrSetStr(HleDispatcher& dispatcher,
+                                          GuestCallFrame const& frame) noexcept {
+    return RegMgrSetBin(dispatcher, frame);
+}
+
+std::uint64_t HleDispatcher::RegMgrSetInt(HleDispatcher& dispatcher,
+                                          GuestCallFrame const& frame) noexcept {
+    const auto value = static_cast<std::int32_t>(frame.gpr[1]);
+    auto* bytes = reinterpret_cast<std::uint8_t const*>(&value);
+    dispatcher.registry_[static_cast<std::uint32_t>(frame.gpr[0])] =
+        std::vector<std::uint8_t>(bytes, bytes + sizeof(value));
     return 0;
 }
 
