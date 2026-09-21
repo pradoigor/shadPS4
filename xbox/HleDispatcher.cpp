@@ -45,6 +45,11 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sceSystemServiceHideSplashScreen") handler = &HideSplashScreen;
     if (name == "sceKernelDebugOutText") handler = &KernelDebugOutText;
     if (name == "sceKernelMprotect") handler = &KernelMprotect;
+    if (name == "memcpy") handler = &MemoryMemcpy;
+    if (name == "memmove") handler = &MemoryMemmove;
+    if (name == "memset") handler = &MemoryMemset;
+    if (name == "memcmp") handler = &MemoryMemcmp;
+    if (name == "strlen") handler = &MemoryStrlen;
     if (name == "clock_gettime") handler = &ClockGetTime;
 
     const auto slot = static_cast<std::uint64_t>(entries_.size());
@@ -184,6 +189,71 @@ std::uint64_t HleDispatcher::KernelMprotect(HleDispatcher& dispatcher,
     return dispatcher.memory_->ProtectNoExecute(address, bytes, prot)
         ? 0
         : OrbisEfault;
+}
+
+std::uint64_t HleDispatcher::MemoryMemcpy(HleDispatcher& dispatcher,
+                                          GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    if (!dispatcher.memory_ || frame.gpr[2] > static_cast<std::uint64_t>(SIZE_MAX))
+        return OrbisEfault;
+    const auto bytes = static_cast<std::size_t>(frame.gpr[2]);
+    auto* destination = dispatcher.memory_->TranslateWritable(frame.gpr[0], bytes);
+    auto* source = dispatcher.memory_->Translate(frame.gpr[1], bytes);
+    if (bytes != 0 && (!destination || !source)) return OrbisEfault;
+    if (bytes != 0) std::memcpy(destination, source, bytes);
+    return frame.gpr[0];
+}
+
+std::uint64_t HleDispatcher::MemoryMemmove(HleDispatcher& dispatcher,
+                                           GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    if (!dispatcher.memory_ || frame.gpr[2] > static_cast<std::uint64_t>(SIZE_MAX))
+        return OrbisEfault;
+    const auto bytes = static_cast<std::size_t>(frame.gpr[2]);
+    auto* destination = dispatcher.memory_->TranslateWritable(frame.gpr[0], bytes);
+    auto* source = dispatcher.memory_->Translate(frame.gpr[1], bytes);
+    if (bytes != 0 && (!destination || !source)) return OrbisEfault;
+    if (bytes != 0) std::memmove(destination, source, bytes);
+    return frame.gpr[0];
+}
+
+std::uint64_t HleDispatcher::MemoryMemset(HleDispatcher& dispatcher,
+                                          GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    if (!dispatcher.memory_ || frame.gpr[2] > static_cast<std::uint64_t>(SIZE_MAX))
+        return OrbisEfault;
+    const auto bytes = static_cast<std::size_t>(frame.gpr[2]);
+    auto* destination = dispatcher.memory_->TranslateWritable(frame.gpr[0], bytes);
+    if (bytes != 0 && !destination) return OrbisEfault;
+    if (bytes != 0) std::memset(destination, static_cast<int>(frame.gpr[1] & 0xFFu), bytes);
+    return frame.gpr[0];
+}
+
+std::uint64_t HleDispatcher::MemoryMemcmp(HleDispatcher& dispatcher,
+                                          GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    if (!dispatcher.memory_ || frame.gpr[2] > static_cast<std::uint64_t>(SIZE_MAX))
+        return OrbisEfault;
+    const auto bytes = static_cast<std::size_t>(frame.gpr[2]);
+    auto* left = dispatcher.memory_->Translate(frame.gpr[0], bytes);
+    auto* right = dispatcher.memory_->Translate(frame.gpr[1], bytes);
+    if (bytes != 0 && (!left || !right)) return OrbisEfault;
+    if (bytes == 0) return 0;
+    return static_cast<std::uint64_t>(static_cast<std::int64_t>(std::memcmp(left, right, bytes)));
+}
+
+std::uint64_t HleDispatcher::MemoryStrlen(HleDispatcher& dispatcher,
+                                          GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    constexpr std::size_t MaxString = 1u << 20;
+    if (!dispatcher.memory_ || frame.gpr[0] == 0) return OrbisEfault;
+    for (std::size_t length = 0; length < MaxString; ++length) {
+        if (frame.gpr[0] > UINT64_MAX - length) return OrbisEfault;
+        auto* byte = static_cast<char*>(dispatcher.memory_->Translate(frame.gpr[0] + length, 1));
+        if (!byte) return OrbisEfault;
+        if (*byte == '\0') return length;
+    }
+    return OrbisEfault;
 }
 
 std::uint64_t HleDispatcher::ClockGetTime(HleDispatcher& dispatcher,

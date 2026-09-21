@@ -74,6 +74,11 @@ private:
     static std::uint64_t HideSplashScreen(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelDebugOutText(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelMprotect(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t MemoryMemcpy(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t MemoryMemmove(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t MemoryMemset(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t MemoryMemcmp(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t MemoryStrlen(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t ClockGetTime(HleDispatcher&, GuestCallFrame const&) noexcept;
 
     SysvThunkArena thunks_;
