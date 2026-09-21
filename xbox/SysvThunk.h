@@ -20,6 +20,7 @@ using SysvDispatch = std::uint64_t (*)(void* context, std::uint64_t slot,
 // guest entry points until a real HLE dispatcher is supplied.
 class SysvThunkArena {
 public:
+    SysvThunkArena() = default;
     ~SysvThunkArena();
 
     SysvThunkArena(SysvThunkArena const&) = delete;
