@@ -38,20 +38,20 @@
     <ClCompile>
       <LanguageStandard>stdcpplatest</LanguageStandard><WarningLevel>Level4</WarningLevel>
       <PrecompiledHeader>NotUsing</PrecompiledHeader><ExceptionHandling>Sync</ExceptionHandling>
-      <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;UNICODE;_UNICODE;SHADPS4_XBOX_UWP=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;UNICODE;_UNICODE;SHADPS4_XBOX_UWP=1;MINIZ_NO_ARCHIVE_APIS;MINIZ_NO_DEFLATE_APIS;MINIZ_NO_STDIO;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>/bigobj /utf-8 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\src;$(ProjectDir)..\externals\miniz;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem><GenerateDebugInformation>true</GenerateDebugInformation>
       <GenerateWindowsMetadata>false</GenerateWindowsMetadata>
-      <AdditionalDependencies>WindowsApp.lib;d3d11.lib;d3d12.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>WindowsApp.lib;bcrypt.lib;d3d11.lib;d3d12.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <FxCompile><ShaderModel>5.0</ShaderModel><EntryPointName>main</EntryPointName></FxCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="App.cpp" /><ClCompile Include="CoreProbe.cpp" /><ClCompile Include="ElfProbe.cpp" /><ClCompile Include="ExceptionProbe.cpp" /><ClCompile Include="ExecProbe.cpp" /><ClCompile Include="IFileProbe.cpp" /><ClCompile Include="LoaderProbe.cpp" /><ClCompile Include="PkgProbe.cpp" /><ClCompile Include="Probes.cpp" /><ClCompile Include="RelocProbe.cpp" /><ClCompile Include="Report.cpp" /><ClCompile Include="SegmentProbe.cpp" /><ClCompile Include="TlsProbe.cpp" /><ClCompile Include="..\src\core\file_format\psf.cpp" /><ClCompile Include="..\src\core\loader\elf.cpp" />
+    <ClCompile Include="PkgCrypto.cpp" /><ClCompile Include="PkgExtractor.cpp" /><ClCompile Include="..\externals\miniz\miniz_tinfl.c" /><ClCompile Include="..\externals\miniz\miniz.c" /><ClCompile Include="App.cpp" /><ClCompile Include="CoreProbe.cpp" /><ClCompile Include="ElfProbe.cpp" /><ClCompile Include="ExceptionProbe.cpp" /><ClCompile Include="ExecProbe.cpp" /><ClCompile Include="IFileProbe.cpp" /><ClCompile Include="LoaderProbe.cpp" /><ClCompile Include="PkgProbe.cpp" /><ClCompile Include="Probes.cpp" /><ClCompile Include="RelocProbe.cpp" /><ClCompile Include="Report.cpp" /><ClCompile Include="SegmentProbe.cpp" /><ClCompile Include="TlsProbe.cpp" /><ClCompile Include="..\src\core\file_format\psf.cpp" /><ClCompile Include="..\src\core\loader\elf.cpp" />
     <ClInclude Include="CoreProbe.h" /><ClInclude Include="ElfProbe.h" /><ClInclude Include="ExceptionProbe.h" /><ClInclude Include="ExecProbe.h" /><ClInclude Include="IFileProbe.h" /><ClInclude Include="LoaderProbe.h" /><ClInclude Include="PkgProbe.h" /><ClInclude Include="Probes.h" /><ClInclude Include="RelocProbe.h" /><ClInclude Include="Report.h" /><ClInclude Include="SegmentProbe.h" /><ClInclude Include="TlsProbe.h" /><ClInclude Include="BuildInfo.h" />
     <AppxManifest Include="Package.appxmanifest" />
     <None Include="MainPage.xaml"><DeploymentContent>true</DeploymentContent></None>

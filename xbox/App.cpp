@@ -3,6 +3,10 @@
 #include "Report.h"
 #include "BuildInfo.h"
 #include "PkgProbe.h"
+#include "PkgExtractor.h"
+#include <winrt/Windows.UI.Xaml.Media.Imaging.h>
+#include <winrt/Windows.Data.Json.h>
+#include <winrt/Windows.System.Display.h>
 #include <windows.ui.xaml.media.dxinterop.h>
 #include <filesystem>
 #include <array>
@@ -53,6 +57,139 @@ struct App : ApplicationT<App> {
     int pending{-1};
     uint64_t controllerBaseline{};
     bool sawSuspension{};
+    struct LibraryItem { std::wstring name, path; bool installed{}; };
+    std::vector<LibraryItem> libraryItems;
+    std::shared_ptr<Lab::InstallProgress> extraction;
+    bool importing{}, listing{};
+    Windows::System::Display::DisplayRequest displayRequest{nullptr};
+
+    Lab::PackageKeys LoadKeys() {
+        auto path = std::filesystem::path(Windows::Storage::ApplicationData::Current().LocalFolder().Path().c_str()) / L"keys.json";
+        if (!std::filesystem::exists(path)) throw std::runtime_error("Importe keys.json antes de extrair.");
+        return ParseKeys(path);
+    }
+    static Lab::PackageKeys ParseKeys(std::filesystem::path const& path) {
+        if (std::filesystem::file_size(path) > 65536) throw std::runtime_error("Arquivo de chaves excede 64 KiB.");
+        std::ifstream input(path, std::ios::binary);
+        std::string text{std::istreambuf_iterator<char>(input), {}};
+        auto json = Windows::Data::Json::JsonObject::Parse(to_hstring(text));
+        Lab::PackageKeys keys;
+        auto read = [&](wchar_t const* name, Lab::RsaFields& fields) {
+            auto set = json.GetNamedObject(name);
+            for (const auto* field : {L"PublicExponent", L"Modulus", L"Prime1", L"Prime2"}) {
+                auto value = to_string(set.GetNamedString(field));
+                if (value.size() % 2) throw std::runtime_error("Campo hexadecimal invalido.");
+                Lab::Bytes bytes;
+                auto digit = [](char c) -> unsigned { if (c >= '0' && c <= '9') return c - '0'; if (c >= 'a' && c <= 'f') return c - 'a' + 10; if (c >= 'A' && c <= 'F') return c - 'A' + 10; throw std::runtime_error("Campo hexadecimal invalido."); };
+                for (size_t i = 0; i < value.size(); i += 2) bytes.push_back(static_cast<unsigned char>((digit(value[i]) << 4) | digit(value[i + 1])));
+                fields[to_string(field)] = std::move(bytes);
+            }
+        };
+        read(L"PkgDerivedKey3Keyset", keys.derived); read(L"FakeKeyset", keys.fake);
+        Lab::ValidatePackageKeys(keys);
+        return keys;
+    }
+    fire_and_forget ImportKeys() {
+        auto lifetime = get_strong();
+        if (extraction || importing) co_return;
+        importing = true;
+        try {
+            Windows::Storage::Pickers::FileOpenPicker picker;
+            picker.FileTypeFilter().Append(L".json");
+            auto selected = co_await picker.PickSingleFileAsync();
+            if (selected) {
+                auto local = Windows::Storage::ApplicationData::Current().LocalFolder();
+                auto pendingKey = co_await selected.CopyAsync(local, L"keys-import.tmp", Windows::Storage::NameCollisionOption::ReplaceExisting);
+                try {
+                    ParseKeys(std::filesystem::path(pendingKey.Path().c_str()));
+                    co_await pendingKey.RenameAsync(L"keys.json", Windows::Storage::NameCollisionOption::ReplaceExisting);
+                    libraryStatus.Text(L"Chaves importadas neste Xbox. A compatibilidade será verificada durante a extração.");
+                } catch (...) {
+                    std::error_code ignored; std::filesystem::remove(std::filesystem::path(pendingKey.Path().c_str()), ignored); throw;
+                }
+            }
+        } catch (...) { libraryStatus.Text(L"Não foi possível importar: JSON inválido ou conjuntos RSA-2048 incompletos. As chaves anteriores foram preservadas."); }
+        importing = false;
+    }
+    void LibrarySelection() {
+        auto index = libraryList.SelectedIndex();
+        if (index < 0 || static_cast<size_t>(index) >= libraryItems.size()) return;
+        auto const& item = libraryItems[index];
+        Find<TextBlock>(L"ContentTitle").Text(item.name);
+        Find<TextBlock>(L"ContentDetails").Text(item.installed ? L"Conteúdo extraído e persistido neste Xbox. A execução PS4 ainda não está disponível." : DescribeContent(item.path));
+        auto extension = std::filesystem::path(item.path).extension().wstring();
+        for (auto& c : extension) c = towlower(c);
+        Find<Button>(L"ExtractContent").IsEnabled(!extraction && !importing && !item.installed && extension == L".pkg");
+    }
+    void ExtractionRecord(std::wstring const& state, std::wstring const& message,
+                          std::wstring const& name, std::wstring const& destination, double started,
+                          Lab::InstallProgress const& progress) {
+        auto json = report->Json();
+        using Windows::Data::Json::JsonValue;
+        json.Insert(L"operation", JsonValue::CreateStringValue(L"pkg_extraction"));
+        json.Insert(L"status", JsonValue::CreateStringValue(state));
+        json.Insert(L"detail", JsonValue::CreateStringValue(message));
+        json.Insert(L"package_name", JsonValue::CreateStringValue(name));
+        json.Insert(L"destination", JsonValue::CreateStringValue(destination));
+        json.Insert(L"files_written", JsonValue::CreateNumberValue(static_cast<double>(progress.files.load())));
+        json.Insert(L"bytes_written", JsonValue::CreateNumberValue(static_cast<double>(progress.bytes.load())));
+        json.Insert(L"duration_ms", JsonValue::CreateNumberValue((Lab::Now() - started) * 1000));
+        json.Insert(L"tests", Windows::Data::Json::JsonArray());
+        Lab::WriteDurable(report->directory + L"\\extraction-report.json", to_string(json.Stringify()));
+    }
+    fire_and_forget ExtractContent() {
+        auto lifetime = get_strong();
+        auto index = libraryList.SelectedIndex();
+        if (extraction || importing || index < 0 || static_cast<size_t>(index) >= libraryItems.size() || libraryItems[index].installed) co_return;
+        auto item = libraryItems[index];
+        auto state = std::make_shared<Lab::InstallProgress>();
+        extraction = state;
+        Find<Button>(L"ExtractContent").IsEnabled(false);
+        Find<Button>(L"SelectContent").IsEnabled(false); Find<Button>(L"ImportKeys").IsEnabled(false);
+        Find<Button>(L"CancelExtraction").IsEnabled(true);
+        auto started = Lab::Now();
+        std::wstring error, destination;
+        bool completed = false;
+        apartment_context ui;
+        try {
+            displayRequest = Windows::System::Display::DisplayRequest(); displayRequest.RequestActive();
+            auto keys = LoadKeys();
+            auto base = std::filesystem::path(report->directory);
+            auto id = std::to_wstring(static_cast<uint64_t>(started * 1000000));
+            auto stage = base / L"InstallStaging" / id;
+            auto target = base / L"Installed" / id;
+            destination = target.wstring();
+            ExtractionRecord(L"running", L"Extração iniciada; destino temporário.", item.name, destination, started, *state);
+            co_await resume_background();
+            try {
+                std::filesystem::create_directories(stage);
+                Lab::ExtractPackage(item.path, stage, keys, *state);
+                for (auto* set : {&keys.derived, &keys.fake}) for (auto& [field, bytes] : *set) SecureZeroMemory(bytes.data(), bytes.size());
+                Lab::WriteDurable((stage / L"library-name.txt").wstring(), to_string(item.name));
+                std::filesystem::create_directories(target.parent_path());
+                std::filesystem::rename(stage, target);
+                completed = true; state->percent.store(100);
+            } catch (std::exception const& e) { error = to_hstring(e.what()); }
+              catch (...) { error = L"Falha de armazenamento ou da plataforma durante a extração."; }
+            for (auto* set : {&keys.derived, &keys.fake}) for (auto& [field, bytes] : *set) SecureZeroMemory(bytes.data(), bytes.size());
+            if (!completed) { std::error_code ignored; std::filesystem::remove_all(stage, ignored); }
+            co_await ui;
+        } catch (std::exception const& e) { error = to_hstring(e.what()); }
+          catch (...) { error = L"Não foi possível iniciar a extração. Verifique chaves e armazenamento."; }
+        co_await ui;
+        try {
+            ExtractionRecord(completed ? L"completed" : (state->cancel ? L"cancelled" : L"failed"),
+                completed ? L"Conteúdo extraído; execução PS4 não validada." : error, item.name, destination, started, *state);
+        } catch (...) { error += L" Não foi possível salvar extraction-report.json."; }
+        try { if (displayRequest) displayRequest.RequestRelease(); } catch (...) {}
+        displayRequest = nullptr;
+        libraryStatus.Text(completed ? L"Extração concluída. Relatório: LocalState/extraction-report.json." : L"Extração não concluída: " + error);
+        extraction.reset();
+        Find<Button>(L"SelectContent").IsEnabled(true); Find<Button>(L"ImportKeys").IsEnabled(true);
+        Find<Button>(L"CancelExtraction").IsEnabled(false);
+        Find<ProgressBar>(L"InstallProgress").Value(completed ? 100 : 0);
+        PopulateLibrary();
+    }
 
     App() {
         StartupLog(L"Application constructed");
@@ -95,27 +232,53 @@ struct App : ApplicationT<App> {
     }
     fire_and_forget PopulateLibrary() {
         auto lifetime = get_strong();
+        if (listing) co_return;
+        listing = true;
         try {
             auto local = Windows::Storage::ApplicationData::Current().LocalFolder();
             auto folder = co_await local.CreateFolderAsync(L"Library", Windows::Storage::CreationCollisionOption::OpenIfExists);
             auto files = co_await folder.GetFilesAsync();
             libraryList.Items().Clear();
-            for (auto const& file : files) {
-                TextBlock item;
-                item.Text(std::wstring(file.Name()) + L"\n" + DescribeContent(std::wstring(file.Path())));
-                item.TextWrapping(TextWrapping::Wrap);
-                item.FontSize(16);
-                item.Margin({0, 6, 0, 6});
-                libraryList.Items().Append(item);
+            libraryItems.clear();
+            auto add = [&](std::wstring name, std::wstring path, bool installed) {
+                libraryItems.push_back({name, path, installed});
+                StackPanel card; card.Width(208); card.Spacing(12); card.Margin({10, 14, 10, 14});
+                Border art; art.Width(208); art.Height(174);
+                art.Background(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 12, 75, 167)));
+                TextBlock glyph; glyph.Text(installed ? L"\xE7FC" : L"\xE8B7"); glyph.FontFamily(Media::FontFamily(L"Segoe MDL2 Assets"));
+                glyph.FontSize(64); glyph.HorizontalAlignment(HorizontalAlignment::Center); glyph.VerticalAlignment(VerticalAlignment::Center); art.Child(glyph);
+                if (installed && std::filesystem::is_regular_file(std::filesystem::path(path) / L"sce_sys" / L"icon0.png")) {
+                    Image image;
+                    auto folderName = std::filesystem::path(path).filename().wstring();
+                    image.Source(Media::Imaging::BitmapImage(Uri(L"ms-appdata:///local/Installed/" + folderName + L"/sce_sys/icon0.png")));
+                    image.Stretch(Media::Stretch::UniformToFill); art.Child(image);
+                }
+                card.Children().Append(art);
+                TextBlock title; title.Text(name); title.FontSize(19); title.MaxLines(2); title.TextWrapping(TextWrapping::Wrap); card.Children().Append(title);
+                TextBlock badge; badge.Text(installed ? L"EXTRAÍDO" : L"IMPORTADO"); badge.FontSize(12); card.Children().Append(badge);
+                libraryList.Items().Append(card);
+            };
+            auto installed = co_await local.CreateFolderAsync(L"Installed", Windows::Storage::CreationCollisionOption::OpenIfExists);
+            auto folders = co_await installed.GetFoldersAsync();
+            for (auto const& game : folders) {
+                auto titlePath = std::filesystem::path(game.Path().c_str()) / L"library-name.txt";
+                std::ifstream titleFile(titlePath, std::ios::binary);
+                std::string name{std::istreambuf_iterator<char>(titleFile), {}};
+                add(name.empty() ? std::wstring(game.Name()) : std::wstring(to_hstring(name)), std::wstring(game.Path()), true);
             }
-            libraryStatus.Text(files.Size() == 0 ? L"Nenhum ELF/SELF selecionado." :
-                L"Conteúdo persistido no armazenamento do aplicativo. O próximo marco conectará o loader.");
+            for (auto const& file : files) {
+                add(std::wstring(file.Name()), std::wstring(file.Path()), false);
+            }
+            if (!libraryItems.empty()) libraryList.SelectedIndex(0);
         } catch (hresult_error const& e) {
             libraryStatus.Text(L"Falha ao listar a biblioteca: " + e.message());
-        }
+        } catch (...) { libraryStatus.Text(L"Não foi possível ler a biblioteca local."); }
+        listing = false;
     }
     fire_and_forget SelectContent() {
         auto lifetime = get_strong();
+        if (extraction || importing) co_return;
+        importing = true;
         try {
             Windows::Storage::Pickers::FileOpenPicker picker;
             picker.ViewMode(Windows::Storage::Pickers::PickerViewMode::List);
@@ -124,16 +287,18 @@ struct App : ApplicationT<App> {
             picker.FileTypeFilter().Append(L".bin");
             picker.FileTypeFilter().Append(L".pkg");
             auto file = co_await picker.PickSingleFileAsync();
-            if (!file) co_return;
+            if (!file) { importing = false; co_return; }
             auto local = Windows::Storage::ApplicationData::Current().LocalFolder();
             auto folder = co_await local.CreateFolderAsync(L"Library", Windows::Storage::CreationCollisionOption::OpenIfExists);
-            co_await file.CopyAsync(folder, file.Name(), Windows::Storage::NameCollisionOption::ReplaceExisting);
+            co_await file.CopyAsync(folder, file.Name(), Windows::Storage::NameCollisionOption::GenerateUniqueName);
             libraryStatus.Text(std::wstring(L"Arquivo copiado: ") + std::wstring(file.Name()) +
                 L"\n" + DescribeContent(std::wstring(file.Path())));
             PopulateLibrary();
         } catch (hresult_error const& e) {
             libraryStatus.Text(L"Falha ao selecionar conteúdo: " + e.message());
-        }
+        } catch (...) { libraryStatus.Text(L"Falha ao importar conteúdo."); }
+        importing = false;
+        LibrarySelection();
     }
     bool Save() {
         try { report->Save(); return true; }
@@ -170,11 +335,21 @@ struct App : ApplicationT<App> {
             Find<Button>(L"LibraryTab").Click([this](auto const&, auto const&) { ShowLibrary(true); });
             Find<Button>(L"DiagnosticsTab").Click([this](auto const&, auto const&) { ShowLibrary(false); });
             Find<Button>(L"SelectContent").Click([this](auto const&, auto const&) { SelectContent(); });
+            Find<Button>(L"ImportKeys").Click([this](auto const&, auto const&) { ImportKeys(); });
+            Find<Button>(L"ExtractContent").Click([this](auto const&, auto const&) { ExtractContent(); });
+            Find<Button>(L"CancelExtraction").Click([this](auto const&, auto const&) { if (extraction) extraction->cancel.store(true); });
+            libraryList.SelectionChanged([this](auto const&, auto const&) { LibrarySelection(); });
             Find<Button>(L"Export").Click([this](auto const&, auto const&) {
                 if (!Save()) return;
                 try {
                     auto name = L"report-export-" + std::to_wstring(static_cast<uint64_t>(Lab::Now())) + L".json";
-                    Lab::WriteDurable(report->directory + L"\\" + name, to_string(report->Json().Stringify()));
+                    auto extractionPath = std::filesystem::path(report->directory) / L"extraction-report.json";
+                    std::string payload = to_string(report->Json().Stringify());
+                    if (std::filesystem::exists(extractionPath)) {
+                        std::ifstream input(extractionPath, std::ios::binary);
+                        payload.assign(std::istreambuf_iterator<char>(input), {});
+                    }
+                    Lab::WriteDurable(report->directory + L"\\" + name, payload);
                     status.Text(L"Exportado para LocalState\\" + name + L". Baixe pelo Device Portal.");
                 } catch (hresult_error const& e) { status.Text(L"Falha na exportação: " + e.message()); }
             });
@@ -193,13 +368,33 @@ struct App : ApplicationT<App> {
                 }
             });
             timer = DispatcherTimer(); timer.Interval(std::chrono::milliseconds(100));
-            timer.Tick([this](auto const&, auto const&) { PollController(); });
+            timer.Tick([this](auto const&, auto const&) {
+                PollController();
+                if (extraction) {
+                    Find<ProgressBar>(L"InstallProgress").Value(extraction->percent.load());
+                    libraryStatus.Text(L"Extraindo · " + std::to_wstring(extraction->files.load()) + L" arquivos · " +
+                        std::to_wstring(extraction->bytes.load() / (1024 * 1024)) + L" MiB · mantenha o aplicativo aberto");
+                }
+            });
             timer.Start();
             Refresh(); list.SelectedIndex(0);
             if (!report->recoveryNotice.empty()) status.Text(report->recoveryNotice);
             Save();
             Window::Current().Content(root); Window::Current().Activate();
-            Find<Button>(L"RunAll").Focus(FocusState::Programmatic);
+            auto extractionReport = std::filesystem::path(report->directory) / L"extraction-report.json";
+            if (std::filesystem::exists(extractionReport)) {
+                try {
+                    std::ifstream input(extractionReport, std::ios::binary); std::string raw{std::istreambuf_iterator<char>(input), {}};
+                    auto previous = Windows::Data::Json::JsonObject::Parse(to_hstring(raw));
+                    if (previous.GetNamedString(L"status", L"") == L"running") {
+                        previous.SetNamedValue(L"status", Windows::Data::Json::JsonValue::CreateStringValue(L"inconclusive"));
+                        Lab::WriteDurable(extractionReport.wstring(), to_string(previous.Stringify()));
+                        libraryStatus.Text(L"A extração anterior foi interrompida. Relatório marcado como inconclusivo; importe ou selecione o PKG para tentar novamente.");
+                    }
+                } catch (...) { libraryStatus.Text(L"Relatório anterior de extração ilegível; arquivo preservado."); }
+            }
+            ShowLibrary(true);
+            Find<Button>(L"LibraryTab").Focus(FocusState::Programmatic);
             StartupLog(L"Window activated; ready for explicit tests");
         } catch (hresult_error const& e) {
             StartupLog(L"OnLaunched HRESULT: " + std::to_wstring(static_cast<uint32_t>(e.code().value)) + L" " + std::wstring(e.message()));

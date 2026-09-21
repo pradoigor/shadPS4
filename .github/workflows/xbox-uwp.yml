@@ -27,6 +27,9 @@ jobs:
           python -m unittest discover -s xbox/scripts -p 'test_*.py'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python xbox/scripts/validate_package.py xbox/artifacts/ShadPS4Xbox.appx xbox/artifacts/build-info.json
+      - name: Exercise encrypted extraction and malformed packages
+        shell: pwsh
+        run: ./xbox/scripts/test_extractor.ps1
       - name: Audit representative desktop APIs against UWP
         shell: pwsh
         run: ./xbox/scripts/audit_api_surface.ps1

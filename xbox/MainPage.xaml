@@ -1,48 +1,48 @@
 <Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
- xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Background="#101827" RequestedTheme="Dark" XYFocusKeyboardNavigation="Enabled">
-  <Grid Margin="48,28">
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"  RequestedTheme="Dark" XYFocusKeyboardNavigation="Enabled">
+  <Grid.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#126DD0" Offset="0"/><GradientStop Color="#0744A7" Offset="0.45"/><GradientStop Color="#031B61" Offset="1"/></LinearGradientBrush></Grid.Background>
+  <Grid.Resources><Style TargetType="Button"><Setter Property="Background" Value="#18FFFFFF"/><Setter Property="BorderBrush" Value="#55FFFFFF"/><Setter Property="Foreground" Value="White"/><Setter Property="FontSize" Value="17"/><Setter Property="Padding" Value="20,12"/><Setter Property="UseSystemFocusVisuals" Value="True"/><Setter Property="FocusVisualPrimaryBrush" Value="White"/></Style></Grid.Resources>
+  <Viewbox IsHitTestVisible="False" Stretch="Fill" Opacity="0.12"><Canvas Width="1920" Height="1080"><Path Data="M -100,810 C 480,330 1010,1260 2050,410 L 2050,630 C 1100,1380 530,530 -100,1030 Z" Fill="#64CFFF"/><Path Data="M -100,850 C 640,400 1160,1280 2050,530" Stroke="White" StrokeThickness="2"/></Canvas></Viewbox>
+  <Grid Margin="52,28">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-    <StackPanel>
-      <TextBlock Text="shadPS4 / XBOX LAB" FontSize="32" FontWeight="SemiBold" Foreground="#65E4C3"/>
-      <TextBlock Text="Viabilidade no Series X · Dev Mode" FontSize="22" Margin="0,4,0,0"/>
-      <TextBlock Text="Diagnóstico experimental. O núcleo PS4 ainda não está portado e este aplicativo não executa jogos." FontSize="16" Foreground="#C4CDD9" TextWrapping="Wrap" Margin="0,6,0,0"/>
-      <TextBlock x:Name="DeviceInfo" FontSize="14" TextWrapping="Wrap" Margin="0,8,0,0"/>
-    </StackPanel>
+    <Grid><StackPanel><TextBlock Text="shadPS4" FontSize="34" FontWeight="Light" CharacterSpacing="80"/><TextBlock Text="XBOX LAB  /  DEV MODE" FontSize="11" CharacterSpacing="180" Foreground="#B9D9FF" Margin="2,3,0,0"/></StackPanel><TextBlock Text="Sua biblioteca, neste console" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="18"/></Grid>
     <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,16,0,12" Spacing="12">
       <Button x:Name="LibraryTab" Content="Biblioteca" Padding="16,10"/>
       <Button x:Name="DiagnosticsTab" Content="Diagnóstico" Padding="16,10"/>
-      <Button x:Name="RunAll" Content="Executar testes automáticos" Padding="16,10"/>
-      <Button x:Name="RunSelected" Content="Executar selecionado" Padding="16,10"/>
-      <Button x:Name="Export" Content="Exportar JSON" Padding="16,10"/>
     </StackPanel>
     <Grid Grid.Row="2">
-      <Grid x:Name="LibraryView" Visibility="Collapsed">
-        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-        <StackPanel Spacing="8">
-          <TextBlock Text="Biblioteca de conteúdo" FontSize="26" FontWeight="SemiBold" Foreground="#65E4C3"/>
-          <TextBlock Text="Selecione um ELF ou SELF para copiá-lo para o armazenamento do aplicativo. O carregador do núcleo ainda não está conectado nesta etapa." FontSize="16" Foreground="#C4CDD9" TextWrapping="Wrap"/>
-          <Button x:Name="SelectContent" Content="Selecionar ELF / SELF" HorizontalAlignment="Left" Padding="16,10"/>
-        </StackPanel>
-        <ListView x:Name="LibraryList" Grid.Row="1" Margin="0,18,0,12"/>
-        <TextBlock x:Name="LibraryStatus" Grid.Row="2" Text="Nenhum conteúdo selecionado." FontSize="15" Foreground="#C4CDD9" TextWrapping="Wrap"/>
+      <Grid x:Name="LibraryView">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <Grid><TextBlock Text="Conteúdo" FontSize="25" FontWeight="Light" VerticalAlignment="Center"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="10"><Button x:Name="SelectContent" Content="＋ Importar PKG / ELF"/><Button x:Name="ImportKeys" Content="Importar chaves"/></StackPanel></Grid>
+        <ListView x:Name="LibraryList" Grid.Row="1" Height="285" Margin="-10,12,-10,12" SelectionMode="Single" ScrollViewer.HorizontalScrollMode="Enabled" ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollMode="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled" XYFocusKeyboardNavigation="Enabled"><ListView.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ListView.ItemsPanel></ListView>
+        <Grid Grid.Row="2"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="250"/></Grid.ColumnDefinitions>
+          <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,0,24,0"><StackPanel Spacing="8"><TextBlock x:Name="ContentTitle" Text="Comece pela sua biblioteca" FontSize="26" FontWeight="Light" TextWrapping="Wrap"/><TextBlock x:Name="ContentDetails" Text="Importe um PKG e selecione Extrair. A execução PS4 ainda não está disponível." FontSize="15" Foreground="#D4E7FF" TextWrapping="Wrap"/></StackPanel></ScrollViewer>
+          <StackPanel Grid.Column="1" Spacing="10"><Button x:Name="ExtractContent" Content="Extrair pacote" IsEnabled="False" HorizontalAlignment="Stretch"/><Button x:Name="CancelExtraction" Content="Cancelar extração" IsEnabled="False" HorizontalAlignment="Stretch"/><ProgressBar x:Name="InstallProgress" Minimum="0" Maximum="100" Value="0" Foreground="#9AE9FF" Height="5"/><TextBlock Text="O arquivo original é preservado. Conteúdo extraído aparece na biblioteca." FontSize="12" Foreground="#B9D9FF" TextWrapping="Wrap"/></StackPanel>
+        </Grid>
+        <TextBlock x:Name="LibraryStatus" Grid.Row="3" Text="Pronto para importar conteúdo." FontSize="14" TextWrapping="Wrap" Margin="0,14,0,0" Foreground="#D4E7FF"/>
       </Grid>
-      <Grid x:Name="DiagnosticsView">
+      <Grid x:Name="DiagnosticsView" Visibility="Collapsed"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+      <TextBlock x:Name="DeviceInfo" Grid.ColumnSpan="2" FontSize="13" TextWrapping="Wrap"/>
+      <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="10" Margin="0,12,0,16">      <Button x:Name="RunAll" Visibility="Collapsed" Content="Executar testes automáticos" Padding="16,10"/>
+      <Button x:Name="RunSelected" Visibility="Collapsed" Content="Executar selecionado" Padding="16,10"/>
+      <Button x:Name="Export" Content="Exportar JSON" Padding="16,10"/>
+</StackPanel>
       <Grid.ColumnDefinitions><ColumnDefinition Width="5*"/><ColumnDefinition Width="6*"/></Grid.ColumnDefinitions>
-      <ListView x:Name="Tests" SelectionMode="Single" IsItemClickEnabled="False" Margin="0,0,24,0"/>
-      <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+      <ListView Grid.Row="2" x:Name="Tests" SelectionMode="Single" IsItemClickEnabled="False" Margin="0,0,24,0"/>
+      <ScrollViewer Grid.Row="2" Grid.Column="1" VerticalScrollBarVisibility="Auto">
         <StackPanel Spacing="12">
-          <TextBlock x:Name="Details" Text="Selecione um teste para ver as evidências e os limites." FontSize="18" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
+          <TextBlock x:Name="Details" Text="Nesta versão, a validação é a extração do PKG na Biblioteca. O relatório fica em LocalState/extraction-report.json. Os testes anteriores foram retirados." FontSize="18" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
           <SwapChainPanel x:Name="GpuPanel" Height="180" HorizontalAlignment="Stretch"/>
           <MediaElement x:Name="Audio" AutoPlay="False" AreTransportControlsEnabled="False" Volume="1" Height="1"/>
           <StackPanel Orientation="Horizontal" Spacing="10">
             <Button x:Name="Confirm" Content="Confirmar imagem / áudio"/>
             <Button x:Name="Reject" Content="Imagem / áudio não funcionou"/>
           </StackPanel>
-          <TextBlock Text="Controle: direcional move o foco; A seleciona. Para suspensão, execute o teste e saia para o painel do Xbox, depois retorne." FontSize="15" Foreground="#C4CDD9" TextWrapping="Wrap"/>
+          <TextBlock Text="Controle: direcional move o foco; A seleciona. Para suspensão, execute o teste e saia para o painel do Xbox, depois retorne." FontSize="15" Foreground="#B9D9FF" TextWrapping="Wrap"/>
         </StackPanel>
       </ScrollViewer>
       </Grid>
     </Grid>
-    <TextBlock x:Name="Status" Grid.Row="3" Text="Pronto. Nenhum resultado é presumido." FontSize="16" TextWrapping="Wrap" Margin="0,12,0,0" Foreground="#65E4C3"/>
+    <TextBlock x:Name="Status" Grid.Row="3" Text="A  Selecionar     ·     Direcional  Navegar" FontSize="16" TextWrapping="Wrap" Margin="0,12,0,0" Foreground="#D4E7FF"/>
   </Grid>
 </Grid>
