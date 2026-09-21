@@ -207,9 +207,9 @@ struct AddressSpace::Impl {
                        EmulatorSettings.GetExtraFmemInMBytes() * 1_MB;
 
         // Allocate backing file that represents the total physical memory.
-        backing_handle = PlatformMemory::CreateBacking(
-            INVALID_HANDLE_VALUE, nullptr, FILE_MAP_ALL_ACCESS, PAGE_EXECUTE_READWRITE,
-            SEC_COMMIT, BackingSize);
+        backing_handle =
+            PlatformMemory::CreateBacking(INVALID_HANDLE_VALUE, nullptr, FILE_MAP_ALL_ACCESS,
+                                          PAGE_EXECUTE_READWRITE, SEC_COMMIT, BackingSize);
 
         ASSERT_MSG(backing_handle, "{}", Common::GetLastErrorMsg());
         // Allocate a virtual memory for the backing file map as placeholder
@@ -256,9 +256,9 @@ struct AddressSpace::Impl {
             if (fd != -1 && prot == PAGE_READONLY) {
                 // Allocate the memory for the mapping
                 DWORD resultvar;
-                ptr = PlatformMemory::Allocate(
-                    process, reinterpret_cast<PVOID>(virtual_addr), size,
-                    MEM_RESERVE | MEM_COMMIT | MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE);
+                ptr = PlatformMemory::Allocate(process, reinterpret_cast<PVOID>(virtual_addr), size,
+                                               MEM_RESERVE | MEM_COMMIT | MEM_REPLACE_PLACEHOLDER,
+                                               PAGE_READWRITE);
 
                 // Use ReadFile to read file contents into the memory area.
                 // Create an OVERLAPPED with the file offset, then supply that to ReadFile
@@ -281,23 +281,23 @@ struct AddressSpace::Impl {
             } else {
                 if (prot == PAGE_NOACCESS) {
                     DWORD resultvar;
-                    ptr = PlatformMemory::MapView(
-                        backing, process, reinterpret_cast<PVOID>(virtual_addr), phys_addr, size,
-                        MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE);
+                    ptr = PlatformMemory::MapView(backing, process,
+                                                  reinterpret_cast<PVOID>(virtual_addr), phys_addr,
+                                                  size, MEM_REPLACE_PLACEHOLDER, PAGE_READWRITE);
                     ASSERT_MSG(ptr, "MapViewOfFile3 failed. {}", Common::GetLastErrorMsg());
                     bool ret = PlatformMemory::Protect(process, ptr, size, prot, &resultvar);
                     ASSERT_MSG(ret, "VirtualProtect failed. {}", Common::GetLastErrorMsg());
                 } else {
-                    ptr = PlatformMemory::MapView(
-                        backing, process, reinterpret_cast<PVOID>(virtual_addr), phys_addr, size,
-                        MEM_REPLACE_PLACEHOLDER, prot);
+                    ptr = PlatformMemory::MapView(backing, process,
+                                                  reinterpret_cast<PVOID>(virtual_addr), phys_addr,
+                                                  size, MEM_REPLACE_PLACEHOLDER, prot);
                     ASSERT_MSG(ptr, "MapViewOfFile3 failed. {}", Common::GetLastErrorMsg());
                 }
             }
         } else {
-            ptr = PlatformMemory::Allocate(
-                process, reinterpret_cast<PVOID>(virtual_addr), size,
-                MEM_RESERVE | MEM_COMMIT | MEM_REPLACE_PLACEHOLDER, prot);
+            ptr =
+                PlatformMemory::Allocate(process, reinterpret_cast<PVOID>(virtual_addr), size,
+                                         MEM_RESERVE | MEM_COMMIT | MEM_REPLACE_PLACEHOLDER, prot);
         }
         ASSERT_MSG(ptr, "{}", Common::GetLastErrorMsg());
         return ptr;

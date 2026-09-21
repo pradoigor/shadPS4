@@ -4,8 +4,8 @@
 #pragma once
 
 #ifdef _WIN32
-#include <windows.h>
 #include <memoryapi.h>
+#include <windows.h>
 
 namespace Core::PlatformMemory {
 
@@ -16,9 +16,10 @@ inline void* Allocate(HANDLE process, void* base, SIZE_T size, ULONG allocation_
     const bool executable = protection == PAGE_EXECUTE || protection == PAGE_EXECUTE_READ ||
                             protection == PAGE_EXECUTE_READWRITE;
     const auto allocation_protection = executable ? PAGE_READWRITE : protection;
-    auto* result = VirtualAlloc2FromApp(process, base, size, allocation_type,
-                                        allocation_protection, parameters, parameter_count);
-    if (!result || !executable || protection == PAGE_EXECUTE_READWRITE) return result;
+    auto* result = VirtualAlloc2FromApp(process, base, size, allocation_type, allocation_protection,
+                                        parameters, parameter_count);
+    if (!result || !executable || protection == PAGE_EXECUTE_READWRITE)
+        return result;
     ULONG previous{};
     if (!VirtualProtectFromApp(result, size, protection, &previous)) {
         VirtualFree(result, 0, MEM_RELEASE);
@@ -42,11 +43,10 @@ inline HANDLE CreateBacking(HANDLE file, PSECURITY_ATTRIBUTES attributes, ULONG 
     (void)parameter_count;
     // UWP does not permit executable file mappings. Guest code is written
     // through RW views and promoted to RX with Protect() under codeGeneration.
-    const auto writable_protection = (protection & 0xFFu) == PAGE_READONLY
-                                         ? PAGE_READONLY
-                                         : PAGE_READWRITE;
-    return CreateFileMappingFromApp(file, attributes,
-                                    writable_protection | allocation_attributes, size, name);
+    const auto writable_protection =
+        (protection & 0xFFu) == PAGE_READONLY ? PAGE_READONLY : PAGE_READWRITE;
+    return CreateFileMappingFromApp(file, attributes, writable_protection | allocation_attributes,
+                                    size, name);
 #else
     return CreateFileMapping2(file, attributes, desired_access, protection, allocation_attributes,
                               size, name, parameters, parameter_count);
@@ -59,12 +59,12 @@ inline void* MapView(HANDLE mapping, HANDLE process, void* base, ULONG64 offset,
 #ifdef SHADPS4_XBOX_UWP
     auto* result = MapViewOfFile3FromApp(mapping, process, base, offset, size, allocation_type,
                                          PAGE_READWRITE, parameters, parameter_count);
-    if (!result || protection == PAGE_READWRITE) return result;
+    if (!result || protection == PAGE_READWRITE)
+        return result;
     ULONG previous{};
     if (!VirtualProtectFromApp(result, size, protection, &previous)) {
-        UnmapViewOfFileEx(result, (allocation_type & MEM_REPLACE_PLACEHOLDER)
-                                     ? MEM_PRESERVE_PLACEHOLDER
-                                     : 0);
+        UnmapViewOfFileEx(
+            result, (allocation_type & MEM_REPLACE_PLACEHOLDER) ? MEM_PRESERVE_PLACEHOLDER : 0);
         return nullptr;
     }
     if (protection == PAGE_EXECUTE || protection == PAGE_EXECUTE_READ)
