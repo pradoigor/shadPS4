@@ -485,6 +485,8 @@ std::string Elf::ElfPHeaderStr(u16 no) {
     return header;
 }
 
+#endif // !SHADPS4_XBOX_UWP
+
 void Elf::LoadSegment(u64 virtual_addr, u64 file_offset, u64 size) {
     if (!is_self) {
         // It's elf file
@@ -521,6 +523,7 @@ bool Elf::IsSharedLib() {
     return m_elf_header.e_type == ET_SCE_DYNAMIC;
 }
 
+#if !defined(SHADPS4_XBOX_UWP)
 void Elf::ElfHeaderDebugDump(const std::filesystem::path& file_name) {
     Common::FS::IOFile f{file_name, Common::FS::FileAccessMode::Create,
                          Common::FS::FileType::TextFile};
