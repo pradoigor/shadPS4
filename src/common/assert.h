@@ -9,7 +9,10 @@
 // The UWP diagnostic target uses the original data-structure headers without
 // linking the desktop logging implementation. Keep assertion call sites
 // source-compatible while the full logger is being ported.
+#include <cstdlib>
 #define LOG_CRITICAL(...) ((void)0)
+#define LOG_ERROR(...) ((void)0)
+#define LOG_INFO(...) ((void)0)
 #else
 #include "common/logging/log.h"
 #endif
@@ -20,6 +23,15 @@
 
 void assert_fail_impl();
 [[noreturn]] void unreachable_impl();
+
+#if defined(SHADPS4_XBOX_UWP)
+inline void assert_fail_impl() {
+    std::abort();
+}
+inline void unreachable_impl() {
+    std::abort();
+}
+#endif
 
 #ifdef _MSC_VER
 #define SHAD_NO_INLINE __declspec(noinline)

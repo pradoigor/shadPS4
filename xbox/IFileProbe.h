@@ -2,7 +2,12 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
+
+namespace Core::FileSys {
+class IFile;
+}
 
 namespace Lab {
 
@@ -15,5 +20,6 @@ struct IFileProbeResult {
 };
 
 IFileProbeResult ProbeUwpIFileAdapter(const std::wstring& directory);
+std::unique_ptr<Core::FileSys::IFile> MakeUwpFile(const std::wstring& path);
 
 } // namespace Lab

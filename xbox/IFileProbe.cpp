@@ -99,6 +99,10 @@ std::vector<std::uint8_t> MakeSyntheticSelfElf() {
 
 } // namespace
 
+std::unique_ptr<Core::FileSys::IFile> MakeUwpFile(const std::wstring& path) {
+    return std::make_unique<UwpFile>(path);
+}
+
 IFileProbeResult ProbeUwpIFileAdapter(const std::wstring& directory) {
     const auto bytes = MakeSyntheticSelfElf();
     const auto path = directory + L"\\ifile-core-probe.bin";

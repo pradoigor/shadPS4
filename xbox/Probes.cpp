@@ -3,6 +3,7 @@
 #include "CoreProbe.h"
 #include "LoaderProbe.h"
 #include "IFileProbe.h"
+#include "ElfProbe.h"
 #include <d3d12.h>
 #include <memoryapi.h>
 #include <fileapifromapp.h>
@@ -92,6 +93,14 @@ void RunProbe(Test& t, std::wstring const& directory) {
         std::string read{std::istreambuf_iterator<char>(input), {}};
         if (read != payload) throw hresult_error(E_FAIL, L"Conteúdo lido difere do conteúdo gravado.");
         t.detail = L"Arquivo gravado, sincronizado e relido em LocalState.";
+    } else if (t.id == L"elf_open") {
+        auto result = ProbeOriginalElfOpen(directory);
+        Number(t, L"file_size", result.file_size);
+        Number(t, L"program_headers", result.program_headers);
+        Number(t, L"segments", result.segments);
+        Number(t, L"elf_entry", static_cast<double>(result.elf_entry));
+        if (!result.passed) throw hresult_error(E_FAIL, L"Elf::Open original não validou a entrada SELF/ELF.");
+        t.detail = L"Elf::Open original foi compilado e leu SELF, segmento e program header por IFile UWP. Não descriptografa SELF nem executa segmentos.";
     } else if (t.id == L"ifile_adapter") {
         auto result = ProbeUwpIFileAdapter(directory);
         Number(t, L"file_size", result.file_size);

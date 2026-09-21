@@ -1,10 +1,14 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#if !defined(SHADPS4_XBOX_UWP)
 #include <fmt/core.h>
+#endif
 #include "common/assert.h"
+#if !defined(SHADPS4_XBOX_UWP)
 #include "common/logging/log.h"
 #include "core/file_sys/backends/host_fs.h"
+#endif
 #include "core/loader/elf.h"
 
 namespace Core::Loader {
@@ -179,6 +183,7 @@ static std::string_view GetMachine(e_machine_es machine) {
 
 Elf::~Elf() = default;
 
+#if !defined(SHADPS4_XBOX_UWP)
 void Elf::Open(const std::filesystem::path& file_name) {
     auto handle = std::make_unique<Core::FileSys::HostFile>(
         file_name, Common::FS::FileAccessMode::Read, /*read_only=*/true);
@@ -187,6 +192,7 @@ void Elf::Open(const std::filesystem::path& file_name) {
     }
     Open(std::move(handle));
 }
+#endif
 
 void Elf::Open(std::unique_ptr<Core::FileSys::IFile> handle) {
     m_f.Reset(std::move(handle));
@@ -340,6 +346,7 @@ bool Elf::IsElfFile() const {
     return true;
 }
 
+#if !defined(SHADPS4_XBOX_UWP)
 std::string Elf::SElfHeaderStr() {
     std::string header = fmt::format("======= SELF HEADER =========\n", m_self.magic);
     header += fmt::format("magic ..............: 0x{:X}\n", m_self.magic);
@@ -543,5 +550,6 @@ void Elf::PHeaderDebugDump(const std::filesystem::path& file_name) {
         }
     }
 }
+#endif
 
 } // namespace Core::Loader

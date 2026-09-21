@@ -46,7 +46,7 @@ Report::Report() {
     auto add = [&](wchar_t const* id, wchar_t const* title, bool isolated = false) {
         Test t; t.id = id; t.title = title; t.isolated = isolated; tests.push_back(std::move(t));
     };
-    add(L"ifile_adapter", L"Núcleo · backend IFile UWP");
+    add(L"elf_open", L"Núcleo · Elf::Open com IFile UWP");
     Load();
 }
 JsonObject Report::Json() const {
