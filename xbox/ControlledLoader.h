@@ -59,6 +59,9 @@ struct ControlledLoadResult {
     std::uint64_t hle_handlers_unimplemented{};
     std::uint64_t hle_relocations_applied{};
     std::uint64_t hle_relocations_unresolved{};
+    std::uint64_t guest_memory_bytes{};
+    std::uint64_t guest_memory_host_address{};
+    bool guest_memory_mapped{};
     std::uint64_t relocation_dry_run_checksum{};
     std::vector<std::string> pending_symbol_names;
     std::vector<std::string> hle_symbol_mappings;

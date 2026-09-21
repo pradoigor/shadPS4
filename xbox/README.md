@@ -4,7 +4,7 @@ Aplicativo **UWP x64 / C++/WinRT / XAML** para medir a viabilidade de portar
 shadPS4 ao Xbox Series X em Dev Mode. **Ainda não é um emulador PS4 no Xbox.**
 O alvo é independente do CMake e das dependências desktop do núcleo.
 
-A versão **0.21.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
+A versão **0.22.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
 PKG/ELF, keysets FPKG embutidos, importação de chaves personalizadas, extração em
 segundo plano e um probe de execução controlada com auditoria de requisitos runtime,
 relocação e inventário de NIDs HLE. O ELF/SELF selecionado é apenas
@@ -17,8 +17,8 @@ privada não executável durante o dry-run; o arquivo selecionado continua intoc
 Os símbolos pendentes também têm seus índices e nomes conferidos contra as
 tabelas internas. O relatório cruza cada NID com o registro AeroLib derivado do
 núcleo e registra o nome conhecido ou a ausência de correspondência. Esse
-inventário identifica símbolos, mas ainda não fornece endereços HLE, não altera
-relocações e não executa o conteúdo. O relatório também lista os IDs codificados
+inventário identifica símbolos e o probe cria endereços HLE temporários, mas não
+altera relocações no arquivo nem executa o conteúdo. O relatório também lista os IDs codificados
 das bibliotecas/módulos importados para montar a ponte HLE. Os nomes das
 bibliotecas e versões são lidos da tabela de strings do ELF, sem executar o
 conteúdo.
@@ -35,6 +35,8 @@ demais. O dispatcher agora também cobre handlers sem acesso à memória para
 versão do sistema, identidade do processo, yield, estado EGL/GL, rede básica e
 tela inicial. O probe aplica os endereços em uma cópia privada não executável para
 validar as relocações, sem gravá-los no arquivo ou promover o convidado a execução.
+Essa cópia também é mapeada em memória UWP somente leitura; a imagem continua
+sem permissão de execução.
 O probe interno também chama o thunk sem argumentos e exige retorno `0`, sem
 envolver o ELF selecionado.
 

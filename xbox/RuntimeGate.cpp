@@ -47,6 +47,8 @@ RuntimeGateResult EvaluateRuntimeGate(ControlledLoadResult const& load) {
     if (load.hle_relocations_unresolved != 0 ||
         load.hle_relocations_applied < load.pending_symbol_relocations.size())
         Add(unique, result.blockers, L"As relocações de símbolos ainda não foram aplicadas à cópia privada.");
+    if (!load.guest_memory_mapped)
+        Add(unique, result.blockers, L"A imagem relocada ainda não foi mapeada em memória UWP somente leitura.");
     Add(unique, result.blockers, L"A imagem relocada permanece em buffer privado não executável.");
 
     for (auto const& encoded : load.import_library_names) {

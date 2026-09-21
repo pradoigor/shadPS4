@@ -2,6 +2,7 @@
 #include "Probes.h"
 
 #include "ControlledLoader.h"
+#include "GuestMemory.h"
 #include "HleDispatcher.h"
 #include "RuntimeGate.h"
 
@@ -41,6 +42,13 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
                            static_cast<std::uint64_t>(relocation.addend);
         std::memcpy(result.private_image.data() + target, &value, sizeof(value));
         ++result.hle_relocations_applied;
+    }
+    GuestMemory guestMemory;
+    result.guest_memory_mapped = guestMemory.MapReadOnly(
+        result.private_image, result.min_virtual_address);
+    if (result.guest_memory_mapped) {
+        result.guest_memory_bytes = guestMemory.size();
+        result.guest_memory_host_address = guestMemory.hostAddress();
     }
     auto gate = EvaluateRuntimeGate(result);
     result.runtime_preflight_ready = gate.ready;
@@ -87,6 +95,9 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
     test.measurements.Insert(L"hle_handlers_unimplemented", JsonValue::CreateNumberValue(static_cast<double>(result.hle_handlers_unimplemented)));
     test.measurements.Insert(L"hle_relocations_applied", JsonValue::CreateNumberValue(static_cast<double>(result.hle_relocations_applied)));
     test.measurements.Insert(L"hle_relocations_unresolved", JsonValue::CreateNumberValue(static_cast<double>(result.hle_relocations_unresolved)));
+    test.measurements.Insert(L"guest_memory_mapped", JsonValue::CreateBooleanValue(result.guest_memory_mapped));
+    test.measurements.Insert(L"guest_memory_bytes", JsonValue::CreateNumberValue(static_cast<double>(result.guest_memory_bytes)));
+    test.measurements.Insert(L"guest_memory_host_address", JsonValue::CreateNumberValue(static_cast<double>(result.guest_memory_host_address)));
     test.measurements.Insert(L"runtime_preflight_ready", JsonValue::CreateBooleanValue(result.runtime_preflight_ready));
     winrt::Windows::Data::Json::JsonArray symbolNames;
     for (auto const& name : result.pending_symbol_names)
@@ -154,6 +165,7 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
                   L", handlers pendentes=" + std::to_wstring(result.hle_handlers_unimplemented) +
                   L", relocations HLE aplicadas em cópia privada=" + std::to_wstring(result.hle_relocations_applied) +
                   L", relocations HLE sem resolução=" + std::to_wstring(result.hle_relocations_unresolved) +
+                  L", memória convidada somente leitura=" + (result.guest_memory_mapped ? L"sim" : L"não") +
                   L", TLS pending=" + std::to_wstring(result.tls_relocations_pending) +
                   std::wstring(L". Gate de runtime=") +
                   (result.runtime_preflight_ready ? L"pronto" : L"bloqueado") +
