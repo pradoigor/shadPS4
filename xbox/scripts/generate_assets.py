@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Deterministic package marks and quiet PCM tone, without external dependencies."""
-import math
+"""Deterministic package marks without external dependencies."""
 from pathlib import Path
 import struct
-import wave
 import zlib
 
 
@@ -28,13 +26,6 @@ def generate(directory):
     directory.mkdir(parents=True, exist_ok=True)
     for name, size in {'Logo': (150, 150), 'SmallLogo': (44, 44), 'StoreLogo': (50, 50), 'Splash': (620, 300)}.items():
         (directory / (name + '.png')).write_bytes(png(*size))
-    with wave.open(str(directory / 'tone.wav'), 'wb') as output:
-        output.setparams((1, 2, 48000, 0, 'NONE', 'not compressed'))
-        samples = bytearray()
-        for i in range(96000):
-            envelope = min(1, i / 2400, (95999 - i) / 2400)
-            samples.extend(struct.pack('<h', round(14000 * envelope * math.sin(2 * math.pi * 440 * i / 48000))))
-        output.writeframes(samples)
 
 
 if __name__ == '__main__':

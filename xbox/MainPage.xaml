@@ -18,27 +18,21 @@
         <ListView x:Name="LibraryList" Grid.Row="1" Height="285" Margin="-10,12,-10,12" SelectionMode="Single" ScrollViewer.HorizontalScrollMode="Enabled" ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollMode="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled" XYFocusKeyboardNavigation="Enabled"><ListView.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ListView.ItemsPanel></ListView>
         <Grid Grid.Row="2"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="250"/></Grid.ColumnDefinitions>
           <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,0,24,0"><StackPanel Spacing="8"><TextBlock x:Name="ContentTitle" Text="Comece pela sua biblioteca" FontSize="26" FontWeight="Light" TextWrapping="Wrap"/><TextBlock x:Name="ContentDetails" Text="Importe um PKG e selecione Extrair. A execução PS4 ainda não está disponível." FontSize="15" Foreground="#D4E7FF" TextWrapping="Wrap"/></StackPanel></ScrollViewer>
-          <StackPanel Grid.Column="1" Spacing="10"><Button x:Name="ExtractContent" Content="Extrair pacote" IsEnabled="False" HorizontalAlignment="Stretch"/><Button x:Name="CancelExtraction" Content="Cancelar extração" IsEnabled="False" HorizontalAlignment="Stretch"/><ProgressBar x:Name="InstallProgress" Minimum="0" Maximum="100" Value="0" Foreground="#9AE9FF" Height="5"/><TextBlock Text="O arquivo original é preservado. Conteúdo extraído aparece na biblioteca." FontSize="12" Foreground="#B9D9FF" TextWrapping="Wrap"/></StackPanel>
+          <StackPanel Grid.Column="1" Spacing="10"><Button x:Name="ExtractContent" Content="Extrair pacote" IsEnabled="False" HorizontalAlignment="Stretch"/><Button x:Name="ValidateContent" Content="Validar ELF / SELF" IsEnabled="False" HorizontalAlignment="Stretch"/><Button x:Name="CancelExtraction" Content="Cancelar extração" IsEnabled="False" HorizontalAlignment="Stretch"/><ProgressBar x:Name="InstallProgress" Minimum="0" Maximum="100" Value="0" Foreground="#9AE9FF" Height="5"/><TextBlock Text="O arquivo original é preservado. A validação mapeia os bytes em buffer não executável." FontSize="12" Foreground="#B9D9FF" TextWrapping="Wrap"/></StackPanel>
         </Grid>
         <TextBlock x:Name="LibraryStatus" Grid.Row="3" Text="Pronto para importar conteúdo." FontSize="14" TextWrapping="Wrap" Margin="0,14,0,0" Foreground="#D4E7FF"/>
       </Grid>
       <Grid x:Name="DiagnosticsView" Visibility="Collapsed"><Grid.ColumnDefinitions><ColumnDefinition Width="5*"/><ColumnDefinition Width="6*"/></Grid.ColumnDefinitions><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
       <TextBlock x:Name="DeviceInfo" Grid.ColumnSpan="2" FontSize="13" TextWrapping="Wrap"/>
-      <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="10" Margin="0,12,0,16">      <Button x:Name="RunAll" Visibility="Collapsed" Content="Executar testes automáticos" Padding="16,10"/>
-      <Button x:Name="RunSelected" Visibility="Collapsed" Content="Executar selecionado" Padding="16,10"/>
+      <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="10" Margin="0,12,0,16">      <Button x:Name="RunAll" Visibility="Collapsed" Content="Executar validação" Padding="16,10"/>
+      <Button x:Name="RunSelected" Content="Executar validação" Padding="16,10"/>
       <Button x:Name="Export" Content="Exportar JSON" Padding="16,10"/>
 </StackPanel>
-      <ListView Grid.Row="2" x:Name="Tests" Visibility="Collapsed" SelectionMode="Single" IsItemClickEnabled="False" Margin="0,0,24,0"/>
+      <ListView Grid.Row="2" x:Name="Tests" Visibility="Visible" SelectionMode="Single" IsItemClickEnabled="False" Margin="0,0,24,0"/>
       <ScrollViewer Grid.Row="2" Grid.ColumnSpan="2" VerticalScrollBarVisibility="Auto">
         <StackPanel Spacing="12">
-          <TextBlock x:Name="Details" Text="Nesta versão, a validação é a extração do PKG na Biblioteca. O relatório fica em LocalState/extraction-report.json. Os testes anteriores foram retirados." FontSize="18" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
-          <SwapChainPanel x:Name="GpuPanel" Visibility="Collapsed" Height="180" HorizontalAlignment="Stretch"/>
-          <MediaElement x:Name="Audio" Visibility="Collapsed" AutoPlay="False" AreTransportControlsEnabled="False" Volume="1" Height="1"/>
-          <StackPanel Orientation="Horizontal" Spacing="10">
-            <Button x:Name="Confirm" Visibility="Collapsed" Content="Confirmar imagem / áudio"/>
-            <Button x:Name="Reject" Visibility="Collapsed" Content="Imagem / áudio não funcionou"/>
-          </StackPanel>
-          <TextBlock Text="Exporte o relatório após a extração. Importar um pacote não inicia o executável." FontSize="15" Foreground="#B9D9FF" TextWrapping="Wrap"/>
+          <TextBlock x:Name="Details" Text="Selecione um ELF/SELF importado ou extraia um PKG. A validação estrutural não executa o arquivo." FontSize="18" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
+          <TextBlock Text="Exporte o relatório após a extração ou validação. Importar um pacote não inicia o executável." FontSize="15" Foreground="#B9D9FF" TextWrapping="Wrap"/>
         </StackPanel>
       </ScrollViewer>
       </Grid>

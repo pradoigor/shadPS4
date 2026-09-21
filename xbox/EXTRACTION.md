@@ -1,6 +1,6 @@
-# Extração UWP 0.3.3
+# Extração e carregamento controlado UWP 0.4.0
 
-O aplicativo agora executa extração, além de inspecionar metadados. A biblioteca
+O aplicativo executa extração, inspeciona metadados e oferece carregamento controlado. A biblioteca
 abre ao iniciar, usa uma faixa horizontal navegável pelo controle e distingue
 arquivos importados de diretórios extraídos. O visual azul e as ondas são próprios,
 inspirados no PS4, sem recursos gráficos da Sony.
@@ -23,21 +23,18 @@ inspirados no PS4, sem recursos gráficos da Sony.
 3. Importe ou selecione o PKG já existente e pressione **Extrair pacote**.
 4. Acompanhe arquivos/MiB; **Cancelar extração** interrompe entre blocos.
 5. Após terminar, confira o cartão **EXTRAÍDO**, feche e reabra o aplicativo.
-6. Baixe `LocalState/extraction-report.json` pelo portal ou use **Diagnóstico →
-   Exportar JSON**. A versão, commit, resultado e contadores ficam registrados.
+6. Se houver `eboot.bin`, pressione **Validar ELF / SELF**. A operação lê os
+   cabeçalhos, verifica limites dos segmentos e mapeia bytes em buffer privado não
+   executável. Baixe `LocalState/report.json` ou use **Diagnóstico → Exportar JSON**.
 
 Se o seletor de arquivos não estiver disponível no console, envie o PKG para
 `LocalState/Library` e as chaves para `LocalState/keys.json` pelo Device Portal,
 então reabra a Biblioteca. Preserve qualquer keys.json anterior antes de trocar
-o conjunto por chaves sintéticas de teste.
+o conjunto.
 
 Os keysets portados fazem parte do código GPL de referência; chaves personalizadas
-ficam somente em LocalState e não entram no relatório. A importação
-valida tamanho/formato; a operação RSA verifica a compatibilidade com o pacote.
-O artefato contém `synthetic-test/valid.pkg` e `synthetic-test/keys.json`, produzidos
-com chaves aleatórias de teste. Não são chaves de PS4 e não servem para jogos.
-Importar essas chaves substitui as chaves locais; use-as apenas para validar a
-extração sintética antes de importar seu próprio conjunto.
+ficam somente em LocalState e não entram no relatório. A importação valida
+tamanho/formato; a operação RSA verifica a compatibilidade com o pacote.
 
 ## Portabilidade e correções
 
@@ -74,7 +71,7 @@ não descriptografa executáveis SELF protegidos e não executa o jogo extraído
 Entradas de sistema copiadas: param.sfo e imagens selecionadas; licenças não são
 decifradas. Ter chaves não garante suporte a qualquer pacote.
 
-O CI testa arquivos sintéticos criptografados com extração byte a byte,
-truncamento, limites de tabela/inodes, corrupção zlib, RSA inválido, traversal,
-ciclos, chaves ausentes e cancelamento. Esses testes não comprovam um PKG real
-nem a apresentação visual no console. A validação final no Xbox continua pendente.
+O CI valida a estrutura do pacote APPX e audita APIs incompatíveis. A extração do
+Apollo foi validada no Xbox pelo usuário; essa evidência permanece no relatório de
+extração e na biblioteca persistida. A validação ELF/SELF desta versão ainda não
+é execução do conteúdo.

@@ -2,54 +2,48 @@
 
 Base analisada: `42c555b7ab5d0678f531a7e4d505560ccc0f8add`.
 
-Este alvo é um laboratório UWP dentro do fork. Ele já compila diretamente os
-headers originais `common/endian.h`, `core/file_format/psf.h`, `core/loader/elf.h`
-e `core/file_sys/ifile.h`, além do codec original `src/core/file_format/psf.cpp`.
-O único teste ativo entrega uma exceção software controlada pelo tratamento SEH original do Windows e conclui o bloco protegido; os
-probes anteriores ficam apenas nas evidências históricas. Ainda não liga o
-núcleo completo, não carrega ELF/PKG e não executa jogos. Resultado aprovado em um teste não
-equivale a aprovação do subsistema completo do emulador.
+Este alvo é um laboratório UWP dentro do fork. A extração do PKG do Apollo foi
+executada no Xbox e persistiu na biblioteca com capa e metadados. A versão atual
+mantém somente uma operação diagnóstica ativa: carregamento controlado de ELF/SELF.
 
-| Área | Evidência no código original | Diagnóstico implementado | Ainda necessário |
-|---|---|---|---|
-| GPU | `src/video_core/renderer_vulkan/vk_instance.cpp`: Vulkan e extensões obrigatórias | D3D11 hardware, shader com readback, triângulo e criação de dispositivo D3D12 | Backend ou tradução compatível; shaders PS4, caches, sincronização e apresentação |
-| Janela/entrada | `CMakeLists.txt`: SDL3 | XAML UWP, SwapChainPanel, Windows.Gaming.Input | Adaptar os consumidores SDL3; a distribuição oficial removeu UWP |
-| Espaço de endereços | `src/core/address_space.cpp`: VirtualAlloc2 e placeholders | Reservas pequenas em três endereços representativos | Layout completo, colisões, alinhamentos e reservas simultâneas |
-| Backing/alias | Mesmo arquivo: CreateFileMapping2, MapViewOfFile3 e backing grande executável | Duas visões de 64 KiB usando APIs FromApp | Placeholders, aliases executáveis e orçamento real do backing PS4 |
-| Execução | Mesmo arquivo: PAGE_EXECUTE_READWRITE; `src/core/linker.cpp`: carregamento/execução | Seis bytes x64 próprios, RW para RX, retorno 42 | ABI, relocação completa, TLS, instruções, bibliotecas e execução de homebrew |
-| Exceções | `src/core/signals.cpp`: AddVectoredExceptionHandler | Tratamento SEH recebe exceção software controlada e conclui o bloco protegido; execução isolada | Compatibilidade do dispatch completo de sinais do núcleo e de falhas de memória de código convidado |
-| Sistema/arquivos | Dependências desktop, bibliotecas e caminhos do núcleo | LocalState, persistência e áudio UWP | Adaptar acesso ao conteúdo e módulos, threads e dependências |
-| Formatos do núcleo | `common/endian.h`, `core/file_format/psf.h`, `psf.cpp`, `core/loader/elf.h`, `elf.cpp` e `core/file_sys/ifile.h` | Estruturas ELF originais aplicam três formas de relocação em imagem sintética | `Linker::Relocate` completo, SELF real/descriptografia, ABI, TLS, exceções e fontes restantes com dependências de logging/assert |
+## Carregamento controlado
 
-## Bloqueios confirmados do núcleo
+O aplicativo lê o cabeçalho original `core/loader/elf.h`, verifica a identidade
+PS4, limita a quantidade de program headers, valida cada `PT_LOAD`, confere
+offsets, tamanhos, alinhamento e ponto de entrada, e copia os bytes para um
+buffer privado sem permissão de execução. O checksum e as medidas são gravados
+no `report.json`.
 
-- `src/core/address_space.cpp` requer placeholders e backing executável por
-  `VirtualAlloc2`, `CreateFileMapping2` e `MapViewOfFile3`. As três chamadas
-  falham no link UWP, embora as alternativas `FromApp` usadas pelos probes funcionem.
-- `src/core/signals.cpp` depende de tratamento de exceções vetorizadas e de
-  componentes do emulador. A API isolada liga para UWP, mas o fluxo completo ainda
-  precisa ser exercitado com código convidado.
-- A janela, entrada e áudio do núcleo dependem de SDL3. O alvo Xbox usa XAML,
-  `Windows.Gaming.Input` e mídia UWP.
-- O renderer em `src/video_core/renderer_vulkan` não pode usar diretamente os
-  dispositivos D3D11/D3D12 validados pelo laboratório; é necessário um backend
-  gráfico próprio ou uma camada Vulkan realmente disponível no Xbox Dev Mode.
+Para SELF, o aplicativo valida a tabela de segmentos e detecta criptografia ou
+compressão. O conteúdo protegido permanece bloqueado; esta etapa não tenta
+descriptografar SELF e nunca chama o ponto de entrada.
 
-`api-surface.json`, quando produzido no Windows, registra se chamadas nativas
-representativas compilam e ligam para UWP x64. Compilar não comprova que elas
-funcionam no Xbox; falhar não prova que uma alternativa não exista.
+Um resultado aprovado significa que a estrutura e os limites descritos foram
+aceitos. Não significa que o ABI, relocador, TLS, bibliotecas, renderer Vulkan ou
+o código do homebrew funcionem no Xbox.
+
+## Bloqueios ainda abertos
+
+- `src/core/address_space.cpp` depende de placeholders e backing executável que
+  precisam de uma implementação própria para UWP.
+- `src/core/signals.cpp` e o tratamento de falhas do código convidado ainda não
+  foram ligados ao runtime UWP.
+- A janela, entrada, áudio e renderer do núcleo dependem de SDL3/Vulkan; a
+  interface do laboratório usa XAML e APIs do Windows.
+- SELF criptografado ainda requer a cadeia de descriptografia compatível antes de
+  qualquer mapeamento executável.
 
 ## Critérios de evolução
 
-1. Confirmar pacote, abertura, relatórios e resultados no console físico.
-2. Verificar operações de memória completas do núcleo, não apenas os probes.
-3. Definir estratégia gráfica com base nas capacidades medidas e requisitos Vulkan.
-4. Portar dependências e executar homebrew PS4 mínimo com rastreamento de falhas.
-5. Só depois selecionar jogos e medir compatibilidade e desempenho.
+1. Validar no console o carregamento controlado usando o `eboot.bin` extraído.
+2. Implementar relocação e TLS em estruturas já validadas, sem executar código
+   recebido até haver isolamento e recuperação de falhas.
+3. Definir uma camada gráfica compatível com as capacidades reais do Dev Mode.
+4. Executar um homebrew mínimo sob limites de tempo e memória, registrando falhas.
+5. Só depois avaliar jogos e desempenho.
 
-## Referências primárias
+## Referências
 
 - [SDL3 no Windows e remoção de UWP](https://wiki.libsdl.org/SDL3/README-windows)
 - [VirtualAllocFromApp](https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualallocfromapp)
-- [Device Portal para Xbox](https://learn.microsoft.com/en-us/previous-versions/windows/uwp/xbox-apps/device-portal-xbox)
-- [APIs do Device Portal](https://learn.microsoft.com/en-us/windows/uwp/debug-test-perf/device-portal-api-core)
+- [Device Portal para Xbox](https://learn.microsoft.com/en-us/previous-versions/windows/uwp/xbox-apps/device-portal)

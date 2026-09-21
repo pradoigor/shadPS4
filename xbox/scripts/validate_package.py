@@ -20,8 +20,7 @@ def validate(package, info_path):
         raise ValueError('APPX hash does not match build-info.json')
     with zipfile.ZipFile(package) as appx:
         names = set(appx.namelist())
-        for name in ['AppxManifest.xml', 'AppxSignature.p7x', 'MainPage.xaml', 'ShadPS4Xbox.exe',
-                     'Shaders/TriangleVS.cso', 'Shaders/TrianglePS.cso', 'Shaders/ProbeCS.cso', 'Assets/tone.wav']:
+        for name in ['AppxManifest.xml', 'AppxSignature.p7x', 'MainPage.xaml', 'ShadPS4Xbox.exe']:
             if name not in names:
                 raise ValueError(f'Missing packaged resource: {name}')
         manifest = ET.fromstring(appx.read('AppxManifest.xml'))
@@ -33,9 +32,6 @@ def validate(package, info_path):
         capabilities = {x.attrib['Name'] for x in manifest.findall('p:Capabilities/*', NS)}
         if capabilities != {'codeGeneration'}:
             raise ValueError(f'Unexpected capabilities: {capabilities}')
-        for shader in ['TriangleVS', 'TrianglePS', 'ProbeCS']:
-            if not appx.read(f'Shaders/{shader}.cso').startswith(b'DXBC'):
-                raise ValueError(f'Invalid compiled shader: {shader}')
         exe = appx.read('ShadPS4Xbox.exe')
         offset = struct.unpack_from('<I', exe, 0x3c)[0]
         if exe[offset:offset+4] != b'PE\0\0' or struct.unpack_from('<H', exe, offset+4)[0] != 0x8664:

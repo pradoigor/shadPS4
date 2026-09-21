@@ -26,9 +26,6 @@ class PackageValidationTests(unittest.TestCase):
               <Capabilities><Capability Name="codeGeneration"/></Capabilities></Package>''',
             'AppxSignature.p7x': b'fixture-only-not-a-real-signature',
             'MainPage.xaml': b'<Grid/>', 'ShadPS4Xbox.exe': bytes(exe),
-            'Shaders/TriangleVS.cso': b'DXBCfixture',
-            'Shaders/TrianglePS.cso': b'DXBCfixture',
-            'Shaders/ProbeCS.cso': b'DXBCfixture', 'Assets/tone.wav': b'fixture',
         }
 
     def write(self):
@@ -51,11 +48,6 @@ class PackageValidationTests(unittest.TestCase):
         package.write_bytes(package.read_bytes() + b'corruption')
         with self.assertRaisesRegex(ValueError, 'hash'):
             validate(package, info)
-
-    def test_rejects_missing_shader(self):
-        del self.files['Shaders/ProbeCS.cso']
-        with self.assertRaisesRegex(ValueError, 'Missing packaged resource'):
-            validate(*self.write())
 
     def test_rejects_different_application(self):
         self.files['AppxManifest.xml'] = self.files['AppxManifest.xml'].replace(b'PradoIgor.ShadPS4Xbox.Diagnostics', b'Other.App')

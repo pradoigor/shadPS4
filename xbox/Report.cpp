@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <utility>
 #include <winrt/Windows.ApplicationModel.h>
 #include <winrt/Windows.Storage.h>
 #include <winrt/Windows.System.h>
@@ -43,11 +44,19 @@ void WriteDurable(std::wstring const& path, std::string const& text) {
 }
 Report::Report() {
     directory = Windows::Storage::ApplicationData::Current().LocalFolder().Path();
+    Test loader;
+    loader.id = L"controlled_loader";
+    loader.title = L"Carregamento controlado ELF/SELF";
+    loader.detail = L"Selecione um eboot.bin, ELF ou SELF na Biblioteca e valide a estrutura. "
+                    L"O buffer resultante nunca é executável.";
+    loader.isolated = false;
+    loader.measurements = JsonObject{};
+    tests.push_back(std::move(loader));
     Load();
 }
 JsonObject Report::Json() const {
     JsonObject result;
-    result.Insert(L"schema_version", JsonValue::CreateNumberValue(1));
+    result.Insert(L"schema_version", JsonValue::CreateNumberValue(2));
     result.Insert(L"commit", JsonValue::CreateStringValue(XBOX_BUILD_COMMIT));
     result.Insert(L"upstream_commit", JsonValue::CreateStringValue(XBOX_UPSTREAM_COMMIT));
     result.Insert(L"emulator_ported", JsonValue::CreateBooleanValue(false));

@@ -46,21 +46,15 @@
     <Link>
       <SubSystem>Windows</SubSystem><GenerateDebugInformation>true</GenerateDebugInformation>
       <GenerateWindowsMetadata>false</GenerateWindowsMetadata>
-      <AdditionalDependencies>WindowsApp.lib;bcrypt.lib;d3d11.lib;d3d12.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>WindowsApp.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <FxCompile><ShaderModel>5.0</ShaderModel><EntryPointName>main</EntryPointName></FxCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="PkgCrypto.cpp" /><ClCompile Include="PkgExtractor.cpp" /><ClCompile Include="PkgBuiltinKeys.cpp" /><ClCompile Include="..\externals\miniz\miniz_tinfl.c" /><ClCompile Include="..\externals\miniz\miniz.c" /><ClCompile Include="App.cpp" /><ClCompile Include="CoreProbe.cpp" /><ClCompile Include="ElfProbe.cpp" /><ClCompile Include="ExceptionProbe.cpp" /><ClCompile Include="ExecProbe.cpp" /><ClCompile Include="IFileProbe.cpp" /><ClCompile Include="LoaderProbe.cpp" /><ClCompile Include="PkgProbe.cpp" /><ClCompile Include="Probes.cpp" /><ClCompile Include="RelocProbe.cpp" /><ClCompile Include="Report.cpp" /><ClCompile Include="SegmentProbe.cpp" /><ClCompile Include="TlsProbe.cpp" /><ClCompile Include="..\src\core\file_format\psf.cpp" /><ClCompile Include="..\src\core\loader\elf.cpp" />
-    <ClInclude Include="CoreProbe.h" /><ClInclude Include="ElfProbe.h" /><ClInclude Include="ExceptionProbe.h" /><ClInclude Include="ExecProbe.h" /><ClInclude Include="IFileProbe.h" /><ClInclude Include="LoaderProbe.h" /><ClInclude Include="PkgProbe.h" /><ClInclude Include="Probes.h" /><ClInclude Include="RelocProbe.h" /><ClInclude Include="Report.h" /><ClInclude Include="SegmentProbe.h" /><ClInclude Include="TlsProbe.h" /><ClInclude Include="BuildInfo.h" />
+    <ClCompile Include="PkgCrypto.cpp" /><ClCompile Include="PkgExtractor.cpp" /><ClCompile Include="PkgBuiltinKeys.cpp" /><ClCompile Include="..\externals\miniz\miniz_tinfl.c" /><ClCompile Include="..\externals\miniz\miniz.c" /><ClCompile Include="App.cpp" /><ClCompile Include="ControlledLoader.cpp" /><ClCompile Include="PkgProbe.cpp" /><ClCompile Include="Probes.cpp" /><ClCompile Include="Report.cpp" />
+    <ClInclude Include="ControlledLoader.h" /><ClInclude Include="PkgProbe.h" /><ClInclude Include="Probes.h" /><ClInclude Include="Report.h" /><ClInclude Include="BuildInfo.h" />
     <AppxManifest Include="Package.appxmanifest" />
     <None Include="MainPage.xaml"><DeploymentContent>true</DeploymentContent></None>
     <Image Include="Assets\*.png" />
-    <None Include="Assets\tone.wav"><DeploymentContent>true</DeploymentContent></None>
-    <None Include="Shaders\*.cso"><DeploymentContent>true</DeploymentContent></None>
-    <FxCompile Include="Shaders\TriangleVS.hlsl"><ShaderType>Vertex</ShaderType><ObjectFileOutput>$(ProjectDir)Shaders\TriangleVS.cso</ObjectFileOutput></FxCompile>
-    <FxCompile Include="Shaders\TrianglePS.hlsl"><ShaderType>Pixel</ShaderType><ObjectFileOutput>$(ProjectDir)Shaders\TrianglePS.cso</ObjectFileOutput></FxCompile>
-    <FxCompile Include="Shaders\ProbeCS.hlsl"><ShaderType>Compute</ShaderType><ObjectFileOutput>$(ProjectDir)Shaders\ProbeCS.cso</ObjectFileOutput></FxCompile>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Import Project="packages\Microsoft.Windows.CppWinRT.2.0.250303.1\build\native\Microsoft.Windows.CppWinRT.targets" />

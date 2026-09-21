@@ -46,12 +46,6 @@ $makepri = "$sdk\bin\$SdkVersion\x64\makepri.exe"
 if ($LASTEXITCODE -ne 0) { throw 'PRI configuration failed.' }
 & $makepri new /pr $priRoot /cf "$project\obj\assets.priconfig.xml" /of "$binaryDir\resources.pri" /in PradoIgor.ShadPS4Xbox.Diagnostics /o
 if ($LASTEXITCODE -ne 0) { throw 'Asset resource indexing failed.' }
-# Compile shaders before MSBuild evaluates its Content wildcard.
-$fxc = "$sdk\bin\$SdkVersion\x64\fxc.exe"
-foreach ($shader in @(@('TriangleVS', 'vs_5_0'), @('TrianglePS', 'ps_5_0'), @('ProbeCS', 'cs_5_0'))) {
-    & $fxc /nologo /T $shader[1] /E main /Fo "$project\Shaders\$($shader[0]).cso" "$project\Shaders\$($shader[0]).hlsl"
-    if ($LASTEXITCODE -ne 0) { throw "Shader compilation failed: $($shader[0])" }
-}
 & $msbuild "$project\Diagnostics.vcxproj" /t:Build /m /p:Configuration=Release /p:Platform=x64 "/p:WindowsTargetPlatformVersion=$SdkVersion" /p:GenerateAppxPackageOnBuild=false /p:AppxPackage=false "/bl:$artifacts\build.binlog"
 if ($LASTEXITCODE -ne 0) { throw 'UWP build failed; see build.binlog.' }
 # Explicit staging avoids implicit C++ deployment mapping and makes the payload reviewable.
@@ -64,8 +58,6 @@ New-Item "$stage\Licenses" -ItemType Directory -Force | Out-Null
 Copy-Item "$root\LICENSE" "$stage\Licenses\shadPS4-GPL.txt"
 Copy-Item "$root\externals\miniz\LICENSE" "$stage\Licenses\miniz.txt"
 Copy-Item "$project\EXTRACTION.md" "$stage\Licenses\extraction-notes.md"
-New-Item "$stage\Shaders" -ItemType Directory -Force | Out-Null
-Copy-Item "$project\Shaders\*.cso" "$stage\Shaders"
 $manifestText = (Get-Content "$project\Package.appxmanifest" -Raw).Replace('$targetnametoken$', 'ShadPS4Xbox')
 # Read the dependency identity from the exact Microsoft package distributed with this build.
 $vclibs = "${env:ProgramFiles(x86)}\Microsoft SDKs\Windows Kits\10\ExtensionSDKs\Microsoft.VCLibs\14.0\AppX\Retail\x64\Microsoft.VCLibs.x64.14.00.appx"
