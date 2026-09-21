@@ -65,7 +65,7 @@ struct App : ApplicationT<App> {
 
     Lab::PackageKeys LoadKeys() {
         auto path = std::filesystem::path(Windows::Storage::ApplicationData::Current().LocalFolder().Path().c_str()) / L"keys.json";
-        if (!std::filesystem::exists(path)) throw std::runtime_error("Importe keys.json antes de extrair.");
+        if (!std::filesystem::exists(path)) throw std::runtime_error("Este PKG usa chaves locais. Importe keys.json antes de extrair.");
         return ParseKeys(path);
     }
     static Lab::PackageKeys ParseKeys(std::filesystem::path const& path) {
@@ -76,7 +76,7 @@ struct App : ApplicationT<App> {
         Lab::PackageKeys keys;
         auto read = [&](wchar_t const* name, Lab::RsaFields& fields) {
             auto set = json.GetNamedObject(name);
-            for (const auto* field : {L"PublicExponent", L"Modulus", L"Prime1", L"Prime2"}) {
+            for (const auto* field : {L"PublicExponent", L"Modulus", L"Prime1", L"Prime2", L"Exponent1", L"Exponent2", L"Coefficient", L"PrivateExponent"}) {
                 auto value = to_string(set.GetNamedString(field));
                 if (value.size() % 2) throw std::runtime_error("Campo hexadecimal invalido.");
                 Lab::Bytes bytes;
@@ -153,7 +153,8 @@ struct App : ApplicationT<App> {
         apartment_context ui;
         try {
             displayRequest = Windows::System::Display::DisplayRequest(); displayRequest.RequestActive();
-            auto keys = LoadKeys();
+            Lab::PackageKeys keys;
+            if (Lab::PackageNeedsKeys(item.path)) keys = LoadKeys();
             auto base = std::filesystem::path(report->directory);
             auto id = std::to_wstring(static_cast<uint64_t>(started * 1000000));
             auto stage = base / L"InstallStaging" / id;

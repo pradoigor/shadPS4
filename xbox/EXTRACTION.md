@@ -10,8 +10,12 @@ inspirados no PS4, sem recursos gráficos da Sony.
 1. Atualize o APPX, preservando LocalState.
 2. Importe `keys.json` pelo botão **Importar chaves**, caso o pacote use o caminho
    RSA/PFS suportado. São necessários `PkgDerivedKey3Keyset` e `FakeKeyset`, com
-   `PublicExponent` (4 bytes), `Modulus` (256), `Prime1` e `Prime2` (128 cada),
-   representados em hexadecimal. Campos adicionais do QtLauncher são ignorados.
+   `PublicExponent` (4 bytes), `Modulus`, `PrivateExponent` (256 cada) e
+   `Prime1`, `Prime2`, `Exponent1`, `Exponent2`, `Coefficient` (128 cada), em
+   hexadecimal. O aplicativo valida todos os componentes antes da operação RSA.
+   O aplicativo verifica a tabela antes de pedir chaves: PKGs sem `entry_keys` e
+   `image_key` não pedem o arquivo. O layout PFS sem criptografia ainda termina
+   como variante não suportada, em vez de apresentar uma exigência falsa de chave.
 3. Importe ou selecione o PKG já existente e pressione **Extrair pacote**.
 4. Acompanhe arquivos/MiB; **Cancelar extração** interrompe entre blocos.
 5. Após terminar, confira o cartão **EXTRAÍDO**, feche e reabra o aplicativo.

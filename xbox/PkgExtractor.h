@@ -20,5 +20,7 @@ struct InstallProgress {
 void ExtractPackage(const std::filesystem::path& package,
                     const std::filesystem::path& staging,
                     const PackageKeys& keys, InstallProgress& progress);
+// Inspects only the PKG table. It never reads or stores key material.
+bool PackageNeedsKeys(const std::filesystem::path& package);
 void ValidatePackageKeys(const PackageKeys& keys);
 }

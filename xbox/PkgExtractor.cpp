@@ -177,10 +177,14 @@ public:
             Range(entry.offset, entry.size, file.size);
             Require(ids.insert(entry.id).second, "ID duplicado na tabela PKG."); entries.push_back(std::move(entry));
         }
+        const bool hasKeyEntries = std::any_of(entries.begin(), entries.end(), [](const auto& entry) {
+            return entry.id == 0x10 || entry.id == 0x20;
+        });
         auto get = [&](uint64_t id) -> const Entry& {
             auto it = std::find_if(entries.begin(), entries.end(), [&](const auto& e) { return e.id == id; });
             Require(it != entries.end(), "Estrutura criptografica PKG ausente ou nao suportada."); return *it;
         };
+        Require(hasKeyEntries, "PKG sem entry_keys/image_key: nao exige essas chaves, mas o layout PFS sem criptografia ainda nao e suportado nesta versao.");
         ValidatePackageKeys(keys);
         const auto& entryKeys = get(0x10);
         Require(entryKeys.size >= 32 + 7 * 32 + 4 * 256, "entry_keys truncado.");
@@ -265,5 +269,24 @@ public:
 void ExtractPackage(const std::filesystem::path& package, const std::filesystem::path& staging,
                     const PackageKeys& keys, InstallProgress& progress) {
     Extractor(package, staging, keys, progress).Run();
+}
+bool PackageNeedsKeys(const std::filesystem::path& path) {
+    Reader file(path);
+    auto header = file.Read(0, 4096);
+    Require(Number(header, 0, 4, true) == 0x7F434E54, "Arquivo nao e PKG PS4.");
+    const auto count = Number(header, 0x10, 4, true);
+    const auto table = Number(header, 0x18, 4, true);
+    Require(count > 0 && count <= 100000, "Tabela PKG invalida.");
+    Range(table, count * 32, file.size);
+    bool foundKeys = false;
+    for (uint64_t i = 0; i < count; ++i) {
+        auto entry = file.Read(table + i * 32, 32);
+        const auto id = Number(entry, 0, 4, true);
+        const auto offset = Number(entry, 16, 4, true);
+        const auto size = Number(entry, 20, 4, true);
+        Range(offset, size, file.size);
+        foundKeys |= id == 0x10 || id == 0x20;
+    }
+    return foundKeys;
 }
 }

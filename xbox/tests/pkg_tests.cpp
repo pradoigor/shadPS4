@@ -18,6 +18,7 @@ int main(int argc, char** argv) {
             (set == "FakeKeyset" ? keys.fake : keys.derived)[field] = bytes;
         }
         ValidatePackageKeys(keys);
+        if (!PackageNeedsKeys(root / "valid.pkg")) throw std::runtime_error("valid fixture key entries not detected");
         unsigned passed{};
         for (auto name : {"valid", "traversal", "cycle", "bad_dirent", "bad_inode", "bad_zlib", "bad_map", "bad_table", "bad_rsa", "truncated", "missing_keys", "cancel"}) {
             auto target = root / (std::string("output-") + name); std::filesystem::create_directory(target);

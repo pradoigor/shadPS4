@@ -17,7 +17,8 @@ for name, key in [('PkgDerivedKey3Keyset', derived_rsa), ('FakeKeyset', fake_rsa
     k = key.private_numbers()
     keysets[name] = {n: v.to_bytes(s, 'big').hex() for n, v, s in [
         ('PublicExponent', k.public_numbers.e, 4), ('Modulus', k.public_numbers.n, 256),
-        ('Prime1', k.p, 128), ('Prime2', k.q, 128)]}
+        ('Prime1', k.p, 128), ('Prime2', k.q, 128), ('Exponent1', k.dmp1, 128),
+        ('Exponent2', k.dmq1, 128), ('Coefficient', k.iqmp, 128), ('PrivateExponent', k.d, 256)]}
 (out / 'keys.json').write_text(json.dumps(keysets, indent=2))
 with (out / 'keys.txt').open('w') as f:
     for name in keysets:

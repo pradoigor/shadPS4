@@ -60,11 +60,15 @@ Bytes Rsa(std::span<const unsigned char> input, const RsaFields& fields) {
     const auto& n = field("Modulus", 256);
     const auto& p = field("Prime1", 128);
     const auto& q = field("Prime2", 128);
+    const auto& dp = field("Exponent1", 128);
+    const auto& dq = field("Exponent2", 128);
+    const auto& iq = field("Coefficient", 128);
+    const auto& d = field("PrivateExponent", 256);
     if (input.size() != 256) throw std::runtime_error("Bloco RSA invalido.");
     BCRYPT_RSAKEY_BLOB header{BCRYPT_RSAPRIVATE_MAGIC, 2048, 4, 256, 128, 128};
     Bytes blob(sizeof(header));
     memcpy(blob.data(), &header, sizeof(header));
-    for (const auto* part : {&e, &n, &p, &q}) blob.insert(blob.end(), part->begin(), part->end());
+    for (const auto* part : {&e, &n, &p, &q, &dp, &dq, &iq, &d}) blob.insert(blob.end(), part->begin(), part->end());
     Algorithm algorithm{BCRYPT_RSA_ALGORITHM};
     Key key;
     auto imported = BCryptImportKeyPair(algorithm.handle, nullptr, BCRYPT_RSAPRIVATE_BLOB,
@@ -119,7 +123,7 @@ Bytes Xts(std::span<const unsigned char> input, std::span<const unsigned char> k
 
 void Lab::ValidatePackageKeys(const PackageKeys& keys) {
     for (const auto* set : {&keys.derived, &keys.fake}) {
-        for (auto [name, size] : {std::pair{"PublicExponent", 4u}, {"Modulus", 256u}, {"Prime1", 128u}, {"Prime2", 128u}}) {
+        for (auto [name, size] : {std::pair{"PublicExponent", 4u}, {"Modulus", 256u}, {"Prime1", 128u}, {"Prime2", 128u}, {"Exponent1", 128u}, {"Exponent2", 128u}, {"Coefficient", 128u}, {"PrivateExponent", 256u}}) {
             auto found = set->find(name);
             if (found == set->end() || found->second.size() != size)
                 throw std::runtime_error("keys.json deve conter PkgDerivedKey3Keyset e FakeKeyset RSA-2048 completos.");
