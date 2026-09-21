@@ -28,6 +28,23 @@ void Require(bool condition, char const* message) {
     if (!condition) throw std::runtime_error(message);
 }
 
+std::string EncodeId(std::uint64_t value) {
+    static constexpr char codes[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-";
+    std::string encoded;
+    if (value < 0x40u) {
+        encoded += codes[value];
+    } else if (value < 0x1000u) {
+        encoded += codes[(value >> 6u) & 0x3fu];
+        encoded += codes[value & 0x3fu];
+    } else {
+        encoded += codes[(value >> 12u) & 0x3fu];
+        encoded += codes[(value >> 6u) & 0x3fu];
+        encoded += codes[value & 0x3fu];
+    }
+    return encoded;
+}
+
 struct Reader {
     std::ifstream input;
     std::uint64_t size{};
@@ -201,10 +218,13 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
                 break;
             case DT_SCE_IMPORT_LIB:
                 ++result.import_libraries;
+                result.import_library_ids.push_back(EncodeId((entry.d_un.d_val >> 48u) & 0xffffu));
                 break;
             case DT_SCE_NEEDED_MODULE:
             case DT_NEEDED:
                 ++result.needed_modules;
+                if (entry.d_tag == DT_SCE_NEEDED_MODULE)
+                    result.needed_module_ids.push_back(EncodeId((entry.d_un.d_val >> 48u) & 0xffffu));
                 break;
             default:
                 break;
@@ -490,6 +510,8 @@ ControlledLoadResult LoadSelf(Reader& reader, self_header const& header) {
     result.symbol_relocations_invalid = inner.symbol_relocations_invalid;
     result.relocation_dry_run_checksum = inner.relocation_dry_run_checksum;
     result.pending_symbol_names = std::move(inner.pending_symbol_names);
+    result.import_library_ids = std::move(inner.import_library_ids);
+    result.needed_module_ids = std::move(inner.needed_module_ids);
     result.has_dynamic = inner.has_dynamic;
     result.has_tls = inner.has_tls;
     result.has_relocations = inner.has_relocations;

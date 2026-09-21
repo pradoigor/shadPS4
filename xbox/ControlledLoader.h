@@ -46,6 +46,8 @@ struct ControlledLoadResult {
     std::uint64_t symbol_relocations_invalid{};
     std::uint64_t relocation_dry_run_checksum{};
     std::vector<std::string> pending_symbol_names;
+    std::vector<std::string> import_library_ids;
+    std::vector<std::string> needed_module_ids;
     bool has_dynamic{};
     bool has_tls{};
     bool has_relocations{};
