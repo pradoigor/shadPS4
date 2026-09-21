@@ -41,6 +41,8 @@ struct ControlledLoadResult {
     std::uint64_t relative_relocations_applied{};
     std::uint64_t symbol_relocations_pending{};
     std::uint64_t tls_relocations_pending{};
+    std::uint64_t symbol_relocations_valid{};
+    std::uint64_t symbol_relocations_invalid{};
     std::uint64_t relocation_dry_run_checksum{};
     bool has_dynamic{};
     bool has_tls{};

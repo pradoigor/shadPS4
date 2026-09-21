@@ -50,6 +50,8 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
     test.measurements.Insert(L"relative_relocations_applied", JsonValue::CreateNumberValue(static_cast<double>(result.relative_relocations_applied)));
     test.measurements.Insert(L"symbol_relocations_pending", JsonValue::CreateNumberValue(static_cast<double>(result.symbol_relocations_pending)));
     test.measurements.Insert(L"tls_relocations_pending", JsonValue::CreateNumberValue(static_cast<double>(result.tls_relocations_pending)));
+    test.measurements.Insert(L"symbol_relocations_valid", JsonValue::CreateNumberValue(static_cast<double>(result.symbol_relocations_valid)));
+    test.measurements.Insert(L"symbol_relocations_invalid", JsonValue::CreateNumberValue(static_cast<double>(result.symbol_relocations_invalid)));
     test.measurements.Insert(L"relocation_dry_run_checksum", JsonValue::CreateNumberValue(static_cast<double>(result.relocation_dry_run_checksum)));
     test.measurements.Insert(L"has_dynamic", JsonValue::CreateBooleanValue(result.has_dynamic));
     test.measurements.Insert(L"has_tls", JsonValue::CreateBooleanValue(result.has_tls));
@@ -70,6 +72,8 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
                   L", targets outside mapped segments=" + std::to_wstring(result.relocation_targets_outside_segments) +
                   L", relative applied in private dry-run=" + std::to_wstring(result.relative_relocations_applied) +
                   L", symbol pending=" + std::to_wstring(result.symbol_relocations_pending) +
+                  L", symbol names valid=" + std::to_wstring(result.symbol_relocations_valid) +
+                  L", invalid=" + std::to_wstring(result.symbol_relocations_invalid) +
                   L", TLS pending=" + std::to_wstring(result.tls_relocations_pending) +
                   L". O dry-run não altera o arquivo nem executa o homebrew; resolver imports/TLS ainda é necessário.\n" +
                   execution.detail + L"\nArquivo: " + executablePath;

@@ -136,6 +136,11 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
         std::uint64_t jmp_rela_offset{};
         std::uint64_t jmp_rela_size{};
         std::uint64_t rela_entry_size{sizeof(elf_relocation)};
+        std::uint64_t string_table_offset{};
+        std::uint64_t string_table_size{};
+        std::uint64_t symbol_table_offset{};
+        std::uint64_t symbol_table_size{};
+        std::uint64_t symbol_entry_size{sizeof(elf_symbol)};
     } dynamicTables;
     const elf_program_header* dynlibData = nullptr;
     for (auto const& program : programs)
@@ -174,6 +179,21 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
                 break;
             case DT_SCE_JMPREL:
                 dynamicTables.jmp_rela_offset = entry.d_un.d_ptr;
+                break;
+            case DT_SCE_STRTAB:
+                dynamicTables.string_table_offset = entry.d_un.d_ptr;
+                break;
+            case DT_SCE_STRSZ:
+                dynamicTables.string_table_size = entry.d_un.d_val;
+                break;
+            case DT_SCE_SYMTAB:
+                dynamicTables.symbol_table_offset = entry.d_un.d_ptr;
+                break;
+            case DT_SCE_SYMTABSZ:
+                dynamicTables.symbol_table_size = entry.d_un.d_val;
+                break;
+            case DT_SCE_SYMENT:
+                dynamicTables.symbol_entry_size = entry.d_un.d_val;
                 break;
             case DT_SCE_PLTRELSZ:
                 dynamicTables.jmp_rela_size = entry.d_un.d_val;
@@ -279,6 +299,42 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
         auto target = static_cast<std::size_t>(program.p_vaddr - result.min_virtual_address);
         std::copy(bytes.begin(), bytes.end(), mapped.begin() + target);
     }
+    auto symbolHasValidName = [&](std::uint32_t symbolIndex) {
+        if (!dynlibData || dynamicTables.symbol_entry_size != sizeof(elf_symbol) ||
+            dynamicTables.symbol_table_size == 0 || dynamicTables.string_table_size == 0 ||
+            dynamicTables.symbol_table_size % dynamicTables.symbol_entry_size != 0 ||
+            static_cast<std::uint64_t>(symbolIndex) >=
+                dynamicTables.symbol_table_size / dynamicTables.symbol_entry_size)
+            return false;
+        const auto symbolDelta = static_cast<std::uint64_t>(symbolIndex) * dynamicTables.symbol_entry_size;
+        if (symbolDelta > dynlibData->p_filesz ||
+            dynamicTables.symbol_table_offset > dynlibData->p_filesz - symbolDelta ||
+            sizeof(elf_symbol) > dynlibData->p_filesz - dynamicTables.symbol_table_offset - symbolDelta)
+            return false;
+        const auto symbolFileOffset = AddChecked(
+            dynlibData->p_offset,
+            AddChecked(dynamicTables.symbol_table_offset, symbolDelta,
+                       "Tabela de símbolos excede os dados ELF."),
+            "Tabela de símbolos excede o arquivo ELF.");
+        auto symbol = elf_symbol{};
+        logicalRead(symbolFileOffset, &symbol, sizeof(symbol));
+        if (symbol.st_name >= dynamicTables.string_table_size) return false;
+        const auto stringDelta = static_cast<std::uint64_t>(symbol.st_name);
+        const auto remaining = dynamicTables.string_table_size - stringDelta;
+        const auto probeSize = (std::min<std::uint64_t>)(remaining, 4096);
+        if (stringDelta > dynlibData->p_filesz ||
+            dynamicTables.string_table_offset > dynlibData->p_filesz - stringDelta ||
+            probeSize > dynlibData->p_filesz - dynamicTables.string_table_offset - stringDelta)
+            return false;
+        std::vector<char> name(static_cast<std::size_t>(probeSize));
+        const auto nameFileOffset = AddChecked(
+            dynlibData->p_offset,
+            AddChecked(dynamicTables.string_table_offset, stringDelta,
+                       "Tabela de strings excede os dados ELF."),
+            "Tabela de strings excede o arquivo ELF.");
+        logicalRead(nameFileOffset, name.data(), name.size());
+        return std::find(name.begin(), name.end(), '\0') != name.end();
+    };
     auto applyRelativeRelocations = [&](std::uint64_t offset, std::uint64_t size) {
         if (size == 0 || !dynlibData || dynamicTables.rela_entry_size != sizeof(elf_relocation) ||
             size % sizeof(elf_relocation) != 0 || offset > dynlibData->p_filesz ||
@@ -304,6 +360,10 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
                        relocation.GetType() == R_X86_64_GLOB_DAT ||
                        relocation.GetType() == R_X86_64_JUMP_SLOT) {
                 ++result.symbol_relocations_pending;
+                if (symbolHasValidName(relocation.GetSymbol()))
+                    ++result.symbol_relocations_valid;
+                else
+                    ++result.symbol_relocations_invalid;
             }
         }
     };
@@ -417,6 +477,8 @@ ControlledLoadResult LoadSelf(Reader& reader, self_header const& header) {
     result.relative_relocations_applied = inner.relative_relocations_applied;
     result.symbol_relocations_pending = inner.symbol_relocations_pending;
     result.tls_relocations_pending = inner.tls_relocations_pending;
+    result.symbol_relocations_valid = inner.symbol_relocations_valid;
+    result.symbol_relocations_invalid = inner.symbol_relocations_invalid;
     result.relocation_dry_run_checksum = inner.relocation_dry_run_checksum;
     result.has_dynamic = inner.has_dynamic;
     result.has_tls = inner.has_tls;

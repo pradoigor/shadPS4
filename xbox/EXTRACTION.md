@@ -1,4 +1,4 @@
-# Extração e execução controlada UWP 0.9.0
+# Extração e execução controlada UWP 0.10.0
 
 O aplicativo executa extração, inspeciona metadados e oferece carregamento controlado. A biblioteca
 abre ao iniciar, usa uma faixa horizontal navegável pelo controle e distingue
@@ -31,6 +31,7 @@ inspirados no PS4, sem recursos gráficos da Sony.
    As relocações são lidas, classificadas e conferidas contra `PT_LOAD` e
    `PT_SCE_RELRO`, mas não são aplicadas no arquivo recebido. Relocações relativas
    são exercitadas em uma cópia privada não executável para medir o próximo bloqueio.
+   Os símbolos usados por relocação também são conferidos nas tabelas de strings e símbolos.
    Baixe `LocalState/report.json`
    ou use **Diagnóstico → Exportar JSON**.
 
