@@ -40,12 +40,14 @@ RuntimeGateResult EvaluateRuntimeGate(ControlledLoadResult const& load) {
 
     // The ABI thunk is now exercised on the console. Binding still happens in
     // a short-lived table and is deliberately not written into guest memory.
-    if (load.hle_addresses_created < load.symbol_relocations_pending)
+    if (load.hle_addresses_created < load.pending_symbol_names.size())
         Add(unique, result.blockers, L"Nem todos os imports receberam um endereço HLE executável.");
     if (load.hle_handlers_unimplemented != 0)
         Add(unique, result.blockers, L"Há imports HLE com thunk ENOSYS; os handlers ainda precisam ser implementados.");
-    if (load.symbol_relocations_pending != 0)
-        Add(unique, result.blockers, L"As relocações de símbolos ainda não foram aplicadas à imagem convidada.");
+    if (load.hle_relocations_unresolved != 0 ||
+        load.hle_relocations_applied < load.pending_symbol_relocations.size())
+        Add(unique, result.blockers, L"As relocações de símbolos ainda não foram aplicadas à cópia privada.");
+    Add(unique, result.blockers, L"A imagem relocada permanece em buffer privado não executável.");
 
     for (auto const& encoded : load.import_library_names) {
         const auto name = LibraryName(encoded);

@@ -37,6 +37,7 @@ public:
     // ENOSYS-style return value and are still reported as unavailable.
     HleResolution Resolve(std::string_view encodedSymbol);
     HleBindingSummary Bind(std::vector<std::string> const& encodedSymbols);
+    void* AddressFor(std::string_view encodedSymbol) const noexcept;
 
     std::size_t implementedCount() const noexcept;
     std::size_t unresolvedCount() const noexcept;
@@ -47,6 +48,7 @@ private:
         std::string nid;
         bool implemented{};
         std::uint64_t (*handler)(GuestCallFrame const&){};
+        void* address{};
     };
 
     static std::uint64_t Dispatch(void* context, std::uint64_t slot,

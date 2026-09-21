@@ -32,9 +32,9 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sysKernelGetUpdVersion") handler = &KernelGetUpdVersion;
 
     const auto slot = static_cast<std::uint64_t>(entries_.size());
-    entries_.push_back(Entry{encoded, nid, handler != &Unimplemented, handler});
-    auto* address = thunks_.Create(this, slot, &Dispatch);
-    return HleResolution{encoded, nid, entries_.back().implemented, address};
+    entries_.push_back(Entry{encoded, nid, handler != &Unimplemented, handler, nullptr});
+    entries_.back().address = thunks_.Create(this, slot, &Dispatch);
+    return HleResolution{encoded, nid, entries_.back().implemented, entries_.back().address};
 }
 
 HleBindingSummary HleDispatcher::Bind(std::vector<std::string> const& encodedSymbols) {
@@ -47,6 +47,12 @@ HleBindingSummary HleDispatcher::Bind(std::vector<std::string> const& encodedSym
         else ++summary.unimplemented_handlers;
     }
     return summary;
+}
+
+void* HleDispatcher::AddressFor(std::string_view encodedSymbol) const noexcept {
+    for (auto const& entry : entries_)
+        if (entry.encoded == encodedSymbol) return entry.address;
+    return nullptr;
 }
 
 std::size_t HleDispatcher::implementedCount() const noexcept {

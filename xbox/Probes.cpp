@@ -6,6 +6,7 @@
 #include "RuntimeGate.h"
 
 #include <windows.h>
+#include <cstring>
 #include <filesystem>
 #include <winrt/Windows.Data.Json.h>
 #include <winrt/base.h>
@@ -24,6 +25,23 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
     result.hle_addresses_created = hleBindings.executable_addresses;
     result.hle_handlers_implemented = hleBindings.implemented_handlers;
     result.hle_handlers_unimplemented = hleBindings.unimplemented_handlers;
+    for (auto const& relocation : result.pending_symbol_relocations) {
+        auto* address = hleDispatcher.AddressFor(relocation.symbol);
+        if (!address || relocation.target < result.min_virtual_address) {
+            ++result.hle_relocations_unresolved;
+            continue;
+        }
+        const auto target = relocation.target - result.min_virtual_address;
+        if (target > result.private_image.size() ||
+            sizeof(std::uint64_t) > result.private_image.size() - target) {
+            ++result.hle_relocations_unresolved;
+            continue;
+        }
+        const auto value = reinterpret_cast<std::uint64_t>(address) +
+                           static_cast<std::uint64_t>(relocation.addend);
+        std::memcpy(result.private_image.data() + target, &value, sizeof(value));
+        ++result.hle_relocations_applied;
+    }
     auto gate = EvaluateRuntimeGate(result);
     result.runtime_preflight_ready = gate.ready;
     result.runtime_blockers = gate.blockers;
@@ -67,6 +85,8 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
     test.measurements.Insert(L"hle_addresses_created", JsonValue::CreateNumberValue(static_cast<double>(result.hle_addresses_created)));
     test.measurements.Insert(L"hle_handlers_implemented", JsonValue::CreateNumberValue(static_cast<double>(result.hle_handlers_implemented)));
     test.measurements.Insert(L"hle_handlers_unimplemented", JsonValue::CreateNumberValue(static_cast<double>(result.hle_handlers_unimplemented)));
+    test.measurements.Insert(L"hle_relocations_applied", JsonValue::CreateNumberValue(static_cast<double>(result.hle_relocations_applied)));
+    test.measurements.Insert(L"hle_relocations_unresolved", JsonValue::CreateNumberValue(static_cast<double>(result.hle_relocations_unresolved)));
     test.measurements.Insert(L"runtime_preflight_ready", JsonValue::CreateBooleanValue(result.runtime_preflight_ready));
     winrt::Windows::Data::Json::JsonArray symbolNames;
     for (auto const& name : result.pending_symbol_names)
@@ -132,10 +152,12 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
                   L", endereços HLE criados=" + std::to_wstring(result.hle_addresses_created) +
                   L", handlers implementados=" + std::to_wstring(result.hle_handlers_implemented) +
                   L", handlers pendentes=" + std::to_wstring(result.hle_handlers_unimplemented) +
+                  L", relocations HLE aplicadas em cópia privada=" + std::to_wstring(result.hle_relocations_applied) +
+                  L", relocations HLE sem resolução=" + std::to_wstring(result.hle_relocations_unresolved) +
                   L", TLS pending=" + std::to_wstring(result.tls_relocations_pending) +
                   std::wstring(L". Gate de runtime=") +
                   (result.runtime_preflight_ready ? L"pronto" : L"bloqueado") +
-                  L". O inventário AeroLib foi convertido em thunks temporários; eles ainda não foram gravados nas relocações e não executam o homebrew.\n" +
+                  L". Os thunks temporários foram usados para aplicar relocations somente em uma cópia privada; o homebrew não foi executado.\n" +
                   gateDetail + L"\n" +
                   execution.detail + L"\nArquivo: " + executablePath;
 }

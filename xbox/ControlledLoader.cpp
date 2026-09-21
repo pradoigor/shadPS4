@@ -429,6 +429,9 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
                     ++result.symbol_relocations_valid;
                     if (seenSymbolNames.insert(symbolName).second && result.pending_symbol_names.size() < 512)
                         result.pending_symbol_names.push_back(symbolName);
+                    if (result.pending_symbol_relocations.size() < 4096)
+                        result.pending_symbol_relocations.push_back(
+                            PendingSymbolRelocation{relocation.rel_offset, relocation.rel_addend, symbolName});
                     // PS4 dynamic symbols carry the encoded NID followed by
                     // the import library and module IDs (for example
                     // "nid#E#E"). The upstream AeroLib table can identify
@@ -461,6 +464,7 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
     result.mapped = true;
     result.mapped_bytes = mapped.size();
     result.checksum = Fnv1a(mapped);
+    result.private_image = std::move(mapped);
     result.detail = L"ELF validado e mapeado em buffer privado não executável. "
                     L"Nenhum byte do arquivo recebeu controle de fluxo.";
     return result;
@@ -552,6 +556,8 @@ ControlledLoadResult LoadSelf(Reader& reader, self_header const& header) {
     result.inner_entry = inner.entry;
     result.inner_mapped_bytes = inner.mapped_bytes;
     result.inner_checksum = inner.checksum;
+    result.min_virtual_address = inner.min_virtual_address;
+    result.max_virtual_address = inner.max_virtual_address;
     result.dynamic_segments = inner.dynamic_segments;
     result.tls_segments = inner.tls_segments;
     result.dynamic_entries = inner.dynamic_entries;
@@ -569,6 +575,8 @@ ControlledLoadResult LoadSelf(Reader& reader, self_header const& header) {
     result.symbol_relocations_invalid = inner.symbol_relocations_invalid;
     result.hle_symbols_known = inner.hle_symbols_known;
     result.hle_symbols_unknown = inner.hle_symbols_unknown;
+    result.pending_symbol_relocations = std::move(inner.pending_symbol_relocations);
+    result.private_image = std::move(inner.private_image);
     result.relocation_dry_run_checksum = inner.relocation_dry_run_checksum;
     result.pending_symbol_names = std::move(inner.pending_symbol_names);
     result.hle_symbol_mappings = std::move(inner.hle_symbol_mappings);
