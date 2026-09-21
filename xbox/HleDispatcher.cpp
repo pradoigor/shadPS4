@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <cstring>
@@ -100,8 +101,15 @@ void* HleDispatcher::AddressFor(std::string_view encodedSymbol) const noexcept {
 
 void HleDispatcher::ConfigureFileSystem(std::filesystem::path appRoot,
                                         std::filesystem::path dataRoot) {
-    appRoot_ = std::filesystem::weakly_canonical(std::move(appRoot));
-    dataRoot_ = std::filesystem::weakly_canonical(std::move(dataRoot));
+    // Both roots originate from the already opened eboot.bin under LocalState.
+    // AppContainer denies the directory enumeration performed internally by
+    // weakly_canonical on Xbox, so normalize textually and validate every guest
+    // component in ResolveGuestPath instead.
+    appRoot_ = std::move(appRoot).lexically_normal();
+    dataRoot_ = std::move(dataRoot).lexically_normal();
+    if (appRoot_.empty() || dataRoot_.empty() || !appRoot_.is_absolute() ||
+        !dataRoot_.is_absolute())
+        throw std::invalid_argument("Raízes do VFS UWP inválidas.");
     std::filesystem::create_directories(dataRoot_);
 }
 
