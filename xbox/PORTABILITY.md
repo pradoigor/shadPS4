@@ -24,7 +24,7 @@ que o carregador tenha uma ponte ABI SysV compatível, endereços HLE reais e um
 renderer UWP para Piglet. O aplicativo deve manter essa barreira e nunca saltar
 para o `e_entry` enquanto algum desses requisitos faltar.
 
-A build `0.34.0.0` corrige o alocador de thunks SysV→Windows para preservar os
+A build `0.35.0.0` corrige o alocador de thunks SysV→Windows para preservar os
 seis registradores inteiros, a pilha convidada e os registradores XMM em uma área
 separada do shadow space exigido pelo ABI Windows. Um chamador de máquina gerado
 pelo projeto injeta padrões distintos em registradores e argumentos de pilha e
