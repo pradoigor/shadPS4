@@ -1,4 +1,4 @@
-# Extração e carregamento controlado UWP 0.4.0
+# Extração e carregamento controlado UWP 0.4.1
 
 O aplicativo executa extração, inspeciona metadados e oferece carregamento controlado. A biblioteca
 abre ao iniciar, usa uma faixa horizontal navegável pelo controle e distingue
