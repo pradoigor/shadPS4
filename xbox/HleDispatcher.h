@@ -56,6 +56,17 @@ private:
     static std::uint64_t Unimplemented(GuestCallFrame const&) noexcept;
     static std::uint64_t KernelUsleep(GuestCallFrame const&) noexcept;
     static std::uint64_t KernelGetUpdVersion(GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelGetLowerLimitUpdVersion(GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelGetPid(GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelGetEuid(GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelSchedYield(GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelThreadSelf(GuestCallFrame const&) noexcept;
+    static std::uint64_t EglGetError(GuestCallFrame const&) noexcept;
+    static std::uint64_t EglQueryApi(GuestCallFrame const&) noexcept;
+    static std::uint64_t GlGetError(GuestCallFrame const&) noexcept;
+    static std::uint64_t NetCtlInit(GuestCallFrame const&) noexcept;
+    static std::uint64_t NetCtlTerm(GuestCallFrame const&) noexcept;
+    static std::uint64_t HideSplashScreen(GuestCallFrame const&) noexcept;
 
     SysvThunkArena thunks_;
     std::vector<Entry> entries_;

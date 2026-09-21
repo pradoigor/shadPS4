@@ -30,6 +30,17 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     auto handler = &Unimplemented;
     if (name == "sceKernelUsleep") handler = &KernelUsleep;
     if (name == "sysKernelGetUpdVersion") handler = &KernelGetUpdVersion;
+    if (name == "sysKernelGetLowerLimitUpdVersion") handler = &KernelGetLowerLimitUpdVersion;
+    if (name == "getpid") handler = &KernelGetPid;
+    if (name == "geteuid") handler = &KernelGetEuid;
+    if (name == "sched_yield") handler = &KernelSchedYield;
+    if (name == "pthread_self") handler = &KernelThreadSelf;
+    if (name == "eglGetError") handler = &EglGetError;
+    if (name == "eglQueryAPI") handler = &EglQueryApi;
+    if (name == "glGetError") handler = &GlGetError;
+    if (name == "sceNetCtlInit") handler = &NetCtlInit;
+    if (name == "sceNetCtlTerm") handler = &NetCtlTerm;
+    if (name == "sceSystemServiceHideSplashScreen") handler = &HideSplashScreen;
 
     const auto slot = static_cast<std::uint64_t>(entries_.size());
     entries_.push_back(Entry{encoded, nid, handler != &Unimplemented, handler, nullptr});
@@ -85,6 +96,53 @@ std::uint64_t HleDispatcher::KernelUsleep(GuestCallFrame const& frame) noexcept 
 }
 
 std::uint64_t HleDispatcher::KernelGetUpdVersion(GuestCallFrame const&) noexcept {
+    return 0;
+}
+
+std::uint64_t HleDispatcher::KernelGetLowerLimitUpdVersion(GuestCallFrame const&) noexcept {
+    return 0;
+}
+
+std::uint64_t HleDispatcher::KernelGetPid(GuestCallFrame const&) noexcept {
+    return 1;
+}
+
+std::uint64_t HleDispatcher::KernelGetEuid(GuestCallFrame const&) noexcept {
+    return 0;
+}
+
+std::uint64_t HleDispatcher::KernelSchedYield(GuestCallFrame const&) noexcept {
+    SwitchToThread();
+    return 0;
+}
+
+std::uint64_t HleDispatcher::KernelThreadSelf(GuestCallFrame const&) noexcept {
+    return static_cast<std::uint64_t>(GetCurrentThreadId());
+}
+
+std::uint64_t HleDispatcher::EglGetError(GuestCallFrame const&) noexcept {
+    constexpr std::uint64_t EglSuccess = 0x3000;
+    return EglSuccess;
+}
+
+std::uint64_t HleDispatcher::EglQueryApi(GuestCallFrame const&) noexcept {
+    constexpr std::uint64_t EglOpenGlEsApi = 0x30A0;
+    return EglOpenGlEsApi;
+}
+
+std::uint64_t HleDispatcher::GlGetError(GuestCallFrame const&) noexcept {
+    return 0;
+}
+
+std::uint64_t HleDispatcher::NetCtlInit(GuestCallFrame const&) noexcept {
+    return 0;
+}
+
+std::uint64_t HleDispatcher::NetCtlTerm(GuestCallFrame const&) noexcept {
+    return 0;
+}
+
+std::uint64_t HleDispatcher::HideSplashScreen(GuestCallFrame const&) noexcept {
     return 0;
 }
 
