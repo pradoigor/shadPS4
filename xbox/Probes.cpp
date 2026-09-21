@@ -101,6 +101,12 @@ void RunProbe(Test& t, std::wstring const& directory) {
         Number(t, L"decoded_integer", result.decoded_integer);
         if (!result.passed) throw hresult_error(E_FAIL, L"Tipos do núcleo divergiram no alvo UWP.");
         t.detail = L"Codec PSF original do shadPS4 compilou no APPX; codificou e decodificou TITLE_ID e APP_VER, além de validar tamanhos e big-endian no console.";
+    } else if (t.id == L"core_file_adapter") {
+        auto result = ProbePsfFileAdapter(directory);
+        Number(t, L"file_size", result.file_size);
+        Number(t, L"decoded_integer", result.decoded_integer);
+        if (!result.passed) throw hresult_error(E_FAIL, L"Arquivo PSF não foi relido ou decodificado no alvo UWP.");
+        t.detail = L"Bytes PSF codificados pelo codec original foram gravados, sincronizados, relidos com CreateFile2 e decodificados no LocalState UWP.";
     } else if (t.id == L"loader_structures") {
         auto result = ProbeUpstreamLoaderStructures();
         Number(t, L"self_header_size", result.self_header_size);

@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 namespace Lab {
 
@@ -16,5 +17,13 @@ struct CoreProbeResult {
 };
 
 CoreProbeResult ProbeUpstreamCoreTypes();
+
+struct CoreFileProbeResult {
+    bool passed{};
+    std::uint32_t file_size{};
+    std::int32_t decoded_integer{};
+};
+
+CoreFileProbeResult ProbePsfFileAdapter(const std::wstring& directory);
 
 } // namespace Lab

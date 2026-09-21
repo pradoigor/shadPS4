@@ -48,6 +48,7 @@ Report::Report() {
     };
     add(L"storage", L"Armazenamento · leitura e gravação");
     add(L"core_types", L"Núcleo · tipos PSF e endian do shadPS4");
+    add(L"core_file_adapter", L"Núcleo · PSF via arquivo UWP");
     add(L"loader_structures", L"Loader · estruturas ELF e SELF do shadPS4");
     add(L"budget", L"Memória · orçamento do aplicativo");
     add(L"d3d11", L"GPU · Direct3D 11 e shader com leitura de volta");

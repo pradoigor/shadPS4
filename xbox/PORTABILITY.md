@@ -4,7 +4,8 @@ Base analisada: `42c555b7ab5d0678f531a7e4d505560ccc0f8add`.
 
 Este alvo é um laboratório UWP dentro do fork. Ele já compila diretamente os
 headers originais `common/endian.h`, `core/file_format/psf.h` e `core/loader/elf.h`,
-além do codec original `src/core/file_format/psf.cpp`, mas ainda não liga o
+além do codec original `src/core/file_format/psf.cpp`. O probe também grava e
+relê um PSF no `LocalState` usando `CreateFile2`, mas ainda não liga o
 núcleo completo, não carrega ELF/PKG e não executa jogos. Resultado aprovado em um teste não
 equivale a aprovação do subsistema completo do emulador.
 
@@ -17,7 +18,7 @@ equivale a aprovação do subsistema completo do emulador.
 | Execução | Mesmo arquivo: PAGE_EXECUTE_READWRITE; `src/core/linker.cpp`: carregamento/execução | Seis bytes x64 próprios, RW para RX, retorno 42 | ABI, relocação, TLS, instruções, bibliotecas e execução de homebrew |
 | Exceções | `src/core/signals.cpp`: AddVectoredExceptionHandler | Interrupções detectadas por journal persistente | Compatibilidade do mecanismo de tratamento de exceções do núcleo; journal não substitui um handler |
 | Sistema/arquivos | Dependências desktop, bibliotecas e caminhos do núcleo | LocalState, persistência e áudio UWP | Adaptar acesso ao conteúdo e módulos, threads e dependências |
-| Formatos do núcleo | `common/endian.h`, `core/file_format/psf.h`, `psf.cpp` e `core/loader/elf.h` | Codec PSF original e estruturas ELF/SELF originais são exercitados em memória no Xbox | Adaptador de arquivo UWP para PSF, SELF/ELF e fontes com dependências de logging/assert |
+| Formatos do núcleo | `common/endian.h`, `core/file_format/psf.h`, `psf.cpp` e `core/loader/elf.h` | Codec PSF original, gravação/leitura UWP e estruturas ELF/SELF originais são exercitados no Xbox | Adaptador de arquivo para SELF/ELF e fontes com dependências de logging/assert |
 
 ## Bloqueios confirmados do núcleo
 

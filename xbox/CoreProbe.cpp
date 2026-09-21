@@ -7,6 +7,9 @@
 
 #include <bit>
 #include <cstring>
+#include <fileapifromapp.h>
+#include <windows.h>
+#include <winrt/base.h>
 
 namespace Lab {
 
@@ -43,6 +46,48 @@ CoreProbeResult ProbeUpstreamCoreTypes() {
                     result.psf_header_size == 0x14 && result.psf_entry_size == 0x10 &&
                     raw_magic == std::byteswap(PSF_MAGIC) && decoded_ok &&
                     title == "HB000000001" && number == 42;
+    return result;
+}
+
+CoreFileProbeResult ProbePsfFileAdapter(const std::wstring& directory) {
+    PSF source;
+    source.AddString("TITLE_ID", "HB000000001");
+    source.AddInteger("APP_VER", 42);
+    const auto encoded = source.Encode();
+    const auto path = directory + L"\\psf-core-probe.bin";
+
+    CREATEFILE2_EXTENDED_PARAMETERS params{sizeof(params)};
+    params.dwFileAttributes = FILE_ATTRIBUTE_NORMAL;
+    winrt::handle writer{CreateFile2(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ,
+                                     CREATE_ALWAYS, &params)};
+    if (!writer) winrt::throw_last_error();
+    DWORD written{};
+    winrt::check_bool(WriteFile(writer.get(), encoded.data(), static_cast<DWORD>(encoded.size()),
+                                &written, nullptr));
+    winrt::check_bool(FlushFileBuffers(writer.get()));
+    writer.close();
+
+    winrt::handle reader{CreateFile2(path.c_str(), GENERIC_READ, FILE_SHARE_READ,
+                                     OPEN_EXISTING, &params)};
+    if (!reader) winrt::throw_last_error();
+    LARGE_INTEGER size{};
+    winrt::check_bool(GetFileSizeEx(reader.get(), &size));
+    if (size.QuadPart < 0 || static_cast<unsigned long long>(size.QuadPart) > UINT32_MAX)
+        throw winrt::hresult_error(E_FAIL, L"Tamanho inesperado do arquivo PSF.");
+    std::vector<std::uint8_t> bytes(static_cast<size_t>(size.QuadPart));
+    DWORD read{};
+    if (!bytes.empty()) {
+        winrt::check_bool(ReadFile(reader.get(), bytes.data(), static_cast<DWORD>(bytes.size()),
+                                   &read, nullptr));
+    }
+
+    PSF decoded;
+    const bool decoded_ok = read == bytes.size() && decoded.Open(bytes);
+    const auto number = decoded.GetInteger("APP_VER");
+    CoreFileProbeResult result;
+    result.file_size = static_cast<std::uint32_t>(bytes.size());
+    result.decoded_integer = number.value_or(-1);
+    result.passed = written == encoded.size() && decoded_ok && number == 42;
     return result;
 }
 
