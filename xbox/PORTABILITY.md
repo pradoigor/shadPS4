@@ -27,8 +27,9 @@ código do homebrew funcionem no Xbox.
 
 A auditoria registra a presença e os tamanhos dos metadados `PT_DYNAMIC` e `PT_TLS`,
 as tabelas de relocação e as dependências declaradas. Ela classifica os tipos de
-relocação e verifica se os alvos ficam em `PT_LOAD` ou `PT_SCE_RELRO`, mas não aplica relocação,
-resolve imports nem chama inicializadores.
+relocação e verifica se os alvos ficam em `PT_LOAD` ou `PT_SCE_RELRO`. Um dry-run
+aplica apenas `R_X86_64_RELATIVE` em uma cópia privada não executável; ele não
+altera o arquivo, resolve imports ou chama inicializadores.
 
 ## Bloqueios ainda abertos
 

@@ -47,6 +47,10 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
     test.measurements.Insert(L"supported_relocations", JsonValue::CreateNumberValue(static_cast<double>(result.supported_relocations)));
     test.measurements.Insert(L"unsupported_relocations", JsonValue::CreateNumberValue(static_cast<double>(result.unsupported_relocations)));
     test.measurements.Insert(L"relocation_targets_outside_segments", JsonValue::CreateNumberValue(static_cast<double>(result.relocation_targets_outside_segments)));
+    test.measurements.Insert(L"relative_relocations_applied", JsonValue::CreateNumberValue(static_cast<double>(result.relative_relocations_applied)));
+    test.measurements.Insert(L"symbol_relocations_pending", JsonValue::CreateNumberValue(static_cast<double>(result.symbol_relocations_pending)));
+    test.measurements.Insert(L"tls_relocations_pending", JsonValue::CreateNumberValue(static_cast<double>(result.tls_relocations_pending)));
+    test.measurements.Insert(L"relocation_dry_run_checksum", JsonValue::CreateNumberValue(static_cast<double>(result.relocation_dry_run_checksum)));
     test.measurements.Insert(L"has_dynamic", JsonValue::CreateBooleanValue(result.has_dynamic));
     test.measurements.Insert(L"has_tls", JsonValue::CreateBooleanValue(result.has_tls));
     test.measurements.Insert(L"has_relocations", JsonValue::CreateBooleanValue(result.has_relocations));
@@ -64,7 +68,10 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
                   L", relocation types supported=" + std::to_wstring(result.supported_relocations) +
                   L", unsupported=" + std::to_wstring(result.unsupported_relocations) +
                   L", targets outside mapped segments=" + std::to_wstring(result.relocation_targets_outside_segments) +
-                  L". Aplicar relocação e resolver imports/TLS ainda é necessário antes de executar o homebrew.\n" +
+                  L", relative applied in private dry-run=" + std::to_wstring(result.relative_relocations_applied) +
+                  L", symbol pending=" + std::to_wstring(result.symbol_relocations_pending) +
+                  L", TLS pending=" + std::to_wstring(result.tls_relocations_pending) +
+                  L". O dry-run não altera o arquivo nem executa o homebrew; resolver imports/TLS ainda é necessário.\n" +
                   execution.detail + L"\nArquivo: " + executablePath;
 }
 

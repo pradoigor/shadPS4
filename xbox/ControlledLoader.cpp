@@ -279,6 +279,37 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
         auto target = static_cast<std::size_t>(program.p_vaddr - result.min_virtual_address);
         std::copy(bytes.begin(), bytes.end(), mapped.begin() + target);
     }
+    auto applyRelativeRelocations = [&](std::uint64_t offset, std::uint64_t size) {
+        if (size == 0 || !dynlibData || dynamicTables.rela_entry_size != sizeof(elf_relocation) ||
+            size % sizeof(elf_relocation) != 0 || offset > dynlibData->p_filesz ||
+            size > dynlibData->p_filesz - offset)
+            return;
+        auto fileOffset = AddChecked(dynlibData->p_offset, offset,
+                                     "Tabela de relocação excede o arquivo ELF.");
+        std::vector<elf_relocation> relocations(static_cast<std::size_t>(size / sizeof(elf_relocation)));
+        logicalRead(fileOffset, relocations.data(), static_cast<std::size_t>(size));
+        constexpr std::uint64_t dryRunBase = 0x100000000ull;
+        for (auto const& relocation : relocations) {
+            if (relocation.GetType() == R_X86_64_RELATIVE) {
+                if (relocation.rel_offset < result.min_virtual_address || mapped.size() < sizeof(std::uint64_t) ||
+                    relocation.rel_offset - result.min_virtual_address > mapped.size() - sizeof(std::uint64_t))
+                    continue;
+                const auto target = static_cast<std::size_t>(relocation.rel_offset - result.min_virtual_address);
+                const auto value = dryRunBase + static_cast<std::uint64_t>(relocation.rel_addend);
+                std::memcpy(mapped.data() + target, &value, sizeof(value));
+                ++result.relative_relocations_applied;
+            } else if (relocation.GetType() == R_X86_64_DTPMOD64) {
+                ++result.tls_relocations_pending;
+            } else if (relocation.GetType() == R_X86_64_64 ||
+                       relocation.GetType() == R_X86_64_GLOB_DAT ||
+                       relocation.GetType() == R_X86_64_JUMP_SLOT) {
+                ++result.symbol_relocations_pending;
+            }
+        }
+    };
+    applyRelativeRelocations(dynamicTables.rela_offset, dynamicTables.rela_size);
+    applyRelativeRelocations(dynamicTables.jmp_rela_offset, dynamicTables.jmp_rela_size);
+    result.relocation_dry_run_checksum = Fnv1a(mapped);
     result.mapped = true;
     result.mapped_bytes = mapped.size();
     result.checksum = Fnv1a(mapped);
@@ -383,6 +414,10 @@ ControlledLoadResult LoadSelf(Reader& reader, self_header const& header) {
     result.supported_relocations = inner.supported_relocations;
     result.unsupported_relocations = inner.unsupported_relocations;
     result.relocation_targets_outside_segments = inner.relocation_targets_outside_segments;
+    result.relative_relocations_applied = inner.relative_relocations_applied;
+    result.symbol_relocations_pending = inner.symbol_relocations_pending;
+    result.tls_relocations_pending = inner.tls_relocations_pending;
+    result.relocation_dry_run_checksum = inner.relocation_dry_run_checksum;
     result.has_dynamic = inner.has_dynamic;
     result.has_tls = inner.has_tls;
     result.has_relocations = inner.has_relocations;
