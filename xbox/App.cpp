@@ -165,6 +165,7 @@ struct App : ApplicationT<App> {
                 std::filesystem::create_directories(stage);
                 Lab::ExtractPackage(item.path, stage, keys, *state);
                 for (auto* set : {&keys.derived, &keys.fake}) for (auto& [field, bytes] : *set) SecureZeroMemory(bytes.data(), bytes.size());
+                if (std::filesystem::exists(stage / L"library-name.txt")) throw std::runtime_error("Nome reservado aos metadados da biblioteca.");
                 Lab::WriteDurable((stage / L"library-name.txt").wstring(), to_string(item.name));
                 std::filesystem::create_directories(target.parent_path());
                 std::filesystem::rename(stage, target);
@@ -183,7 +184,7 @@ struct App : ApplicationT<App> {
         } catch (...) { error += L" Não foi possível salvar extraction-report.json."; }
         try { if (displayRequest) displayRequest.RequestRelease(); } catch (...) {}
         displayRequest = nullptr;
-        libraryStatus.Text(completed ? L"Extração concluída. Relatório: LocalState/extraction-report.json." : L"Extração não concluída: " + error);
+        libraryStatus.Text(completed ? L"Extração concluída. Relatório: LocalState/extraction-report.json." + error : L"Extração não concluída: " + error);
         extraction.reset();
         Find<Button>(L"SelectContent").IsEnabled(true); Find<Button>(L"ImportKeys").IsEnabled(true);
         Find<Button>(L"CancelExtraction").IsEnabled(false);

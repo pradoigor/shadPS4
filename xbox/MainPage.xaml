@@ -3,6 +3,7 @@
   <Grid.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#126DD0" Offset="0"/><GradientStop Color="#0744A7" Offset="0.45"/><GradientStop Color="#031B61" Offset="1"/></LinearGradientBrush></Grid.Background>
   <Grid.Resources><Style TargetType="Button"><Setter Property="Background" Value="#18FFFFFF"/><Setter Property="BorderBrush" Value="#55FFFFFF"/><Setter Property="Foreground" Value="White"/><Setter Property="FontSize" Value="17"/><Setter Property="Padding" Value="20,12"/><Setter Property="UseSystemFocusVisuals" Value="True"/><Setter Property="FocusVisualPrimaryBrush" Value="White"/></Style></Grid.Resources>
   <Viewbox IsHitTestVisible="False" Stretch="Fill" Opacity="0.12"><Canvas Width="1920" Height="1080"><Path Data="M -100,810 C 480,330 1010,1260 2050,410 L 2050,630 C 1100,1380 530,530 -100,1030 Z" Fill="#64CFFF"/><Path Data="M -100,850 C 640,400 1160,1280 2050,530" Stroke="White" StrokeThickness="2"/></Canvas></Viewbox>
+  <Viewbox Stretch="Uniform"><Grid Width="1280" Height="720">
   <Grid Margin="52,28">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
     <Grid><StackPanel><TextBlock Text="shadPS4" FontSize="34" FontWeight="Light" CharacterSpacing="80"/><TextBlock Text="XBOX LAB  /  DEV MODE" FontSize="11" CharacterSpacing="180" Foreground="#B9D9FF" Margin="2,3,0,0"/></StackPanel><TextBlock Text="Sua biblioteca, neste console" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="18"/></Grid>
@@ -44,4 +45,5 @@
     </Grid>
     <TextBlock x:Name="Status" Grid.Row="3" Text="A  Selecionar     ·     Direcional  Navegar" FontSize="16" TextWrapping="Wrap" Margin="0,12,0,0" Foreground="#D4E7FF"/>
   </Grid>
+</Grid></Viewbox>
 </Grid>

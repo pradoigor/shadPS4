@@ -4,10 +4,10 @@ Aplicativo **UWP x64 / C++/WinRT / XAML** para medir a viabilidade de portar
 shadPS4 ao Xbox Series X em Dev Mode. **Ainda não é um emulador PS4 no Xbox.**
 O alvo é independente do CMake e das dependências desktop do núcleo.
 
-O marco de interface inclui as áreas **Biblioteca** e **Diagnóstico**. Em
-Biblioteca, o usuário pode selecionar um ELF/SELF e persistir uma cópia no
-armazenamento do aplicativo. A tela identifica explicitamente que o loader do
-núcleo ainda não está conectado; selecionar um arquivo não o executa.
+A versão **0.3.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
+PKG/ELF, importação local de chaves e extração experimental em segundo plano,
+com progresso, cancelamento e relatório. Consulte [EXTRACTION.md](EXTRACTION.md)
+para formatos suportados, instruções, testes e limites. Extrair não executa o jogo.
 
 ## Compilar
 
@@ -24,8 +24,9 @@ UWP, SDK 10.0.22621.0 e Python 3.12, então execute no PowerShell:
 ```
 
 O pacote declara `codeGeneration` para o teste de código próprio e não pede
-acesso à internet. Não inclui firmware, jogos, chaves ou código de terceiros
-adicional ao fork. A interface carrega XAML sem tipos personalizados; o build
+acesso à internet. Não inclui firmware, jogos nem chaves reais. O submódulo miniz já
+fixado no fork fornece descompressão; o artefato de teste usa apenas chaves
+RSA sintéticas geradas no CI. A interface carrega XAML sem tipos personalizados; o build
 usa C++/WinRT 2.0.250303.1 e shaders HLSL pré-compilados, sem compilador no Xbox.
 
 ## Instalar
@@ -44,26 +45,13 @@ nunca remove aplicativos automaticamente.
 
 ## Testar
 
-- **Biblioteca:** seleciona extensões `.elf`, `.self`, `.bin` ou `.pkg` e copia o arquivo para `LocalState/Library`. Para PKG, a interface valida o magic, lê o cabeçalho e a tabela de entradas, mostra Content ID/Title ID, regiões declaradas e a presença de `param.sfo`; não instala, descriptografa ou executa o conteúdo.
+Use **Biblioteca → Importar PKG / ELF → Extrair pacote**. Os diagnósticos antigos
+foram retirados. O fluxo desta versão e o pacote sintético incluído no artefato
+estão documentados em [EXTRACTION.md](EXTRACTION.md).
 
-- **Executar testes automáticos:** armazenamento, orçamento, D3D11 com readback,
-  dispositivo D3D12 e mapeamento RW pequeno. Sem resultados sintéticos.
-- **Executar selecionado:** executa um teste, inclusive os testes isolados de
-  endereço, proteção e código x64. Cada início é persistido e sincronizado antes
-  de executar. Após interrupção, o resultado passa a **inconclusivo**.
-- **Imagem/áudio:** exigem confirmação humana explícita. Não confirme um teste
-  de áudio apenas porque a API aceitou a reprodução.
-- **Controle:** pressione X após iniciar o teste; sem entrada em 30 segundos,
-  o resultado é inconclusivo. Navegação da interface deve ser verificada também.
-- **Ciclo de vida:** execute, saia para o painel e retorne. Aprovação exige os
-  eventos reais Suspending e Resuming na mesma sessão. Fechar e reabrir durante
-  esse teste produz inconclusivo, não um falso sucesso.
-- **Exportar JSON:** grava arquivo com data em LocalState; baixe pelo File
-  explorer do Device Portal. `report.json` sempre contém o estado mais recente.
-
-O relatório inclui versão, commit, versão do sistema, resultado, duração,
-medições e erro. Resultados de outra build ficam em `previous-build-report.json`
-e não são atribuídos à build nova. Relatório inválido é preservado separadamente.
+O relatório `extraction-report.json` contém versão/commit, duração, estado,
+contadores e erro; pode ser exportado pela área Diagnóstico. O PKG original é
+preservado. Falhas não promovem a pasta temporária a conteúdo instalado.
 
 ## Aceitação no console
 

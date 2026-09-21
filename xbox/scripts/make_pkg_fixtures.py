@@ -71,7 +71,8 @@ def pkg(kind):
     encrypted[0x370:0x380] = seed
     header = bytearray(0x1000)
     struct.pack_into('>IIIIIII', header, 0, 0x7f434e54, 1, 0, 3, 3, 0, 0x1000)
-    header[0x40:0x64] = b'XX0000-XBOX00001_00-SYNTHETICFIXTURE00'
+    header[0x40:0x64] = b'XX0000-XBOX00001_00-SYNTHETICFIXTURE00'[:36]
+    assert len(header) == 4096
     pfs_offset = 0x4000
     struct.pack_into('>QQ', header, 0x410, pfs_offset, len(encrypted))
     struct.pack_into('>Q', header, 0x430, pfs_offset + len(encrypted))

@@ -60,6 +60,10 @@ if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item $stage -ItemType Directory -Force | Out-Null
 Copy-Item "$binaryDir\ShadPS4Xbox.exe", "$binaryDir\resources.pri", "$project\MainPage.xaml" $stage
 Copy-Item "$project\Assets" $stage -Recurse
+New-Item "$stage\Licenses" -ItemType Directory -Force | Out-Null
+Copy-Item "$root\LICENSE" "$stage\Licenses\shadPS4-GPL.txt"
+Copy-Item "$root\externals\miniz\LICENSE" "$stage\Licenses\miniz.txt"
+Copy-Item "$project\EXTRACTION.md" "$stage\Licenses\extraction-notes.md"
 New-Item "$stage\Shaders" -ItemType Directory -Force | Out-Null
 Copy-Item "$project\Shaders\*.cso" "$stage\Shaders"
 $manifestText = (Get-Content "$project\Package.appxmanifest" -Raw).Replace('$targetnametoken$', 'ShadPS4Xbox')
