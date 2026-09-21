@@ -4,6 +4,11 @@ Aplicativo **UWP x64 / C++/WinRT / XAML** para medir a viabilidade de portar
 shadPS4 ao Xbox Series X em Dev Mode. **Ainda não é um emulador PS4 no Xbox.**
 O alvo é independente do CMake e das dependências desktop do núcleo.
 
+O marco de interface inclui as áreas **Biblioteca** e **Diagnóstico**. Em
+Biblioteca, o usuário pode selecionar um ELF/SELF e persistir uma cópia no
+armazenamento do aplicativo. A tela identifica explicitamente que o loader do
+núcleo ainda não está conectado; selecionar um arquivo não o executa.
+
 ## Compilar
 
 O workflow **Xbox UWP diagnostics** compila a branch `xbox-uwp` no Windows 2022.
@@ -30,7 +35,7 @@ usa C++/WinRT 2.0.250303.1 e shaders HLSL pré-compilados, sem compilador no Xbo
 3. Confira o certificado do console e faça login. Não desative a autenticação.
 4. Em **Home → My games & apps → Add**, selecione `ShadPS4Xbox.appx`.
 5. Selecione as dependências **x64** da pasta `Dependencies` e conclua.
-6. Inicie **shadPS4 · Xbox Lab**. A abertura não inicia testes; selecione **Executar testes automáticos** após a interface aparecer. As etapas de inicialização ficam em `LocalState/startup.log`, inclusive erros anteriores à criação do relatório.
+6. Inicie **shadPS4 · Xbox Lab**. A abertura não inicia testes; use **Biblioteca** para selecionar conteúdo ou **Diagnóstico** para consultar o probe ativo. As etapas de inicialização ficam em `LocalState/startup.log`, inclusive erros anteriores à criação do relatório.
 
 A assinatura é de desenvolvimento. Builds seguintes usam certificado temporário
 com o mesmo Publisher. Se o console recusar uma atualização por assinatura,
@@ -38,6 +43,8 @@ preserve LocalState e o relatório antes de qualquer reinstalação; o projeto
 nunca remove aplicativos automaticamente.
 
 ## Testar
+
+- **Biblioteca:** seleciona extensões `.elf`, `.self` ou `.bin` e copia o arquivo para `LocalState/Library`. Nesta versão não há carregamento nem execução do conteúdo.
 
 - **Executar testes automáticos:** armazenamento, orçamento, D3D11 com readback,
   dispositivo D3D12 e mapeamento RW pequeno. Sem resultados sintéticos.

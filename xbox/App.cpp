@@ -12,6 +12,7 @@
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Gaming.Input.h>
 #include <winrt/Windows.Storage.h>
+#include <winrt/Windows.Storage.Pickers.h>
 #include <winrt/Windows.UI.Xaml.h>
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
@@ -41,7 +42,9 @@ static void StartupLog(std::wstring const& message) noexcept {
 
 struct App : ApplicationT<App> {
     std::unique_ptr<Lab::Report> report;
-    Grid root{nullptr}; ListView list{nullptr}; TextBlock status{nullptr}, details{nullptr};
+    Grid root{nullptr}; Grid libraryView{nullptr}, diagnosticsView{nullptr};
+    ListView list{nullptr}, libraryList{nullptr};
+    TextBlock status{nullptr}, details{nullptr}, libraryStatus{nullptr};
     MediaElement audio{nullptr}; SwapChainPanel panel{nullptr}; DispatcherTimer timer{nullptr};
     com_ptr<IDXGISwapChain1> swapchain;
     bool busy{}, refreshing{}, persistenceFailed{};
@@ -69,6 +72,51 @@ struct App : ApplicationT<App> {
         });
     }
     template<typename T> T Find(wchar_t const* name) { return root.FindName(name).as<T>(); }
+    void ShowLibrary(bool visible) {
+        libraryView.Visibility(visible ? Visibility::Visible : Visibility::Collapsed);
+        diagnosticsView.Visibility(visible ? Visibility::Collapsed : Visibility::Visible);
+        if (visible) PopulateLibrary();
+    }
+    fire_and_forget PopulateLibrary() {
+        auto lifetime = get_strong();
+        try {
+            auto local = Windows::Storage::ApplicationData::Current().LocalFolder();
+            auto folder = co_await local.CreateFolderAsync(L"Library", Windows::Storage::CreationCollisionOption::OpenIfExists);
+            auto files = co_await folder.GetFilesAsync();
+            libraryList.Items().Clear();
+            for (auto const& file : files) {
+                TextBlock item;
+                item.Text(std::wstring(file.Name()) + L"\nSelecionado para o núcleo; carregamento ainda não implementado.");
+                item.TextWrapping(TextWrapping::Wrap);
+                item.FontSize(16);
+                item.Margin({0, 6, 0, 6});
+                libraryList.Items().Append(item);
+            }
+            libraryStatus.Text(files.Size() == 0 ? L"Nenhum ELF/SELF selecionado." :
+                L"Conteúdo persistido no armazenamento do aplicativo. O próximo marco conectará o loader.");
+        } catch (hresult_error const& e) {
+            libraryStatus.Text(L"Falha ao listar a biblioteca: " + e.message());
+        }
+    }
+    fire_and_forget SelectContent() {
+        auto lifetime = get_strong();
+        try {
+            Windows::Storage::Pickers::FileOpenPicker picker;
+            picker.ViewMode(Windows::Storage::Pickers::PickerViewMode::List);
+            picker.FileTypeFilter().Append(L".elf");
+            picker.FileTypeFilter().Append(L".self");
+            picker.FileTypeFilter().Append(L".bin");
+            auto file = co_await picker.PickSingleFileAsync();
+            if (!file) co_return;
+            auto local = Windows::Storage::ApplicationData::Current().LocalFolder();
+            auto folder = co_await local.CreateFolderAsync(L"Library", Windows::Storage::CreationCollisionOption::OpenIfExists);
+            co_await file.CopyAsync(folder, file.Name(), Windows::Storage::NameCollisionOption::ReplaceExisting);
+            libraryStatus.Text(L"Arquivo copiado: " + std::wstring(file.Name()) + L". O loader ainda não está conectado.");
+            PopulateLibrary();
+        } catch (hresult_error const& e) {
+            libraryStatus.Text(L"Falha ao selecionar conteúdo: " + e.message());
+        }
+    }
     bool Save() {
         try { report->Save(); return true; }
         catch (hresult_error const& e) {
@@ -90,7 +138,10 @@ struct App : ApplicationT<App> {
             std::string xaml{std::istreambuf_iterator<char>(file), {}};
             StartupLog(L"Loading MainPage.xaml");
             root = Markup::XamlReader::Load(to_hstring(xaml)).as<Grid>();
-            list = Find<ListView>(L"Tests"); status = Find<TextBlock>(L"Status"); details = Find<TextBlock>(L"Details");
+            libraryView = Find<Grid>(L"LibraryView"); diagnosticsView = Find<Grid>(L"DiagnosticsView");
+            list = Find<ListView>(L"Tests"); libraryList = Find<ListView>(L"LibraryList");
+            status = Find<TextBlock>(L"Status"); details = Find<TextBlock>(L"Details");
+            libraryStatus = Find<TextBlock>(L"LibraryStatus");
             panel = Find<SwapChainPanel>(L"GpuPanel"); audio = Find<MediaElement>(L"Audio");
             StartupLog(L"XAML loaded; opening report");
             report = std::make_unique<Lab::Report>();
@@ -98,6 +149,9 @@ struct App : ApplicationT<App> {
             list.SelectionChanged([this](auto const&, auto const&) { if (!refreshing) ShowDetails(); });
             Find<Button>(L"RunAll").Click([this](auto const&, auto const&) { RunAll(); });
             Find<Button>(L"RunSelected").Click([this](auto const&, auto const&) { RunSelected(); });
+            Find<Button>(L"LibraryTab").Click([this](auto const&, auto const&) { ShowLibrary(true); });
+            Find<Button>(L"DiagnosticsTab").Click([this](auto const&, auto const&) { ShowLibrary(false); });
+            Find<Button>(L"SelectContent").Click([this](auto const&, auto const&) { SelectContent(); });
             Find<Button>(L"Export").Click([this](auto const&, auto const&) {
                 if (!Save()) return;
                 try {

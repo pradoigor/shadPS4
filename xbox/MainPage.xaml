@@ -9,11 +9,24 @@
       <TextBlock x:Name="DeviceInfo" FontSize="14" TextWrapping="Wrap" Margin="0,8,0,0"/>
     </StackPanel>
     <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,16,0,12" Spacing="12">
+      <Button x:Name="LibraryTab" Content="Biblioteca" Padding="16,10"/>
+      <Button x:Name="DiagnosticsTab" Content="Diagnóstico" Padding="16,10"/>
       <Button x:Name="RunAll" Content="Executar testes automáticos" Padding="16,10"/>
       <Button x:Name="RunSelected" Content="Executar selecionado" Padding="16,10"/>
       <Button x:Name="Export" Content="Exportar JSON" Padding="16,10"/>
     </StackPanel>
     <Grid Grid.Row="2">
+      <Grid x:Name="LibraryView" Visibility="Collapsed">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <StackPanel Spacing="8">
+          <TextBlock Text="Biblioteca de conteúdo" FontSize="26" FontWeight="SemiBold" Foreground="#65E4C3"/>
+          <TextBlock Text="Selecione um ELF ou SELF para copiá-lo para o armazenamento do aplicativo. O carregador do núcleo ainda não está conectado nesta etapa." FontSize="16" Foreground="#C4CDD9" TextWrapping="Wrap"/>
+          <Button x:Name="SelectContent" Content="Selecionar ELF / SELF" HorizontalAlignment="Left" Padding="16,10"/>
+        </StackPanel>
+        <ListView x:Name="LibraryList" Grid.Row="1" Margin="0,18,0,12"/>
+        <TextBlock x:Name="LibraryStatus" Grid.Row="2" Text="Nenhum conteúdo selecionado." FontSize="15" Foreground="#C4CDD9" TextWrapping="Wrap"/>
+      </Grid>
+      <Grid x:Name="DiagnosticsView">
       <Grid.ColumnDefinitions><ColumnDefinition Width="5*"/><ColumnDefinition Width="6*"/></Grid.ColumnDefinitions>
       <ListView x:Name="Tests" SelectionMode="Single" IsItemClickEnabled="False" Margin="0,0,24,0"/>
       <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
@@ -28,6 +41,7 @@
           <TextBlock Text="Controle: direcional move o foco; A seleciona. Para suspensão, execute o teste e saia para o painel do Xbox, depois retorne." FontSize="15" Foreground="#C4CDD9" TextWrapping="Wrap"/>
         </StackPanel>
       </ScrollViewer>
+      </Grid>
     </Grid>
     <TextBlock x:Name="Status" Grid.Row="3" Text="Pronto. Nenhum resultado é presumido." FontSize="16" TextWrapping="Wrap" Margin="0,12,0,0" Foreground="#65E4C3"/>
   </Grid>
