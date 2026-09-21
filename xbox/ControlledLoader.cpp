@@ -566,8 +566,12 @@ ControlledLoadResult LoadSelf(Reader& reader, self_header const& header) {
     result.tls_relocations_pending = inner.tls_relocations_pending;
     result.symbol_relocations_valid = inner.symbol_relocations_valid;
     result.symbol_relocations_invalid = inner.symbol_relocations_invalid;
+    result.hle_symbols_known = inner.hle_symbols_known;
+    result.hle_symbols_unknown = inner.hle_symbols_unknown;
     result.relocation_dry_run_checksum = inner.relocation_dry_run_checksum;
     result.pending_symbol_names = std::move(inner.pending_symbol_names);
+    result.hle_symbol_mappings = std::move(inner.hle_symbol_mappings);
+    result.hle_unmapped_symbols = std::move(inner.hle_unmapped_symbols);
     result.import_library_ids = std::move(inner.import_library_ids);
     result.needed_module_ids = std::move(inner.needed_module_ids);
     result.import_library_names = std::move(inner.import_library_names);
