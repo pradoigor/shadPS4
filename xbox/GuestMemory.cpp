@@ -2,7 +2,6 @@
 #include "GuestMemory.h"
 #include "core/platform_memory.h"
 
-#include <memoryapi.h>
 #include <windows.h>
 
 #include <cstring>

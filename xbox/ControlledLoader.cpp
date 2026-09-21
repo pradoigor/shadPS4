@@ -11,7 +11,6 @@
 #include <fstream>
 #include <functional>
 #include <limits>
-#include <memoryapi.h>
 #include <set>
 #include <stdexcept>
 #include <utility>
