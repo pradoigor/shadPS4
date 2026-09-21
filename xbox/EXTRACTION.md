@@ -1,4 +1,4 @@
-# Extração UWP 0.3.2
+# Extração UWP 0.3.3
 
 O aplicativo agora executa extração, além de inspecionar metadados. A biblioteca
 abre ao iniciar, usa uma faixa horizontal navegável pelo controle e distingue
