@@ -50,6 +50,10 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "memset") handler = &MemoryMemset;
     if (name == "memcmp") handler = &MemoryMemcmp;
     if (name == "strlen") handler = &MemoryStrlen;
+    if (name == "mmap" || name == "mmap_np" || name == "__wrap_mmap") handler = &MemoryMmap;
+    if (name == "sceKernelMmap") handler = &KernelMmap;
+    if (name == "munmap") handler = &MemoryMunmap;
+    if (name == "sceKernelMunmap") handler = &KernelMunmap;
     if (name == "clock_gettime") handler = &ClockGetTime;
 
     const auto slot = static_cast<std::uint64_t>(entries_.size());
@@ -254,6 +258,66 @@ std::uint64_t HleDispatcher::MemoryStrlen(HleDispatcher& dispatcher,
         if (*byte == '\0') return length;
     }
     return OrbisEfault;
+}
+
+std::uint64_t HleDispatcher::MemoryMmap(HleDispatcher& dispatcher,
+                                        GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t Failure = UINT64_MAX;
+    if (!dispatcher.memory_ || frame.gpr[1] == 0 || (frame.gpr[2] & 0x4ull) != 0 ||
+        (frame.gpr[2] & ~0x7ull) != 0)
+        return Failure;
+    const auto flags = frame.gpr[3];
+    const auto fd = static_cast<std::int64_t>(frame.gpr[4]);
+    if ((flags & 0x1000ull) == 0 && fd != -1) return Failure;
+    std::uint64_t address = 0;
+    if (!dispatcher.memory_->MapAnonymous(frame.gpr[1], frame.gpr[2], frame.gpr[0],
+                                          (flags & 0x10ull) != 0, address))
+        return Failure;
+    return address;
+}
+
+std::uint64_t HleDispatcher::KernelMmap(HleDispatcher& dispatcher,
+                                        GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEnomem = 0x8002000Cull;
+    constexpr std::uint64_t OrbisEacces = 0x8002000Dull;
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    constexpr std::uint64_t OrbisEinval = 0x80020016ull;
+    if (!dispatcher.memory_ || frame.gpr[1] == 0) return OrbisEinval;
+    if ((frame.gpr[2] & 0x4ull) != 0) return OrbisEacces;
+    if ((frame.gpr[2] & ~0x7ull) != 0 ||
+        (frame.gpr[3] & 0x1000ull) == 0 || frame.guest_stack > UINT64_MAX - 8)
+        return OrbisEinval;
+    auto* resultSlot = dispatcher.memory_->Translate(frame.guest_stack + 8, sizeof(std::uint64_t));
+    if (!resultSlot) return OrbisEfault;
+    std::uint64_t resultAddress = 0;
+    std::memcpy(&resultAddress, resultSlot, sizeof(resultAddress));
+    auto* output = dispatcher.memory_->TranslateWritable(resultAddress, sizeof(std::uint64_t));
+    if (!output) return OrbisEfault;
+    std::uint64_t address = 0;
+    if (!dispatcher.memory_->MapAnonymous(frame.gpr[1], frame.gpr[2], frame.gpr[0],
+                                          (frame.gpr[3] & 0x10ull) != 0, address))
+        return OrbisEnomem;
+    std::memcpy(output, &address, sizeof(address));
+    return 0;
+}
+
+std::uint64_t HleDispatcher::MemoryMunmap(HleDispatcher& dispatcher,
+                                          GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t Failure = UINT64_MAX;
+    if (!dispatcher.memory_ || !dispatcher.memory_->Unmap(frame.gpr[0],
+                                                           static_cast<std::size_t>(frame.gpr[1])))
+        return Failure;
+    return 0;
+}
+
+std::uint64_t HleDispatcher::KernelMunmap(HleDispatcher& dispatcher,
+                                          GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    constexpr std::uint64_t OrbisEinval = 0x80020016ull;
+    if (!dispatcher.memory_ || frame.gpr[1] == 0) return OrbisEinval;
+    return dispatcher.memory_->Unmap(frame.gpr[0], static_cast<std::size_t>(frame.gpr[1]))
+        ? 0
+        : OrbisEfault;
 }
 
 std::uint64_t HleDispatcher::ClockGetTime(HleDispatcher& dispatcher,

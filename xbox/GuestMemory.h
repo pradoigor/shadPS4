@@ -24,6 +24,10 @@ public:
                       std::vector<GuestSegmentInfo> const& segments);
     void* Translate(std::uint64_t guestAddress, std::size_t bytes) const noexcept;
     void* TranslateWritable(std::uint64_t guestAddress, std::size_t bytes) const noexcept;
+    bool MapAnonymous(std::size_t bytes, std::uint64_t prot,
+                      std::uint64_t requestedAddress, bool fixed,
+                      std::uint64_t& guestAddress) noexcept;
+    bool Unmap(std::uint64_t guestAddress, std::size_t bytes) noexcept;
     // Applies only non-executable page protection to an isolated PF_W range.
     // The UWP image mapping and all code/read-only ranges remain unchanged.
     bool ProtectNoExecute(std::uint64_t guestAddress, std::size_t bytes,
@@ -44,8 +48,17 @@ private:
         std::uint64_t address{};
         std::uint64_t size{};
         void* host{};
+        std::uint32_t protection{};
     };
     std::vector<WritableRange> writable_;
+    struct AnonymousRange {
+        std::uint64_t address{};
+        std::uint64_t size{};
+        void* host{};
+        std::uint32_t protection{};
+    };
+    std::vector<AnonymousRange> anonymous_;
+    std::uint64_t nextAnonymousGuest_{};
 };
 
 } // namespace Lab

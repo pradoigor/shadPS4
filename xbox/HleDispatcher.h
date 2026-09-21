@@ -79,6 +79,10 @@ private:
     static std::uint64_t MemoryMemset(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MemoryMemcmp(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MemoryStrlen(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t MemoryMmap(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelMmap(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t MemoryMunmap(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelMunmap(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t ClockGetTime(HleDispatcher&, GuestCallFrame const&) noexcept;
 
     SysvThunkArena thunks_;
