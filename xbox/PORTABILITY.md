@@ -5,8 +5,8 @@ Base analisada: `42c555b7ab5d0678f531a7e4d505560ccc0f8add`.
 Este alvo é um laboratório UWP dentro do fork. Ele já compila diretamente os
 headers originais `common/endian.h`, `core/file_format/psf.h`, `core/loader/elf.h`
 e `core/file_sys/ifile.h`, além do codec original `src/core/file_format/psf.cpp`.
-O único teste ativo usa as estruturas e constantes originais de `core/loader/elf.h` para
-aplicar relocations ELF sintéticas; os
+O único teste ativo usa a estrutura original `Core::Tcb` de `core/tls.h` e o slot TLS do
+Windows para validar armazenamento por thread; os
 probes anteriores ficam apenas nas evidências históricas. Ainda não liga o
 núcleo completo, não carrega ELF/PKG e não executa jogos. Resultado aprovado em um teste não
 equivale a aprovação do subsistema completo do emulador.

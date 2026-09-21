@@ -7,6 +7,7 @@
 #include "SegmentProbe.h"
 #include "ExecProbe.h"
 #include "RelocProbe.h"
+#include "TlsProbe.h"
 #include <d3d12.h>
 #include <memoryapi.h>
 #include <fileapifromapp.h>
@@ -96,6 +97,15 @@ void RunProbe(Test& t, std::wstring const& directory) {
         std::string read{std::istreambuf_iterator<char>(input), {}};
         if (read != payload) throw hresult_error(E_FAIL, L"Conteúdo lido difere do conteúdo gravado.");
         t.detail = L"Arquivo gravado, sincronizado e relido em LocalState.";
+    } else if (t.id == L"tls_model") {
+        auto result = ProbeOriginalTlsModel(directory);
+        Number(t, L"slot", result.slot);
+        Number(t, L"tcb_size", result.tcb_size);
+        Number(t, L"dtv_entries", result.dtv_entries);
+        Number(t, L"roundtrip_address", static_cast<double>(result.roundtrip_address));
+        Number(t, L"canary", static_cast<double>(result.canary));
+        if (!result.passed) throw hresult_error(E_FAIL, L"TLS UWP não recuperou o TCB original por thread.");
+        t.detail = L"A estrutura original Core::Tcb foi armazenada e recuperada no slot TLS do Windows, preservando self, DTV e canário. Valida a primitiva por thread usada pelo alvo UWP; não inicializa o TLS completo do linker nem executa código PS4.";
     } else if (t.id == L"relocation_model") {
         auto result = ProbeOriginalRelocationModel(directory);
         Number(t, L"record_count", result.record_count);
