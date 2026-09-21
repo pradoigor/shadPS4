@@ -72,6 +72,7 @@ struct ControlledLoadResult {
   std::uint64_t hle_relocations_unresolved{};
   std::uint64_t guest_memory_bytes{};
   std::uint64_t guest_memory_writable_bytes{};
+  std::uint64_t guest_memory_executable_bytes{};
   std::uint64_t guest_memory_host_address{};
   bool guest_memory_mapped{};
   bool guest_memory_identity_mapped{};

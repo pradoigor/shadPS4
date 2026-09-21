@@ -40,6 +40,7 @@ public:
   bool mapped() const noexcept { return base_ != nullptr; }
   std::size_t size() const noexcept { return size_; }
   std::size_t writableBytes() const noexcept;
+  std::size_t executableBytes() const noexcept { return executableBytes_; }
   std::uint64_t guestBase() const noexcept { return guestBase_; }
   std::uint64_t loadBias() const noexcept { return loadBias_; }
   std::uint64_t RuntimeAddress(std::uint64_t virtualAddress) const noexcept {
@@ -54,6 +55,7 @@ private:
   std::size_t size_{};
   std::uint64_t guestBase_{};
   std::uint64_t loadBias_{};
+  std::size_t executableBytes_{};
   struct WritableRange {
     std::uint64_t address{};
     std::uint64_t size{};

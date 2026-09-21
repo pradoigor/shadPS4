@@ -24,7 +24,7 @@ que o carregador tenha uma ponte ABI SysV compatível, endereços HLE reais e um
 renderer UWP para Piglet. O aplicativo deve manter essa barreira e nunca saltar
 para o `e_entry` enquanto algum desses requisitos faltar.
 
-A build `0.36.0.0` corrige o alocador de thunks SysV→Windows para preservar os
+A build `0.37.0.0` corrige o alocador de thunks SysV→Windows para preservar os
 seis registradores inteiros, a pilha convidada e os registradores XMM em uma área
 separada do shadow space exigido pelo ABI Windows. Um chamador de máquina gerado
 pelo projeto injeta padrões distintos em registradores e argumentos de pilha e
@@ -39,17 +39,18 @@ camada sem alterar o caminho Win32 desktop. A construção completa do espaço P
 ainda depende de substituir a reserva física monolítica por compromisso sob demanda,
 pois reservar e confirmar toda a memória do PS4 excede o orçamento prático do UWP.
 O probe agora cria e conta thunks para todos os imports do ELF e aplica
-os endereços em uma cópia privada não executável e mapeia essa cópia como somente
-leitura com proteção por segmento para validar a faixa de memória. A imagem agora
+os endereços em uma cópia privada não executável e mapeia essa cópia com proteção
+por segmento para validar a faixa de memória. A imagem agora
 é uma alocação coerente em uma base válida escolhida pelo UWP; o load bias real
 substitui a base fixa do dry-run. Segmentos `PF_W` e HLE compartilham os mesmos
-bytes e as demais regiões permanecem não executáveis.
+bytes. Segmentos `PF_X` passam por uma transição RW→RX depois das relocações,
+enquanto qualquer segmento W+X é rejeitado.
 O primeiro handler com ponteiro,
 `sceKernelDebugOutText`, rejeita endereços fora da faixa antes de usar o log do
 host. A imagem convidada continua sem memória executável; isso ainda é infraestrutura de
 ligação, não uma autorização de execução.
-O probe também chama `clock_gettime` com um ponteiro para uma faixa `PF_W` e
-valida os segundos e nanossegundos escritos pelo handler.
+O probe também chama `clock_gettime` com um ponteiro para uma faixa `PF_W` usando
+um chamador SysV gerado e valida os segundos e nanossegundos escritos pelo handler.
 O handler `sceKernelMprotect` foi acrescentado para a camada de memória: ele
 aceita somente proteções sem execução dentro das faixas `PF_W` coerentes e
 retorna erro para `PROT_EXEC` ou endereços fora dessas faixas. A mudança é

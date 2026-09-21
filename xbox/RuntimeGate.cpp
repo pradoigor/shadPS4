@@ -67,8 +67,9 @@ RuntimeGateResult EvaluateRuntimeGate(ControlledLoadResult const &load) {
     Add(unique, result.blockers,
         L"Os endereços runtime do convidado ainda não correspondem aos "
         L"ponteiros nativos do host.");
-  Add(unique, result.blockers,
-      L"A imagem convidada ainda não foi promovida para páginas RX.");
+  if (load.guest_memory_executable_bytes == 0)
+    Add(unique, result.blockers,
+        L"A imagem convidada não possui segmentos PF_X promovidos para RX.");
 
   for (auto const &encoded : load.import_library_names) {
     const auto name = LibraryName(encoded);

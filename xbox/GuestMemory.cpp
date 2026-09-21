@@ -82,23 +82,41 @@ bool GuestMemory::MapValidated(
     return false;
   }
   for (auto const &segment : segments) {
-    if ((segment.flags & 0x2u) == 0 || segment.size == 0 ||
-        segment.address < guestBase)
+    if (segment.size == 0 || segment.address < guestBase)
       continue;
     const auto offset = segment.address - guestBase;
     if (offset > image.size() || segment.size > image.size() - offset)
       continue;
-    auto *writable = static_cast<std::uint8_t *>(allocation) + offset;
-    if (!Core::PlatformMemory::Protect(GetCurrentProcess(), writable,
-                                       segment.size, PAGE_READWRITE,
-                                       &previous)) {
+    const bool writable = (segment.flags & 0x2u) != 0;
+    const bool executable = (segment.flags & 0x1u) != 0;
+    if (writable && executable) {
       writable_.clear();
       Core::PlatformMemory::Free(GetCurrentProcess(), allocation, 0,
                                  MEM_RELEASE);
       return false;
     }
-    writable_.push_back(WritableRange{loadBias + segment.address, segment.size,
-                                      writable, PAGE_READWRITE});
+    const DWORD protection = writable     ? PAGE_READWRITE
+                             : executable ? PAGE_EXECUTE_READ
+                                          : PAGE_READONLY;
+    auto *segmentHost = static_cast<std::uint8_t *>(allocation) + offset;
+    if (!Core::PlatformMemory::Protect(GetCurrentProcess(), segmentHost,
+                                       segment.size, protection, &previous)) {
+      writable_.clear();
+      Core::PlatformMemory::Free(GetCurrentProcess(), allocation, 0,
+                                 MEM_RELEASE);
+      return false;
+    }
+    if (writable)
+      writable_.push_back(WritableRange{loadBias + segment.address,
+                                        segment.size, segmentHost, protection});
+    if (executable)
+      executableBytes_ += static_cast<std::size_t>(segment.size);
+  }
+  if (!FlushInstructionCache(GetCurrentProcess(), allocation, image.size())) {
+    writable_.clear();
+    executableBytes_ = 0;
+    Core::PlatformMemory::Free(GetCurrentProcess(), allocation, 0, MEM_RELEASE);
+    return false;
   }
   base_ = allocation;
   size_ = image.size();

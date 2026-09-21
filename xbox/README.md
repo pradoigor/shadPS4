@@ -4,16 +4,17 @@ Aplicativo **UWP x64 / C++/WinRT / XAML** para medir a viabilidade de portar
 shadPS4 ao Xbox Series X em Dev Mode. **Ainda não é um emulador PS4 no Xbox.**
 O alvo é independente do CMake e das dependências desktop do núcleo.
 
-A versão **0.36.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
+A versão **0.37.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
 PKG/ELF, keysets FPKG embutidos, importação de chaves personalizadas, extração em
 segundo plano e um probe de execução controlada com auditoria de requisitos runtime,
 relocação e inventário de NIDs HLE. O ELF/SELF selecionado é apenas
-validado e mapeado em buffer não executável; o único código executado é um ELF
+validado primeiro em buffer não executável e depois copiado para um mapa coerente
+com proteção por segmento; o único código que recebe controle de fluxo é um ELF
 mínimo gerado pelo próprio projeto, com retorno esperado `42`. O relatório também
 conta segmentos dynamic/TLS, relocações e dependências importadas, valida os tipos
 e os alvos das relocações em `PT_LOAD` e `PT_SCE_RELRO`, mas ainda não as aplica
 nem resolve todos os imports. As relocações relativas são conferidas em uma cópia
-privada e reaplicadas com a base escolhida pelo UWP no mapa coerente não executável;
+privada e reaplicadas com a base escolhida pelo UWP no mapa coerente;
 o arquivo selecionado continua intocado.
 Os símbolos pendentes também têm seus índices e nomes conferidos contra as
 tabelas internas. O relatório cruza cada NID com o registro AeroLib derivado do
@@ -47,9 +48,11 @@ O probe aplica os endereços em uma cópia privada não executável para
 validar as relocações, sem gravá-los no arquivo ou promover o convidado a execução.
 Essa cópia também é mapeada de forma coerente em uma base válida escolhida pelo
 UWP; o load bias é aplicado aos ponteiros relativos e HLE e instruções x86-64
-passam a observar os mesmos bytes. Segmentos `PF_W` ficam
-graváveis e código/read-only continua sem permissão de execução nesta etapa.
-O probe chama `clock_gettime` por um thunk com ponteiro SysV e valida o
+passam a observar os mesmos bytes. Segmentos `PF_W` ficam graváveis e segmentos
+`PF_X` são promovidos de RW para RX somente depois de todas as relocações; mapas
+W+X são recusados.
+O probe chama `clock_gettime` por um chamador gerado que coloca os argumentos em
+RDI/RSI conforme a ABI SysV e valida o
 `timespec` escrito em uma faixa `PF_W`.
 O dispatcher também reconhece `sceKernelMprotect`, mas só altera proteção de
 faixas `PF_W` coerentes e rejeita qualquer pedido de execução; isso permite

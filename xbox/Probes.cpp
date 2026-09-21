@@ -58,6 +58,7 @@ void RunProbe(Test &test, std::wstring const &executablePath,
         result.guest_memory_host_address ==
         guestMemory.RuntimeAddress(result.min_virtual_address);
     result.guest_memory_writable_bytes = guestMemory.writableBytes();
+    result.guest_memory_executable_bytes = guestMemory.executableBytes();
     std::uint64_t anonymousAddress = 0;
     if (guestMemory.MapAnonymous(0x4000, 0x3, 0, false, anonymousAddress)) {
       result.guest_memory_anonymous_probe_address = anonymousAddress;
@@ -99,10 +100,8 @@ void RunProbe(Test &test, std::wstring const &executablePath,
     }
     auto *thunk = hleDispatcher.AddressFor(clockSymbol);
     if (guestAddress != 0 && thunk) {
-      using ClockGetTimeHle = std::uint64_t (*)(std::uint64_t, std::uint64_t);
       result.hle_pointer_probe_guest_address = guestAddress;
-      result.hle_pointer_probe_return =
-          reinterpret_cast<ClockGetTimeHle>(thunk)(0, guestAddress);
+      result.hle_pointer_probe_return = InvokeSysv2(thunk, 0, guestAddress);
       struct Timespec {
         std::int64_t seconds;
         std::int64_t nanoseconds;
@@ -247,6 +246,9 @@ void RunProbe(Test &test, std::wstring const &executablePath,
   test.measurements.Insert(L"guest_memory_writable_bytes",
                            JsonValue::CreateNumberValue(static_cast<double>(
                                result.guest_memory_writable_bytes)));
+  test.measurements.Insert(L"guest_memory_executable_bytes",
+                           JsonValue::CreateNumberValue(static_cast<double>(
+                               result.guest_memory_executable_bytes)));
   test.measurements.Insert(L"guest_memory_host_address",
                            JsonValue::CreateNumberValue(static_cast<double>(
                                result.guest_memory_host_address)));
@@ -377,6 +379,8 @@ void RunProbe(Test &test, std::wstring const &executablePath,
       (result.guest_memory_identity_mapped ? L"sim" : L"não") +
       L", bytes PF_W graváveis=" +
       std::to_wstring(result.guest_memory_writable_bytes) +
+      L", bytes PF_X executáveis=" +
+      std::to_wstring(result.guest_memory_executable_bytes) +
       L", probe mmap/mprotect/munmap=" +
       (result.guest_memory_anonymous_probe_passed ? L"aprovado" : L"pendente") +
       L", smoke test de ponteiro clock_gettime=" +
