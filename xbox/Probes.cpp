@@ -114,6 +114,46 @@ void RunProbe(Test &test, std::wstring const &executablePath,
                                         output->nanoseconds < 1'000'000'000;
     }
   }
+  std::string initialUserSymbol;
+  std::string systemParamSymbol;
+  for (auto const &mapping : result.hle_symbol_mappings) {
+    constexpr std::string_view initialSuffix = "=sceUserServiceGetInitialUser";
+    constexpr std::string_view paramSuffix = "=sceSystemServiceParamGetInt";
+    if (mapping.size() > initialSuffix.size() &&
+        mapping.compare(mapping.size() - initialSuffix.size(),
+                        initialSuffix.size(), initialSuffix) == 0)
+      initialUserSymbol =
+          mapping.substr(0, mapping.size() - initialSuffix.size());
+    if (mapping.size() > paramSuffix.size() &&
+        mapping.compare(mapping.size() - paramSuffix.size(), paramSuffix.size(),
+                        paramSuffix) == 0)
+      systemParamSymbol =
+          mapping.substr(0, mapping.size() - paramSuffix.size());
+  }
+  if (!initialUserSymbol.empty() && !systemParamSymbol.empty() &&
+      result.guest_memory_writable_bytes >= 32) {
+    std::uint64_t guestAddress = 0;
+    for (auto const &segment : result.guest_segments) {
+      if ((segment.flags & 0x2u) != 0 && segment.size >= 32) {
+        guestAddress = guestMemory.RuntimeAddress(segment.address);
+        break;
+      }
+    }
+    auto *initialThunk = hleDispatcher.AddressFor(initialUserSymbol);
+    auto *paramThunk = hleDispatcher.AddressFor(systemParamSymbol);
+    auto *values = static_cast<std::int32_t *>(
+        guestMemory.TranslateWritable(guestAddress, 2 * sizeof(std::int32_t)));
+    if (guestAddress && initialThunk && paramThunk && values) {
+      values[0] = -1;
+      values[1] = -1;
+      const auto initialResult = InvokeSysv2(initialThunk, guestAddress, 0);
+      const auto paramResult =
+          InvokeSysv2(paramThunk, 1, guestAddress + sizeof(std::int32_t));
+      result.hle_service_probe_passed = initialResult == 0 &&
+                                        paramResult == 0 && values[0] == 1 &&
+                                        values[1] == 1;
+    }
+  }
   auto gate = EvaluateRuntimeGate(result);
   result.runtime_preflight_ready = gate.ready;
   result.runtime_blockers = gate.blockers;
@@ -261,6 +301,9 @@ void RunProbe(Test &test, std::wstring const &executablePath,
   test.measurements.Insert(
       L"hle_pointer_probe_passed",
       JsonValue::CreateBooleanValue(result.hle_pointer_probe_passed));
+  test.measurements.Insert(
+      L"hle_service_probe_passed",
+      JsonValue::CreateBooleanValue(result.hle_service_probe_passed));
   test.measurements.Insert(L"hle_pointer_probe_return",
                            JsonValue::CreateNumberValue(static_cast<double>(
                                result.hle_pointer_probe_return)));
@@ -385,6 +428,8 @@ void RunProbe(Test &test, std::wstring const &executablePath,
       (result.guest_memory_anonymous_probe_passed ? L"aprovado" : L"pendente") +
       L", smoke test de ponteiro clock_gettime=" +
       (result.hle_pointer_probe_passed ? L"aprovado" : L"pendente") +
+      L", serviços de usuário/sistema=" +
+      (result.hle_service_probe_passed ? L"aprovado" : L"pendente") +
       L", TLS pending=" + std::to_wstring(result.tls_relocations_pending) +
       std::wstring(L". Gate de runtime=") +
       (result.runtime_preflight_ready ? L"pronto" : L"bloqueado") +

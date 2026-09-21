@@ -57,6 +57,11 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "munmap") use(&MemoryMunmap);
     if (name == "sceKernelMunmap") use(&KernelMunmap);
     if (name == "clock_gettime") use(&ClockGetTime);
+    if (name == "sceUserServiceInitialize") use(&UserServiceInitialize);
+    if (name == "sceUserServiceGetInitialUser") use(&UserServiceGetInitialUser);
+    if (name == "sceUserServiceGetLoginUserIdList") use(&UserServiceGetLoginUsers);
+    if (name == "sceUserServiceGetUserName") use(&UserServiceGetUserName);
+    if (name == "sceSystemServiceParamGetInt") use(&SystemServiceParamGetInt);
 
     const auto slot = static_cast<std::uint64_t>(entries_.size());
     entries_.push_back(Entry{encoded, nid, implemented, handler, nullptr});
@@ -341,6 +346,68 @@ std::uint64_t HleDispatcher::ClockGetTime(HleDispatcher& dispatcher,
     value.seconds = seconds.count();
     value.nanoseconds = nanos.count();
     std::memcpy(output, &value, sizeof(value));
+    return 0;
+}
+
+std::uint64_t HleDispatcher::UserServiceInitialize(HleDispatcher&,
+                                                    GuestCallFrame const&) noexcept {
+    return 0;
+}
+
+std::uint64_t HleDispatcher::UserServiceGetInitialUser(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t InvalidArgument = 0x80960005ull;
+    if (!dispatcher.memory_) return InvalidArgument;
+    auto* output = static_cast<std::int32_t*>(
+        dispatcher.memory_->TranslateWritable(frame.gpr[0], sizeof(std::int32_t)));
+    if (!output) return InvalidArgument;
+    *output = 1;
+    return 0;
+}
+
+std::uint64_t HleDispatcher::UserServiceGetLoginUsers(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t InvalidArgument = 0x80960005ull;
+    constexpr std::int32_t users[4] = {1, -1, -1, -1};
+    if (!dispatcher.memory_) return InvalidArgument;
+    auto* output = dispatcher.memory_->TranslateWritable(frame.gpr[0], sizeof(users));
+    if (!output) return InvalidArgument;
+    std::memcpy(output, users, sizeof(users));
+    return 0;
+}
+
+std::uint64_t HleDispatcher::UserServiceGetUserName(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t InvalidArgument = 0x80960005ull;
+    constexpr std::uint64_t BufferTooShort = 0x8096000Aull;
+    constexpr char name[] = "Xbox";
+    if (frame.gpr[0] == UINT64_MAX || frame.gpr[2] < sizeof(name))
+        return frame.gpr[2] < sizeof(name) ? BufferTooShort : InvalidArgument;
+    if (!dispatcher.memory_) return InvalidArgument;
+    auto* output = dispatcher.memory_->TranslateWritable(
+        frame.gpr[1], static_cast<std::size_t>(frame.gpr[2]));
+    if (!output) return InvalidArgument;
+    std::memcpy(output, name, sizeof(name));
+    return 0;
+}
+
+std::uint64_t HleDispatcher::SystemServiceParamGetInt(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t ParameterError = 0x80A10003ull;
+    if (!dispatcher.memory_) return ParameterError;
+    auto* output = static_cast<std::int32_t*>(
+        dispatcher.memory_->TranslateWritable(frame.gpr[1], sizeof(std::int32_t)));
+    if (!output) return ParameterError;
+    switch (frame.gpr[0]) {
+    case 1: *output = 1; break;
+    case 2: *output = 1; break;
+    case 3: *output = 1; break;
+    case 4: *output = -180; break;
+    case 5: *output = 0; break;
+    case 7: *output = 0; break;
+    case 1000: *output = 1; break;
+    default: *output = 0; break;
+    }
     return 0;
 }
 

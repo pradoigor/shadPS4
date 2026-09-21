@@ -84,6 +84,14 @@ private:
     static std::uint64_t MemoryMunmap(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelMunmap(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t ClockGetTime(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t UserServiceInitialize(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t UserServiceGetInitialUser(HleDispatcher&,
+                                                   GuestCallFrame const&) noexcept;
+    static std::uint64_t UserServiceGetLoginUsers(HleDispatcher&,
+                                                  GuestCallFrame const&) noexcept;
+    static std::uint64_t UserServiceGetUserName(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t SystemServiceParamGetInt(HleDispatcher&,
+                                                  GuestCallFrame const&) noexcept;
 
     SysvThunkArena thunks_;
     std::vector<Entry> entries_;

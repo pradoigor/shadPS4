@@ -24,7 +24,7 @@ que o carregador tenha uma ponte ABI SysV compatível, endereços HLE reais e um
 renderer UWP para Piglet. O aplicativo deve manter essa barreira e nunca saltar
 para o `e_entry` enquanto algum desses requisitos faltar.
 
-A build `0.37.0.0` corrige o alocador de thunks SysV→Windows para preservar os
+A build `0.38.0.0` corrige o alocador de thunks SysV→Windows para preservar os
 seis registradores inteiros, a pilha convidada e os registradores XMM em uma área
 separada do shadow space exigido pelo ABI Windows. Um chamador de máquina gerado
 pelo projeto injeta padrões distintos em registradores e argumentos de pilha e
@@ -51,6 +51,9 @@ host. A imagem convidada continua sem memória executável; isso ainda é infrae
 ligação, não uma autorização de execução.
 O probe também chama `clock_gettime` com um ponteiro para uma faixa `PF_W` usando
 um chamador SysV gerado e valida os segundos e nanossegundos escritos pelo handler.
+O primeiro bloco funcional de `libSceUserService` e `libSceSystemService` foi
+implementado com validação de ponteiros e códigos de erro Orbis: inicialização,
+usuário inicial, usuários logados, nome e parâmetros inteiros do sistema.
 O handler `sceKernelMprotect` foi acrescentado para a camada de memória: ele
 aceita somente proteções sem execução dentro das faixas `PF_W` coerentes e
 retorna erro para `PROT_EXEC` ou endereços fora dessas faixas. A mudança é
