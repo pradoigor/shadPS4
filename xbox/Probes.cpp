@@ -37,12 +37,28 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
     test.measurements.Insert(L"inner_entry", JsonValue::CreateNumberValue(static_cast<double>(result.inner_entry)));
     test.measurements.Insert(L"inner_mapped_bytes", JsonValue::CreateNumberValue(static_cast<double>(result.inner_mapped_bytes)));
     test.measurements.Insert(L"inner_checksum_fnv1a", JsonValue::CreateNumberValue(static_cast<double>(result.inner_checksum)));
+    test.measurements.Insert(L"dynamic_segments", JsonValue::CreateNumberValue(static_cast<double>(result.dynamic_segments)));
+    test.measurements.Insert(L"tls_segments", JsonValue::CreateNumberValue(static_cast<double>(result.tls_segments)));
+    test.measurements.Insert(L"dynamic_entries", JsonValue::CreateNumberValue(static_cast<double>(result.dynamic_entries)));
+    test.measurements.Insert(L"rela_entries", JsonValue::CreateNumberValue(static_cast<double>(result.rela_entries)));
+    test.measurements.Insert(L"jmp_rela_entries", JsonValue::CreateNumberValue(static_cast<double>(result.jmp_rela_entries)));
+    test.measurements.Insert(L"import_libraries", JsonValue::CreateNumberValue(static_cast<double>(result.import_libraries)));
+    test.measurements.Insert(L"needed_modules", JsonValue::CreateNumberValue(static_cast<double>(result.needed_modules)));
+    test.measurements.Insert(L"has_dynamic", JsonValue::CreateBooleanValue(result.has_dynamic));
+    test.measurements.Insert(L"has_tls", JsonValue::CreateBooleanValue(result.has_tls));
+    test.measurements.Insert(L"has_relocations", JsonValue::CreateBooleanValue(result.has_relocations));
+    test.measurements.Insert(L"has_imports", JsonValue::CreateBooleanValue(result.has_imports));
     auto execution = ExecuteGeneratedProbe(std::filesystem::path(directory));
     test.measurements.Insert(L"execution_returned_value", JsonValue::CreateNumberValue(execution.returned_value));
     test.measurements.Insert(L"execution_address", JsonValue::CreateNumberValue(static_cast<double>(execution.executable_address)));
     test.measurements.Insert(L"execution_elf_file_size", JsonValue::CreateNumberValue(static_cast<double>(execution.elf_file_size)));
     test.status = L"passed";
-    test.detail = result.detail + L"\n" + execution.detail + L"\nArquivo: " + executablePath;
+    test.detail = result.detail + L"\nMetadados runtime: dynamic=" + std::to_wstring(result.dynamic_entries) +
+                  L", relocations=" + std::to_wstring(result.rela_entries + result.jmp_rela_entries) +
+                  L", imports=" + std::to_wstring(result.import_libraries + result.needed_modules) +
+                  L", TLS=" + std::to_wstring(result.tls_segments) +
+                  L". Resolver esses requisitos ainda é necessário antes de executar o homebrew.\n" +
+                  execution.detail + L"\nArquivo: " + executablePath;
 }
 
 } // namespace Lab

@@ -130,6 +130,59 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
     result.min_virtual_address = std::numeric_limits<std::uint64_t>::max();
     result.max_virtual_address = 0;
 
+    // Read only the runtime metadata tables. This audit never resolves an
+    // import and never follows an initializer; it records what a future
+    // UWP loader would still need before guest control flow is possible.
+    for (auto const& program : programs) {
+        if (program.p_type == PT_TLS) {
+            result.has_tls = true;
+            ++result.tls_segments;
+        }
+        if (program.p_type != PT_DYNAMIC) continue;
+        result.has_dynamic = true;
+        ++result.dynamic_segments;
+        constexpr std::uint64_t maxDynamicBytes = 4ull * 1024ull * 1024ull;
+        if (program.p_filesz == 0 || program.p_filesz > maxDynamicBytes ||
+            program.p_filesz % sizeof(elf_dynamic) != 0)
+            continue;
+        const auto count = program.p_filesz / sizeof(elf_dynamic);
+        std::vector<elf_dynamic> dynamic(count);
+        logicalRead(program.p_offset, dynamic.data(), static_cast<std::size_t>(program.p_filesz));
+        std::uint64_t relaSize = 0;
+        std::uint64_t relaEntrySize = sizeof(elf_relocation);
+        std::uint64_t jmpRelaSize = 0;
+        for (auto const& entry : dynamic) {
+            if (entry.d_tag == DT_NULL) break;
+            ++result.dynamic_entries;
+            switch (entry.d_tag) {
+            case DT_SCE_RELASZ:
+                relaSize = entry.d_un.d_val;
+                break;
+            case DT_SCE_RELAENT:
+                relaEntrySize = entry.d_un.d_val;
+                break;
+            case DT_SCE_PLTRELSZ:
+                jmpRelaSize = entry.d_un.d_val;
+                break;
+            case DT_SCE_IMPORT_LIB:
+                ++result.import_libraries;
+                break;
+            case DT_SCE_NEEDED_MODULE:
+            case DT_NEEDED:
+                ++result.needed_modules;
+                break;
+            default:
+                break;
+            }
+        }
+        if (relaEntrySize == sizeof(elf_relocation) && relaSize % relaEntrySize == 0)
+            result.rela_entries = relaSize / relaEntrySize;
+        if (jmpRelaSize % sizeof(elf_relocation) == 0)
+            result.jmp_rela_entries = jmpRelaSize / sizeof(elf_relocation);
+        result.has_relocations = result.rela_entries != 0 || result.jmp_rela_entries != 0;
+        result.has_imports = result.import_libraries != 0 || result.needed_modules != 0;
+    }
+
     struct LoadRange { elf_program_header header; };
     std::vector<LoadRange> loads;
     for (auto const& program : programs) {
@@ -262,6 +315,17 @@ ControlledLoadResult LoadSelf(Reader& reader, self_header const& header) {
     result.inner_entry = inner.entry;
     result.inner_mapped_bytes = inner.mapped_bytes;
     result.inner_checksum = inner.checksum;
+    result.dynamic_segments = inner.dynamic_segments;
+    result.tls_segments = inner.tls_segments;
+    result.dynamic_entries = inner.dynamic_entries;
+    result.rela_entries = inner.rela_entries;
+    result.jmp_rela_entries = inner.jmp_rela_entries;
+    result.import_libraries = inner.import_libraries;
+    result.needed_modules = inner.needed_modules;
+    result.has_dynamic = inner.has_dynamic;
+    result.has_tls = inner.has_tls;
+    result.has_relocations = inner.has_relocations;
+    result.has_imports = inner.has_imports;
     result.entry = inner.entry;
     result.load_segments = inner.load_segments;
     result.mapped = inner.mapped;

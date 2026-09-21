@@ -4,8 +4,8 @@ Base analisada: `42c555b7ab5d0678f531a7e4d505560ccc0f8add`.
 
 Este alvo é um laboratório UWP dentro do fork. A extração do PKG do Apollo foi
 executada no Xbox e persistiu na biblioteca com capa e metadados. A versão atual
-mantém uma operação diagnóstica ativa: validação do ELF/SELF selecionado seguida
-de execução de um ELF mínimo gerado pelo próprio projeto.
+mantém uma operação diagnóstica ativa: validação do ELF/SELF selecionado, auditoria
+de requisitos runtime e execução de um ELF mínimo gerado pelo próprio projeto.
 
 ## Carregamento controlado
 
@@ -24,6 +24,10 @@ Um resultado aprovado significa que a estrutura e os limites descritos foram
 aceitos e que o probe próprio retornou `42`. O arquivo selecionado não é executado.
 Isso não significa que o ABI, relocador, TLS, bibliotecas, renderer Vulkan ou o
 código do homebrew funcionem no Xbox.
+
+A auditoria registra a presença e os tamanhos dos metadados `PT_DYNAMIC` e `PT_TLS`,
+as tabelas de relocação e as dependências declaradas. Ela não aplica relocação,
+resolve imports nem chama inicializadores.
 
 ## Bloqueios ainda abertos
 

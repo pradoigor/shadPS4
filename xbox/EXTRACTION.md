@@ -1,4 +1,4 @@
-# Extração e execução controlada UWP 0.5.0
+# Extração e execução controlada UWP 0.6.0
 
 O aplicativo executa extração, inspeciona metadados e oferece carregamento controlado. A biblioteca
 abre ao iniciar, usa uma faixa horizontal navegável pelo controle e distingue
@@ -26,7 +26,9 @@ inspirados no PS4, sem recursos gráficos da Sony.
 6. Se houver `eboot.bin`, pressione **Executar probe controlado**. A operação lê os
    cabeçalhos, verifica limites dos segmentos e mapeia bytes em buffer privado não
    executável. Em seguida, executa somente um ELF mínimo gerado pelo projeto, que
-   retorna `42`; o arquivo selecionado nunca é chamado. Baixe `LocalState/report.json`
+   retorna `42`; o arquivo selecionado nunca é chamado. O relatório também registra
+   metadados `PT_DYNAMIC`, `PT_TLS`, relocações e imports para orientar o carregador.
+   Baixe `LocalState/report.json`
    ou use **Diagnóstico → Exportar JSON**.
 
 Se o seletor de arquivos não estiver disponível no console, envie o PKG para

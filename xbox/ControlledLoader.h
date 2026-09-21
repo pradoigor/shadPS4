@@ -28,6 +28,17 @@ struct ControlledLoadResult {
     std::uint64_t inner_entry{};
     std::uint64_t inner_mapped_bytes{};
     std::uint64_t inner_checksum{};
+    std::uint64_t dynamic_segments{};
+    std::uint64_t tls_segments{};
+    std::uint64_t dynamic_entries{};
+    std::uint64_t rela_entries{};
+    std::uint64_t jmp_rela_entries{};
+    std::uint64_t import_libraries{};
+    std::uint64_t needed_modules{};
+    bool has_dynamic{};
+    bool has_tls{};
+    bool has_relocations{};
+    bool has_imports{};
     std::wstring detail;
 };
 
