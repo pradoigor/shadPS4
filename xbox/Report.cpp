@@ -46,7 +46,7 @@ Report::Report() {
     auto add = [&](wchar_t const* id, wchar_t const* title, bool isolated = false) {
         Test t; t.id = id; t.title = title; t.isolated = isolated; tests.push_back(std::move(t));
     };
-    add(L"exception_delivery", L"Núcleo · entrega de exceção vetorizada", true);
+    add(L"exception_delivery", L"Núcleo · entrega de exceção estruturada", true);
     Load();
 }
 JsonObject Report::Json() const {
