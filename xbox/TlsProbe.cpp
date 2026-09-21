@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "TlsProbe.h"
 
-#include "core/tls.h"
-
 #include <array>
 #include <cstdint>
 #include <cstring>
-#include <fileapifromapp.h>
 #include <windows.h>
+#include <fileapifromapp.h>
 #include <winrt/base.h>
+
+#include "common/arch.h"
+#include "core/tls.h"
 
 namespace Lab {
 namespace {
