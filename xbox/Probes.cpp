@@ -73,7 +73,7 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
     test.measurements.Insert(L"hle_unmapped_symbols", hleUnmapped);
     winrt::Windows::Data::Json::JsonArray runtimeBlockers;
     for (auto const& blocker : result.runtime_blockers)
-        runtimeBlockers.Append(JsonValue::CreateStringValue(winrt::to_hstring(blocker)));
+        runtimeBlockers.Append(JsonValue::CreateStringValue(blocker));
     test.measurements.Insert(L"runtime_blockers", runtimeBlockers);
     winrt::Windows::Data::Json::JsonArray libraryIds;
     for (auto const& id : result.import_library_ids)
