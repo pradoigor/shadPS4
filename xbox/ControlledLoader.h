@@ -14,6 +14,11 @@ struct PendingSymbolRelocation {
   std::string symbol;
 };
 
+struct PendingRelativeRelocation {
+  std::uint64_t target{};
+  std::int64_t addend{};
+};
+
 struct GuestSegmentInfo {
   std::uint64_t address{};
   std::uint64_t size{};
@@ -84,6 +89,7 @@ struct ControlledLoadResult {
   std::vector<std::string> import_library_names;
   std::vector<std::string> needed_module_names;
   std::vector<PendingSymbolRelocation> pending_symbol_relocations;
+  std::vector<PendingRelativeRelocation> pending_relative_relocations;
   std::vector<GuestSegmentInfo> guest_segments;
   // Private, non-executable image used only for relocation dry-runs.
   std::vector<std::uint8_t> private_image;

@@ -65,9 +65,10 @@ RuntimeGateResult EvaluateRuntimeGate(ControlledLoadResult const &load) {
         L"A imagem relocada ainda não foi mapeada em memória UWP coerente.");
   if (!load.guest_memory_identity_mapped)
     Add(unique, result.blockers,
-        L"A imagem convidada ainda não ocupa seus endereços virtuais reais.");
+        L"Os endereços runtime do convidado ainda não correspondem aos "
+        L"ponteiros nativos do host.");
   Add(unique, result.blockers,
-      L"A imagem relocada permanece em buffer privado não executável.");
+      L"A imagem convidada ainda não foi promovida para páginas RX.");
 
   for (auto const &encoded : load.import_library_names) {
     const auto name = LibraryName(encoded);

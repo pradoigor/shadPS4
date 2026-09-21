@@ -9,10 +9,11 @@
 
 namespace Lab {
 
-// Owns a coherent UWP allocation placed at the validated guest virtual base.
-// Guest and host addresses are identical, so native x86-64 loads and
-// RIP-relative references see the same image as HLE pointer translation. Code
-// remains non-executable until the runtime gate authorizes an RW-to-RX change.
+// Owns a coherent UWP allocation for a validated position-independent image.
+// Runtime guest addresses include the chosen load bias and are identical to
+// host pointers, so native x86-64 references and HLE pointer translation agree.
+// Code remains non-executable until the runtime gate authorizes an RW-to-RX
+// change.
 class GuestMemory {
 public:
   GuestMemory() = default;
@@ -23,7 +24,8 @@ public:
 
   bool MapValidated(std::vector<std::uint8_t> const &image,
                     std::uint64_t guestBase,
-                    std::vector<GuestSegmentInfo> const &segments);
+                    std::vector<GuestSegmentInfo> const &segments,
+                    std::vector<PendingRelativeRelocation> const &relocations);
   void *Translate(std::uint64_t guestAddress, std::size_t bytes) const noexcept;
   void *TranslateWritable(std::uint64_t guestAddress,
                           std::size_t bytes) const noexcept;
@@ -39,6 +41,10 @@ public:
   std::size_t size() const noexcept { return size_; }
   std::size_t writableBytes() const noexcept;
   std::uint64_t guestBase() const noexcept { return guestBase_; }
+  std::uint64_t loadBias() const noexcept { return loadBias_; }
+  std::uint64_t RuntimeAddress(std::uint64_t virtualAddress) const noexcept {
+    return loadBias_ + virtualAddress;
+  }
   std::uint64_t hostAddress() const noexcept {
     return reinterpret_cast<std::uint64_t>(base_);
   }
@@ -47,6 +53,7 @@ private:
   void *base_{};
   std::size_t size_{};
   std::uint64_t guestBase_{};
+  std::uint64_t loadBias_{};
   struct WritableRange {
     std::uint64_t address{};
     std::uint64_t size{};
@@ -61,7 +68,6 @@ private:
     std::uint32_t protection{};
   };
   std::vector<AnonymousRange> anonymous_;
-  std::uint64_t nextAnonymousGuest_{};
 };
 
 } // namespace Lab

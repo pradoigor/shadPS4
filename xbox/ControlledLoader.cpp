@@ -493,6 +493,8 @@ ControlledLoadResult LoadElf(Reader &reader, elf_header const &header,
         const auto value =
             dryRunBase + static_cast<std::uint64_t>(relocation.rel_addend);
         std::memcpy(mapped.data() + target, &value, sizeof(value));
+        result.pending_relative_relocations.push_back(PendingRelativeRelocation{
+            relocation.rel_offset, relocation.rel_addend});
         ++result.relative_relocations_applied;
       } else if (relocation.GetType() == R_X86_64_DTPMOD64) {
         ++result.tls_relocations_pending;
@@ -677,6 +679,8 @@ ControlledLoadResult LoadSelf(Reader &reader, self_header const &header) {
   result.hle_symbols_unknown = inner.hle_symbols_unknown;
   result.pending_symbol_relocations =
       std::move(inner.pending_symbol_relocations);
+  result.pending_relative_relocations =
+      std::move(inner.pending_relative_relocations);
   result.guest_segments = std::move(inner.guest_segments);
   result.private_image = std::move(inner.private_image);
   result.relocation_dry_run_checksum = inner.relocation_dry_run_checksum;

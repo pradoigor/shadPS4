@@ -45,22 +45,36 @@ GuestMemory::~GuestMemory() {
     Core::PlatformMemory::Free(GetCurrentProcess(), base_, 0, MEM_RELEASE);
 }
 
-bool GuestMemory::MapValidated(std::vector<std::uint8_t> const &image,
-                               std::uint64_t guestBase,
-                               std::vector<GuestSegmentInfo> const &segments) {
+bool GuestMemory::MapValidated(
+    std::vector<std::uint8_t> const &image, std::uint64_t guestBase,
+    std::vector<GuestSegmentInfo> const &segments,
+    std::vector<PendingRelativeRelocation> const &relocations) {
   if (base_ || image.empty() || guestBase > UINT64_MAX - image.size())
     return false;
-  auto *requested = reinterpret_cast<void *>(guestBase);
-  auto *allocation = Core::PlatformMemory::Allocate(
-      GetCurrentProcess(), requested, image.size(), MEM_RESERVE | MEM_COMMIT,
-      PAGE_READWRITE);
-  if (!allocation || allocation != requested) {
-    if (allocation)
-      Core::PlatformMemory::Free(GetCurrentProcess(), allocation, 0,
-                                 MEM_RELEASE);
+  auto *allocation =
+      Core::PlatformMemory::Allocate(GetCurrentProcess(), nullptr, image.size(),
+                                     MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+  if (!allocation)
+    return false;
+  const auto hostBase = reinterpret_cast<std::uint64_t>(allocation);
+  if (hostBase < guestBase) {
+    Core::PlatformMemory::Free(GetCurrentProcess(), allocation, 0, MEM_RELEASE);
     return false;
   }
+  const auto loadBias = hostBase - guestBase;
   std::memcpy(allocation, image.data(), image.size());
+  for (auto const &relocation : relocations) {
+    if (relocation.target < guestBase || image.size() < sizeof(std::uint64_t) ||
+        relocation.target - guestBase > image.size() - sizeof(std::uint64_t)) {
+      Core::PlatformMemory::Free(GetCurrentProcess(), allocation, 0,
+                                 MEM_RELEASE);
+      return false;
+    }
+    const auto offset = static_cast<std::size_t>(relocation.target - guestBase);
+    const auto value = loadBias + static_cast<std::uint64_t>(relocation.addend);
+    std::memcpy(static_cast<std::uint8_t *>(allocation) + offset, &value,
+                sizeof(value));
+  }
   DWORD previous{};
   if (!Core::PlatformMemory::Protect(GetCurrentProcess(), allocation,
                                      image.size(), PAGE_READONLY, &previous)) {
@@ -83,13 +97,13 @@ bool GuestMemory::MapValidated(std::vector<std::uint8_t> const &image,
                                  MEM_RELEASE);
       return false;
     }
-    writable_.push_back(
-        WritableRange{segment.address, segment.size, writable, PAGE_READWRITE});
+    writable_.push_back(WritableRange{loadBias + segment.address, segment.size,
+                                      writable, PAGE_READWRITE});
   }
   base_ = allocation;
   size_ = image.size();
-  guestBase_ = guestBase;
-  nextAnonymousGuest_ = AlignGuest(guestBase_ + image.size());
+  guestBase_ = hostBase;
+  loadBias_ = loadBias;
   return true;
 }
 
@@ -163,10 +177,8 @@ bool GuestMemory::MapAnonymous(std::size_t bytes, std::uint64_t prot,
   if (fixed) {
     if (address == 0 || address % GuestPage != 0)
       return false;
-  } else if (address == 0 || address % GuestPage != 0) {
-    address = nextAnonymousGuest_;
   }
-  if (address == 0 || address > UINT64_MAX - size)
+  if (fixed && address > UINT64_MAX - size)
     return false;
 
   auto occupied = [&](std::uint64_t candidate) {
@@ -177,25 +189,22 @@ bool GuestMemory::MapAnonymous(std::size_t bytes, std::uint64_t prot,
         return true;
     return false;
   };
-  if (!fixed) {
-    while (occupied(address)) {
-      if (address > UINT64_MAX - size)
-        return false;
-      address = AlignGuest(address + size);
-      if (address == 0)
-        return false;
-    }
-  } else if (occupied(address)) {
+  if (fixed && occupied(address)) {
     return false;
   }
 
   const auto protection = ProtectionFor(prot);
-  auto *host = VirtualAllocFromApp(nullptr, static_cast<SIZE_T>(size),
-                                   MEM_RESERVE | MEM_COMMIT, protection);
+  auto *host = VirtualAllocFromApp(
+      fixed ? reinterpret_cast<void *>(address) : nullptr,
+      static_cast<SIZE_T>(size), MEM_RESERVE | MEM_COMMIT, protection);
   if (!host)
     return false;
+  address = reinterpret_cast<std::uint64_t>(host);
+  if (fixed && address != requestedAddress) {
+    VirtualFree(host, 0, MEM_RELEASE);
+    return false;
+  }
   anonymous_.push_back(AnonymousRange{address, size, host, protection});
-  nextAnonymousGuest_ = AlignGuest(address + size);
   guestAddress = address;
   return true;
 }

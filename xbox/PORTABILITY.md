@@ -24,7 +24,7 @@ que o carregador tenha uma ponte ABI SysV compatível, endereços HLE reais e um
 renderer UWP para Piglet. O aplicativo deve manter essa barreira e nunca saltar
 para o `e_entry` enquanto algum desses requisitos faltar.
 
-A build `0.35.0.0` corrige o alocador de thunks SysV→Windows para preservar os
+A build `0.36.0.0` corrige o alocador de thunks SysV→Windows para preservar os
 seis registradores inteiros, a pilha convidada e os registradores XMM em uma área
 separada do shadow space exigido pelo ABI Windows. Um chamador de máquina gerado
 pelo projeto injeta padrões distintos em registradores e argumentos de pilha e
@@ -41,8 +41,9 @@ pois reservar e confirmar toda a memória do PS4 excede o orçamento prático do
 O probe agora cria e conta thunks para todos os imports do ELF e aplica
 os endereços em uma cópia privada não executável e mapeia essa cópia como somente
 leitura com proteção por segmento para validar a faixa de memória. A imagem agora
-é uma alocação coerente colocada no endereço virtual solicitado: segmentos `PF_W`
-e HLE compartilham os mesmos bytes e as demais regiões permanecem não executáveis.
+é uma alocação coerente em uma base válida escolhida pelo UWP; o load bias real
+substitui a base fixa do dry-run. Segmentos `PF_W` e HLE compartilham os mesmos
+bytes e as demais regiões permanecem não executáveis.
 O primeiro handler com ponteiro,
 `sceKernelDebugOutText`, rejeita endereços fora da faixa antes de usar o log do
 host. A imagem convidada continua sem memória executável; isso ainda é infraestrutura de
@@ -59,8 +60,8 @@ Os handlers de cópia/comparação de memória (`memcpy`, `memmove`, `memset`,
 destinos que não sejam graváveis. Esse suporte prepara a camada libc do
 homebrew sem alterar APIs públicas do núcleo desktop.
 `mmap`/`munmap` e `sceKernelMmap`/`sceKernelMunmap` agora têm uma camada anônima
-isolada: o host aloca páginas UWP, enquanto o dispatcher retorna um endereço
-convidado controlado. O suporte é limitado a mapas anônimos sem execução e não
+isolada: o host aloca páginas UWP, enquanto o dispatcher retorna o mesmo endereço
+usado como ponteiro nativo. O suporte é limitado a mapas anônimos sem execução e não
 é uma implementação do espaço de endereços completo do PS4.
 O probe do diagnóstico exerce diretamente uma página anônima: grava enquanto
 `PAGE_READWRITE`, muda para somente leitura sem execução, confirma a leitura,

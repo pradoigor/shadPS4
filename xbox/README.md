@@ -4,7 +4,7 @@ Aplicativo **UWP x64 / C++/WinRT / XAML** para medir a viabilidade de portar
 shadPS4 ao Xbox Series X em Dev Mode. **Ainda não é um emulador PS4 no Xbox.**
 O alvo é independente do CMake e das dependências desktop do núcleo.
 
-A versão **0.35.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
+A versão **0.36.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
 PKG/ELF, keysets FPKG embutidos, importação de chaves personalizadas, extração em
 segundo plano e um probe de execução controlada com auditoria de requisitos runtime,
 relocação e inventário de NIDs HLE. O ELF/SELF selecionado é apenas
@@ -12,8 +12,9 @@ validado e mapeado em buffer não executável; o único código executado é um 
 mínimo gerado pelo próprio projeto, com retorno esperado `42`. O relatório também
 conta segmentos dynamic/TLS, relocações e dependências importadas, valida os tipos
 e os alvos das relocações em `PT_LOAD` e `PT_SCE_RELRO`, mas ainda não as aplica
-nem resolve imports. As relocações relativas são aplicadas somente em uma cópia
-privada não executável durante o dry-run; o arquivo selecionado continua intocado.
+nem resolve todos os imports. As relocações relativas são conferidas em uma cópia
+privada e reaplicadas com a base escolhida pelo UWP no mapa coerente não executável;
+o arquivo selecionado continua intocado.
 Os símbolos pendentes também têm seus índices e nomes conferidos contra as
 tabelas internas. O relatório cruza cada NID com o registro AeroLib derivado do
 núcleo e registra o nome conhecido ou a ausência de correspondência. Esse
@@ -44,8 +45,9 @@ Orbis correto de `ENOSYS`. `sceKernelDebugOutText` traduz e valida um ponteiro d
 contra a memória convidada somente leitura antes de enviá-lo ao log de depuração.
 O probe aplica os endereços em uma cópia privada não executável para
 validar as relocações, sem gravá-los no arquivo ou promover o convidado a execução.
-Essa cópia também é mapeada de forma coerente no endereço virtual validado: HLE
-e instruções x86-64 passam a observar os mesmos bytes. Segmentos `PF_W` ficam
+Essa cópia também é mapeada de forma coerente em uma base válida escolhida pelo
+UWP; o load bias é aplicado aos ponteiros relativos e HLE e instruções x86-64
+passam a observar os mesmos bytes. Segmentos `PF_W` ficam
 graváveis e código/read-only continua sem permissão de execução nesta etapa.
 O probe chama `clock_gettime` por um thunk com ponteiro SysV e valida o
 `timespec` escrito em uma faixa `PF_W`.
@@ -56,7 +58,8 @@ As operações básicas `memcpy`, `memmove`, `memset`, `memcmp` e `strlen` tamb�
 validam os ponteiros contra o mapa convidado antes de acessar memória. Elas são
 handlers HLE de diagnóstico e não significam que o ELF selecionado foi executado.
 O mapa de memória agora possui alocações anônimas isoladas para `mmap`/`munmap`,
-com endereços convidados sintéticos, proteção sem execução e liberação explícita.
+com endereços convidados iguais aos ponteiros nativos, proteção sem execução e
+liberação explícita.
 O caminho `sceKernelMmap` valida o ponteiro de saída na pilha convidada antes de
 publicar o endereço alocado.
 O diagnóstico inclui um probe isolado de `mmap`/`mprotect`/`munmap` que grava,

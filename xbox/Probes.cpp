@@ -49,12 +49,14 @@ void RunProbe(Test &test, std::wstring const &executablePath,
   }
   GuestMemory guestMemory;
   result.guest_memory_mapped = guestMemory.MapValidated(
-      result.private_image, result.min_virtual_address, result.guest_segments);
+      result.private_image, result.min_virtual_address, result.guest_segments,
+      result.pending_relative_relocations);
   if (result.guest_memory_mapped) {
     result.guest_memory_bytes = guestMemory.size();
     result.guest_memory_host_address = guestMemory.hostAddress();
     result.guest_memory_identity_mapped =
-        result.guest_memory_host_address == result.min_virtual_address;
+        result.guest_memory_host_address ==
+        guestMemory.RuntimeAddress(result.min_virtual_address);
     result.guest_memory_writable_bytes = guestMemory.writableBytes();
     std::uint64_t anonymousAddress = 0;
     if (guestMemory.MapAnonymous(0x4000, 0x3, 0, false, anonymousAddress)) {
@@ -91,7 +93,7 @@ void RunProbe(Test &test, std::wstring const &executablePath,
     std::uint64_t guestAddress = 0;
     for (auto const &segment : result.guest_segments) {
       if ((segment.flags & 0x2u) != 0 && segment.size >= 16) {
-        guestAddress = segment.address;
+        guestAddress = guestMemory.RuntimeAddress(segment.address);
         break;
       }
     }
@@ -365,7 +367,7 @@ void RunProbe(Test &test, std::wstring const &executablePath,
       std::to_wstring(result.hle_handlers_implemented) +
       L", handlers pendentes=" +
       std::to_wstring(result.hle_handlers_unimplemented) +
-      L", relocations HLE aplicadas em cópia privada=" +
+      L", relocations HLE aplicadas antes do mapa coerente=" +
       std::to_wstring(result.hle_relocations_applied) +
       L", relocations HLE sem resolução=" +
       std::to_wstring(result.hle_relocations_unresolved) +
@@ -382,8 +384,8 @@ void RunProbe(Test &test, std::wstring const &executablePath,
       L", TLS pending=" + std::to_wstring(result.tls_relocations_pending) +
       std::wstring(L". Gate de runtime=") +
       (result.runtime_preflight_ready ? L"pronto" : L"bloqueado") +
-      L". Os thunks temporários foram usados para aplicar relocations somente "
-      L"em uma cópia privada; o homebrew não foi executado.\n" +
+      L". As relocations foram reaplicadas com a base escolhida pelo UWP e "
+      L"copiadas para o mapa coerente; o homebrew não foi executado.\n" +
       gateDetail + L"\n" + execution.detail + L"\nArquivo: " + executablePath;
 }
 
