@@ -6,6 +6,7 @@
 #include "ElfProbe.h"
 #include "SegmentProbe.h"
 #include "ExecProbe.h"
+#include "RelocProbe.h"
 #include <d3d12.h>
 #include <memoryapi.h>
 #include <fileapifromapp.h>
@@ -95,6 +96,15 @@ void RunProbe(Test& t, std::wstring const& directory) {
         std::string read{std::istreambuf_iterator<char>(input), {}};
         if (read != payload) throw hresult_error(E_FAIL, L"Conteúdo lido difere do conteúdo gravado.");
         t.detail = L"Arquivo gravado, sincronizado e relido em LocalState.";
+    } else if (t.id == L"relocation_model") {
+        auto result = ProbeOriginalRelocationModel(directory);
+        Number(t, L"record_count", result.record_count);
+        Number(t, L"relative_value", result.relative_value);
+        Number(t, L"local_symbol_value", result.local_symbol_value);
+        Number(t, L"tls_module_value", result.tls_module_value);
+        Number(t, L"encoded_size", result.encoded_size);
+        if (!result.passed) throw hresult_error(E_FAIL, L"Modelo de relocação ELF não produziu os endereços esperados.");
+        t.detail = L"Estruturas e constantes originais de elf.h aplicaram RELATIVE, R_X86_64_64 local e DTPMOD64 em imagem sintética. Valida representação e aritmética usadas pelo linker; não executa Linker::Relocate completo nem resolve imports.";
     } else if (t.id == L"elf_execute_segment") {
         auto result = ProbeOriginalElfExecuteSegment(directory);
         Number(t, L"file_size", result.file_size);

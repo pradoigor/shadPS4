@@ -51,8 +51,8 @@
     <FxCompile><ShaderModel>5.0</ShaderModel><EntryPointName>main</EntryPointName></FxCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="App.cpp" /><ClCompile Include="CoreProbe.cpp" /><ClCompile Include="ElfProbe.cpp" /><ClCompile Include="ExecProbe.cpp" /><ClCompile Include="IFileProbe.cpp" /><ClCompile Include="LoaderProbe.cpp" /><ClCompile Include="Probes.cpp" /><ClCompile Include="Report.cpp" /><ClCompile Include="SegmentProbe.cpp" /><ClCompile Include="..\src\core\file_format\psf.cpp" /><ClCompile Include="..\src\core\loader\elf.cpp" />
-    <ClInclude Include="CoreProbe.h" /><ClInclude Include="ElfProbe.h" /><ClInclude Include="ExecProbe.h" /><ClInclude Include="IFileProbe.h" /><ClInclude Include="LoaderProbe.h" /><ClInclude Include="Probes.h" /><ClInclude Include="Report.h" /><ClInclude Include="SegmentProbe.h" /><ClInclude Include="BuildInfo.h" />
+    <ClCompile Include="App.cpp" /><ClCompile Include="CoreProbe.cpp" /><ClCompile Include="ElfProbe.cpp" /><ClCompile Include="ExecProbe.cpp" /><ClCompile Include="IFileProbe.cpp" /><ClCompile Include="LoaderProbe.cpp" /><ClCompile Include="Probes.cpp" /><ClCompile Include="RelocProbe.cpp" /><ClCompile Include="Report.cpp" /><ClCompile Include="SegmentProbe.cpp" /><ClCompile Include="..\src\core\file_format\psf.cpp" /><ClCompile Include="..\src\core\loader\elf.cpp" />
+    <ClInclude Include="CoreProbe.h" /><ClInclude Include="ElfProbe.h" /><ClInclude Include="ExecProbe.h" /><ClInclude Include="IFileProbe.h" /><ClInclude Include="LoaderProbe.h" /><ClInclude Include="Probes.h" /><ClInclude Include="RelocProbe.h" /><ClInclude Include="Report.h" /><ClInclude Include="SegmentProbe.h" /><ClInclude Include="BuildInfo.h" />
     <AppxManifest Include="Package.appxmanifest" />
     <None Include="MainPage.xaml"><DeploymentContent>true</DeploymentContent></None>
     <Image Include="Assets\*.png" />

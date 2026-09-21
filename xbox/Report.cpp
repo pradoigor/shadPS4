@@ -46,7 +46,7 @@ Report::Report() {
     auto add = [&](wchar_t const* id, wchar_t const* title, bool isolated = false) {
         Test t; t.id = id; t.title = title; t.isolated = isolated; tests.push_back(std::move(t));
     };
-    add(L"elf_execute_segment", L"Núcleo · segmento ELF executável");
+    add(L"relocation_model", L"Núcleo · modelo de relocação ELF");
     Load();
 }
 JsonObject Report::Json() const {
