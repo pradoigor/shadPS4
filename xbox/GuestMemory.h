@@ -10,7 +10,8 @@
 namespace Lab {
 
 // Owns a private UWP allocation for a validated image. Code and read-only
-// ranges remain non-executable; only page-aligned PF_W ranges are writable.
+// ranges remain non-executable; PF_W ranges use isolated writable copies so a
+// shared ELF page never makes code writable.
 class GuestMemory {
 public:
     GuestMemory() = default;
@@ -38,6 +39,7 @@ private:
     struct WritableRange {
         std::uint64_t address{};
         std::uint64_t size{};
+        void* host{};
     };
     std::vector<WritableRange> writable_;
 };

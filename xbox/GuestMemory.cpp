@@ -9,6 +9,8 @@
 namespace Lab {
 
 GuestMemory::~GuestMemory() {
+    for (auto const& range : writable_)
+        if (range.host) VirtualFree(range.host, 0, MEM_RELEASE);
     if (base_) VirtualFree(base_, 0, MEM_RELEASE);
 }
 
@@ -31,35 +33,21 @@ bool GuestMemory::MapValidated(std::vector<std::uint8_t> const& image,
             segment.address < guestBase)
             continue;
         const auto offset = segment.address - guestBase;
-        constexpr std::uint64_t PageSize = 0x1000;
         if (offset > image.size() || segment.size > image.size() - offset)
             continue;
-        const auto end = offset + segment.size;
-        const auto pageStart = offset & ~(PageSize - 1);
-        const auto pageEnd = (end + PageSize - 1) & ~(PageSize - 1);
-        bool overlapsReadOnly = false;
-        for (auto const& other : segments) {
-            if ((other.flags & 0x2u) != 0 || other.size == 0 ||
-                other.address < guestBase)
-                continue;
-            const auto otherStart = other.address - guestBase;
-            if (otherStart > image.size() || other.size > image.size() - otherStart)
-                continue;
-            const auto otherEnd = otherStart + other.size;
-            const auto otherPageStart = otherStart & ~(PageSize - 1);
-            const auto otherPageEnd = (otherEnd + PageSize - 1) & ~(PageSize - 1);
-            if (pageStart < otherPageEnd && otherPageStart < pageEnd) {
-                overlapsReadOnly = true;
-                break;
-            }
-        }
-        if (overlapsReadOnly || pageEnd > image.size()) continue;
-        auto* writable = static_cast<std::uint8_t*>(allocation) + pageStart;
-        if (!VirtualProtectFromApp(writable, pageEnd - pageStart, PAGE_READWRITE, &previous)) {
+        auto* writable = VirtualAllocFromApp(nullptr, segment.size,
+                                              MEM_RESERVE | MEM_COMMIT,
+                                              PAGE_READWRITE);
+        if (!writable) {
+            for (auto const& range : writable_)
+                if (range.host) VirtualFree(range.host, 0, MEM_RELEASE);
+            writable_.clear();
             VirtualFree(allocation, 0, MEM_RELEASE);
             return false;
         }
-        writable_.push_back(WritableRange{segment.address, segment.size});
+        std::memcpy(writable, static_cast<std::uint8_t*>(allocation) + offset,
+                    static_cast<std::size_t>(segment.size));
+        writable_.push_back(WritableRange{segment.address, segment.size, writable});
     }
     base_ = allocation;
     size_ = image.size();
@@ -69,6 +57,13 @@ bool GuestMemory::MapValidated(std::vector<std::uint8_t> const& image,
 
 void* GuestMemory::Translate(std::uint64_t guestAddress, std::size_t bytes) const noexcept {
     if (!base_ || guestAddress < guestBase_) return nullptr;
+    for (auto const& range : writable_) {
+        if (guestAddress >= range.address &&
+            guestAddress - range.address <= range.size &&
+            bytes <= range.size - (guestAddress - range.address))
+            return static_cast<std::uint8_t*>(range.host) +
+                   (guestAddress - range.address);
+    }
     const auto offset = guestAddress - guestBase_;
     if (offset > static_cast<std::uint64_t>(size_) ||
         bytes > size_ - static_cast<std::size_t>(offset)) return nullptr;
@@ -87,7 +82,8 @@ void* GuestMemory::TranslateWritable(std::uint64_t guestAddress,
         if (guestAddress >= range.address &&
             guestAddress - range.address <= range.size &&
             bytes <= range.size - (guestAddress - range.address))
-            return Translate(guestAddress, bytes);
+            return static_cast<std::uint8_t*>(range.host) +
+                   (guestAddress - range.address);
     }
     return nullptr;
 }
