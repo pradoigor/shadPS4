@@ -4,7 +4,6 @@
 #pragma once
 
 #ifdef _WIN32
-#include <memoryapi.h>
 #include <windows.h>
 
 namespace Core::PlatformMemory {
