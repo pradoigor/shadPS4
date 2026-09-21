@@ -5,7 +5,14 @@
 
 #pragma once
 
+#if defined(SHADPS4_XBOX_UWP)
+// The UWP diagnostic target uses the original data-structure headers without
+// linking the desktop logging implementation. Keep assertion call sites
+// source-compatible while the full logger is being ported.
+#define LOG_CRITICAL(...) ((void)0)
+#else
 #include "common/logging/log.h"
+#endif
 
 // Sometimes we want to try to continue even after hitting an assert.
 // However touching this file yields a global recompilation as this header is included almost
