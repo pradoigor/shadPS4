@@ -276,7 +276,7 @@ ControlledLoadResult LoadElf(Reader& reader, elf_header const& header, std::uint
         std::vector<char> bytes(static_cast<std::size_t>(probeSize));
         const auto fileOffset = AddChecked(
             dynlibData->p_offset,
-            AddChecked(dynamicTables.string_table_offset + offset,
+            AddChecked(dynamicTables.string_table_offset, offset,
                        "Tabela de strings excede os dados ELF."),
             "Tabela de strings excede o arquivo ELF.");
         logicalRead(fileOffset, bytes.data(), bytes.size());
