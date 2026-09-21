@@ -44,7 +44,7 @@ nunca remove aplicativos automaticamente.
 
 ## Testar
 
-- **Biblioteca:** seleciona extensões `.elf`, `.self` ou `.bin` e copia o arquivo para `LocalState/Library`. Nesta versão não há carregamento nem execução do conteúdo.
+- **Biblioteca:** seleciona extensões `.elf`, `.self`, `.bin` ou `.pkg` e copia o arquivo para `LocalState/Library`. Para PKG, a interface reconhece apenas o magic do contêiner e o tamanho; não instala, descriptografa ou executa o conteúdo.
 
 - **Executar testes automáticos:** armazenamento, orçamento, D3D11 com readback,
   dispositivo D3D12 e mapeamento RW pequeno. Sem resultados sintéticos.

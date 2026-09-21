@@ -4,6 +4,7 @@
 #include "BuildInfo.h"
 #include <windows.ui.xaml.media.dxinterop.h>
 #include <filesystem>
+#include <array>
 #include <fstream>
 #include <chrono>
 #include <winrt/Windows.ApplicationModel.h>
@@ -72,6 +73,23 @@ struct App : ApplicationT<App> {
         });
     }
     template<typename T> T Find(wchar_t const* name) { return root.FindName(name).as<T>(); }
+    static std::wstring DescribeContent(std::wstring const& path) {
+        std::error_code error;
+        const auto size = std::filesystem::file_size(std::filesystem::path(path), error);
+        std::array<unsigned char, 4> header{};
+        std::ifstream input(std::filesystem::path(path), std::ios::binary);
+        input.read(reinterpret_cast<char*>(header.data()), static_cast<std::streamsize>(header.size()));
+        const auto magic = (static_cast<std::uint32_t>(header[0]) << 24u) |
+            (static_cast<std::uint32_t>(header[1]) << 16u) |
+            (static_cast<std::uint32_t>(header[2]) << 8u) | static_cast<std::uint32_t>(header[3]);
+        if (input.gcount() == static_cast<std::streamsize>(header.size()) && magic == 0x7F504B47u) {
+            const std::wstring size_text = error ? L"tamanho indisponível" : std::to_wstring(size) + L" bytes";
+            return std::wstring(L"PKG PS4 reconhecido pelo magic 0x7F504B47 · ") + size_text +
+                L"\nLeitura limitada ao cabeçalho; conteúdo criptografado não é aberto.";
+        }
+        return error ? L"Arquivo selecionado; tamanho indisponível." :
+            L"Arquivo selecionado · " + std::to_wstring(size) + L" bytes\nFormato ainda não analisado.";
+    }
     void ShowLibrary(bool visible) {
         libraryView.Visibility(visible ? Visibility::Visible : Visibility::Collapsed);
         diagnosticsView.Visibility(visible ? Visibility::Collapsed : Visibility::Visible);
@@ -86,7 +104,7 @@ struct App : ApplicationT<App> {
             libraryList.Items().Clear();
             for (auto const& file : files) {
                 TextBlock item;
-                item.Text(std::wstring(file.Name()) + L"\nSelecionado para o núcleo; carregamento ainda não implementado.");
+                item.Text(std::wstring(file.Name()) + L"\n" + DescribeContent(file.Path()));
                 item.TextWrapping(TextWrapping::Wrap);
                 item.FontSize(16);
                 item.Margin({0, 6, 0, 6});
@@ -106,12 +124,13 @@ struct App : ApplicationT<App> {
             picker.FileTypeFilter().Append(L".elf");
             picker.FileTypeFilter().Append(L".self");
             picker.FileTypeFilter().Append(L".bin");
+            picker.FileTypeFilter().Append(L".pkg");
             auto file = co_await picker.PickSingleFileAsync();
             if (!file) co_return;
             auto local = Windows::Storage::ApplicationData::Current().LocalFolder();
             auto folder = co_await local.CreateFolderAsync(L"Library", Windows::Storage::CreationCollisionOption::OpenIfExists);
             co_await file.CopyAsync(folder, file.Name(), Windows::Storage::NameCollisionOption::ReplaceExisting);
-            libraryStatus.Text(L"Arquivo copiado: " + std::wstring(file.Name()) + L". O loader ainda não está conectado.");
+            libraryStatus.Text(L"Arquivo copiado: " + std::wstring(file.Name()) + L"\n" + DescribeContent(file.Path()));
             PopulateLibrary();
         } catch (hresult_error const& e) {
             libraryStatus.Text(L"Falha ao selecionar conteúdo: " + e.message());
