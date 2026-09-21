@@ -5,9 +5,9 @@ Base analisada: `42c555b7ab5d0678f531a7e4d505560ccc0f8add`.
 Este alvo é um laboratório UWP dentro do fork. Ele já compila diretamente os
 headers originais `common/endian.h`, `core/file_format/psf.h`, `core/loader/elf.h`
 e `core/file_sys/ifile.h`, além do codec original `src/core/file_format/psf.cpp`.
-O probe ativo deriva `IFile` com APIs UWP e usa o `FileReader` original para ler
-um contêiner SELF/ELF sintético no `LocalState`; os probes anteriores ficam apenas
-nas evidências históricas. Ainda não liga o
+O único teste ativo deriva `IFile` com APIs UWP e usa o `FileReader` original para
+ler um contêiner SELF/ELF sintético no `LocalState`; os probes anteriores ficam
+apenas nas evidências históricas. Ainda não liga o
 núcleo completo, não carrega ELF/PKG e não executa jogos. Resultado aprovado em um teste não
 equivale a aprovação do subsistema completo do emulador.
 

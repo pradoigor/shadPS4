@@ -47,17 +47,6 @@ Report::Report() {
         Test t; t.id = id; t.title = title; t.isolated = isolated; tests.push_back(std::move(t));
     };
     add(L"ifile_adapter", L"Núcleo · backend IFile UWP");
-    add(L"budget", L"Memória · orçamento do aplicativo");
-    add(L"d3d11", L"GPU · Direct3D 11 e shader com leitura de volta");
-    add(L"d3d12", L"GPU · dispositivo Direct3D 12");
-    add(L"mapping", L"Memória · duas visões do mesmo mapeamento");
-    add(L"address", L"Memória · reservas nos endereços PS4", true);
-    add(L"protection", L"Memória · proteção de páginas", true);
-    add(L"codegen", L"CPU · execução de código x64 próprio", true);
-    add(L"presentation", L"Imagem · triângulo na tela", true);
-    add(L"controller", L"Controle · entrada real", true);
-    add(L"audio", L"Áudio · tom de teste", true);
-    add(L"lifecycle", L"Ciclo de vida · suspender e retomar", true);
     Load();
 }
 JsonObject Report::Json() const {
