@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "Probes.h"
 #include "CoreProbe.h"
+#include "LoaderProbe.h"
 #include <d3d12.h>
 #include <memoryapi.h>
 #include <fileapifromapp.h>
@@ -100,6 +101,17 @@ void RunProbe(Test& t, std::wstring const& directory) {
         Number(t, L"decoded_integer", result.decoded_integer);
         if (!result.passed) throw hresult_error(E_FAIL, L"Tipos do núcleo divergiram no alvo UWP.");
         t.detail = L"Codec PSF original do shadPS4 compilou no APPX; codificou e decodificou TITLE_ID e APP_VER, além de validar tamanhos e big-endian no console.";
+    } else if (t.id == L"loader_structures") {
+        auto result = ProbeUpstreamLoaderStructures();
+        Number(t, L"self_header_size", result.self_header_size);
+        Number(t, L"self_segment_size", result.self_segment_size);
+        Number(t, L"elf_header_size", result.elf_header_size);
+        Number(t, L"elf_program_header_size", result.elf_program_header_size);
+        Number(t, L"self_signature", result.self_signature);
+        Number(t, L"elf_signature", result.elf_signature);
+        Number(t, L"segment_id", result.segment_id);
+        if (!result.passed) throw hresult_error(E_FAIL, L"Estruturas ELF/SELF divergiram no alvo UWP.");
+        t.detail = L"Cabeçalho original elf.h compilou no APPX; assinaturas ELF/SELF, tamanhos e flags de segmento foram validados. Não carrega ELF/SELF nem descriptografa SELF.";
     } else if (t.id == L"budget") {
         Number(t, L"app_memory_usage_bytes", static_cast<double>(Windows::System::MemoryManager::AppMemoryUsage()));
         Number(t, L"app_memory_limit_bytes", static_cast<double>(Windows::System::MemoryManager::AppMemoryUsageLimit()));
