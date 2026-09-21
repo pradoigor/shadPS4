@@ -24,7 +24,7 @@ que o carregador tenha uma ponte ABI SysV compatível, endereços HLE reais e um
 renderer UWP para Piglet. O aplicativo deve manter essa barreira e nunca saltar
 para o `e_entry` enquanto algum desses requisitos faltar.
 
-A build `0.26.0.0` contém um alocador de thunks SysV→Windows que preserva os
+A build `0.27.0.0` contém um alocador de thunks SysV→Windows que preserva os
 registradores inteiros, a pilha convidada e os registradores XMM antes de chamar
 um dispatcher Windows. O dispatcher possui somente dois handlers iniciais
 (`sceKernelUsleep` e `sysKernelGetUpdVersion`); todos os outros imports retornam
@@ -38,6 +38,8 @@ O primeiro handler com ponteiro,
 `sceKernelDebugOutText`, rejeita endereços fora da faixa antes de usar o log do
 host. A imagem convidada continua sem memória executável; isso ainda é infraestrutura de
 ligação, não uma autorização de execução.
+O probe também chama `clock_gettime` com um ponteiro para uma faixa `PF_W` e
+valida os segundos e nanossegundos escritos pelo handler.
 O probe interno agora exerce um thunk sem argumentos para
 `sysKernelGetUpdVersion` e exige retorno zero. Essa chamada usa somente um
 handler do próprio aplicativo; ela não usa memória ELF nem executa o Apollo.

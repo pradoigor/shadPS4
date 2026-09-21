@@ -9,6 +9,7 @@
 #include <windows.h>
 #include <cstring>
 #include <filesystem>
+#include <string_view>
 #include <winrt/Windows.Data.Json.h>
 #include <winrt/base.h>
 
@@ -52,6 +53,41 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
         result.guest_memory_writable_bytes = guestMemory.writableBytes();
     }
     hleDispatcher.AttachGuestMemory(&guestMemory);
+    std::string clockSymbol;
+    for (auto const& mapping : result.hle_symbol_mappings) {
+        constexpr std::string_view suffix = "=clock_gettime";
+        if (mapping.size() > suffix.size() &&
+            mapping.compare(mapping.size() - suffix.size(), suffix.size(), suffix) == 0) {
+            clockSymbol = mapping.substr(0, mapping.size() - suffix.size());
+            break;
+        }
+    }
+    if (!clockSymbol.empty() && result.guest_memory_writable_bytes >= 16) {
+        std::uint64_t guestAddress = 0;
+        for (auto const& segment : result.guest_segments) {
+            if ((segment.flags & 0x2u) != 0 && segment.size >= 16) {
+                guestAddress = segment.address;
+                break;
+            }
+        }
+        auto* thunk = hleDispatcher.AddressFor(clockSymbol);
+        if (guestAddress != 0 && thunk) {
+            using ClockGetTimeHle = std::uint64_t (*)(std::uint64_t, std::uint64_t);
+            result.hle_pointer_probe_guest_address = guestAddress;
+            result.hle_pointer_probe_return =
+                reinterpret_cast<ClockGetTimeHle>(thunk)(0, guestAddress);
+            struct Timespec {
+                std::int64_t seconds;
+                std::int64_t nanoseconds;
+            } value{};
+            auto* output = static_cast<Timespec*>(
+                guestMemory.TranslateWritable(guestAddress, sizeof(value)));
+            result.hle_pointer_probe_passed =
+                result.hle_pointer_probe_return == 0 && output &&
+                output->seconds > 0 && output->nanoseconds >= 0 &&
+                output->nanoseconds < 1'000'000'000;
+        }
+    }
     auto gate = EvaluateRuntimeGate(result);
     result.runtime_preflight_ready = gate.ready;
     result.runtime_blockers = gate.blockers;
@@ -101,6 +137,9 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
     test.measurements.Insert(L"guest_memory_bytes", JsonValue::CreateNumberValue(static_cast<double>(result.guest_memory_bytes)));
     test.measurements.Insert(L"guest_memory_writable_bytes", JsonValue::CreateNumberValue(static_cast<double>(result.guest_memory_writable_bytes)));
     test.measurements.Insert(L"guest_memory_host_address", JsonValue::CreateNumberValue(static_cast<double>(result.guest_memory_host_address)));
+    test.measurements.Insert(L"hle_pointer_probe_passed", JsonValue::CreateBooleanValue(result.hle_pointer_probe_passed));
+    test.measurements.Insert(L"hle_pointer_probe_return", JsonValue::CreateNumberValue(static_cast<double>(result.hle_pointer_probe_return)));
+    test.measurements.Insert(L"hle_pointer_probe_guest_address", JsonValue::CreateNumberValue(static_cast<double>(result.hle_pointer_probe_guest_address)));
     test.measurements.Insert(L"runtime_preflight_ready", JsonValue::CreateBooleanValue(result.runtime_preflight_ready));
     winrt::Windows::Data::Json::JsonArray symbolNames;
     for (auto const& name : result.pending_symbol_names)
@@ -170,6 +209,7 @@ void RunProbe(Test& test, std::wstring const& executablePath, std::wstring const
                   L", relocations HLE sem resolução=" + std::to_wstring(result.hle_relocations_unresolved) +
                   L", memória convidada mapeada com proteção=" + (result.guest_memory_mapped ? L"sim" : L"não") +
                   L", bytes PF_W graváveis=" + std::to_wstring(result.guest_memory_writable_bytes) +
+                  L", smoke test de ponteiro clock_gettime=" + (result.hle_pointer_probe_passed ? L"aprovado" : L"pendente") +
                   L", TLS pending=" + std::to_wstring(result.tls_relocations_pending) +
                   std::wstring(L". Gate de runtime=") +
                   (result.runtime_preflight_ready ? L"pronto" : L"bloqueado") +

@@ -69,6 +69,9 @@ struct ControlledLoadResult {
     std::uint64_t guest_memory_writable_bytes{};
     std::uint64_t guest_memory_host_address{};
     bool guest_memory_mapped{};
+    bool hle_pointer_probe_passed{};
+    std::uint64_t hle_pointer_probe_return{};
+    std::uint64_t hle_pointer_probe_guest_address{};
     std::uint64_t relocation_dry_run_checksum{};
     std::vector<std::string> pending_symbol_names;
     std::vector<std::string> hle_symbol_mappings;
