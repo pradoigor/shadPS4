@@ -26,6 +26,9 @@ with (out / 'keys.txt').open('w') as f:
 
 def pkg(kind):
     blocks = [bytearray(65536) for _ in range(8)]
+    # PFS mode bit 2 marks the image as XTS-encrypted; bit 3 matches the
+    # case-insensitive layout used by the reference extractor.
+    struct.pack_into('<H', blocks[0], 0x1c, 0x000c)
     struct.pack_into('<I', blocks[0], 0x20, 65536)
     struct.pack_into('<Q', blocks[0], 0x30, 6)
     struct.pack_into('<Q', blocks[0], 0x48, 1)

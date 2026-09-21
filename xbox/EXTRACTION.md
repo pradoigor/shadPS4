@@ -1,4 +1,4 @@
-# Extração UWP 0.3.0
+# Extração UWP 0.3.2
 
 O aplicativo agora executa extração, além de inspecionar metadados. A biblioteca
 abre ao iniciar, usa uma faixa horizontal navegável pelo controle e distingue
@@ -13,9 +13,11 @@ inspirados no PS4, sem recursos gráficos da Sony.
    `PublicExponent` (4 bytes), `Modulus`, `PrivateExponent` (256 cada) e
    `Prime1`, `Prime2`, `Exponent1`, `Exponent2`, `Coefficient` (128 cada), em
    hexadecimal. O aplicativo valida todos os componentes antes da operação RSA.
-   O aplicativo verifica a tabela antes de pedir chaves: PKGs sem `entry_keys` e
-   `image_key` não pedem o arquivo. O layout PFS sem criptografia ainda termina
-   como variante não suportada, em vez de apresentar uma exigência falsa de chave.
+   O aplicativo lê o modo do cabeçalho PFS antes de pedir chaves: imagens sem o
+bit de criptografia seguem o caminho sem chaves; imagens XTS exigem os conjuntos
+RSA. A presença isolada de `entry_keys`/`image_key` não dispara mais um pedido
+falso. O PKG do Apollo v2.3.2 foi confirmado como XTS-criptografado (modo PFS
+0x000D), portanto ele realmente entra no caminho que solicita `keys.json`.
 3. Importe ou selecione o PKG já existente e pressione **Extrair pacote**.
 4. Acompanhe arquivos/MiB; **Cancelar extração** interrompe entre blocos.
 5. Após terminar, confira o cartão **EXTRAÍDO**, feche e reabra o aplicativo.

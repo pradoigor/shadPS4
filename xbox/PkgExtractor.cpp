@@ -63,6 +63,7 @@ class Extractor {
     const PackageKeys& keys;
     InstallProgress& progress;
     uint64_t pfsOffset{}, pfsSize{}, pfscOffset{}, plainSize{};
+    bool pfsEncrypted{};
     Bytes xtsKey;
     std::vector<uint64_t> sectors;
     std::vector<Node> nodes;
@@ -71,6 +72,7 @@ class Extractor {
     void Cancel() { Require(!progress.cancel.load(), "Extracao cancelada."); }
     Bytes Pfs(uint64_t offset, uint64_t count) {
         Range(offset, count, pfsSize);
+        if (!pfsEncrypted) return file.Read(pfsOffset + offset, count);
         const auto aligned = offset & ~uint64_t(4095);
         const auto length = ((offset - aligned + count + 4095) / 4096) * 4096;
         Range(aligned, length, pfsSize);
@@ -167,6 +169,12 @@ public:
         auto header = file.Read(0, 4096);
         Require(Number(header, 0, 4, true) == 0x7F434E54, "Arquivo nao e PKG PS4.");
         auto count = Number(header, 0x10, 4, true), table = Number(header, 0x18, 4, true);
+        pfsOffset = Number(header, 0x410, 8, true);
+        pfsSize = Number(header, 0x418, 8, true);
+        Range(pfsOffset, pfsSize, file.size);
+        Require(pfsSize >= 0x20, "Imagem PFS invalida.");
+        auto pfsHeader = file.Read(pfsOffset, 0x20);
+        pfsEncrypted = (Number(pfsHeader, 0x1C, 2) & 0x0004) != 0;
         Require(count > 0 && count <= 100000, "Tabela PKG invalida.");
         Range(table, count * 32, file.size);
         std::vector<Entry> entries;
@@ -184,23 +192,23 @@ public:
             auto it = std::find_if(entries.begin(), entries.end(), [&](const auto& e) { return e.id == id; });
             Require(it != entries.end(), "Estrutura criptografica PKG ausente ou nao suportada."); return *it;
         };
-        Require(hasKeyEntries, "PKG sem entry_keys/image_key: nao exige essas chaves, mas o layout PFS sem criptografia ainda nao e suportado nesta versao.");
-        ValidatePackageKeys(keys);
-        const auto& entryKeys = get(0x10);
-        Require(entryKeys.size >= 32 + 7 * 32 + 4 * 256, "entry_keys truncado.");
-        auto derived = PkgCrypto::Rsa(file.Read(entryKeys.offset + 32 + 7 * 32 + 3 * 256, 256), keys.derived);
-        const auto& image = get(0x20);
-        Require(image.size == 256, "image_key invalido.");
-        auto hashInput = image.raw; hashInput.insert(hashInput.end(), derived.begin(), derived.end());
-        auto ivKey = PkgCrypto::Hash(hashInput);
-        auto imageKey = PkgCrypto::Aes(file.Read(image.offset, 256), std::span(ivKey).subspan(16), std::span(ivKey).first(16));
-        auto ekpfs = PkgCrypto::Rsa(imageKey, keys.fake);
-        pfsOffset = Number(header, 0x410, 8, true); pfsSize = Number(header, 0x418, 8, true);
-        Range(pfsOffset, pfsSize, file.size);
+        if (pfsEncrypted) {
+            Require(hasKeyEntries, "Imagem PFS criptografada sem entry_keys/image_key.");
+            ValidatePackageKeys(keys);
+            const auto& entryKeys = get(0x10);
+            Require(entryKeys.size >= 32 + 7 * 32 + 4 * 256, "entry_keys truncado.");
+            auto derived = PkgCrypto::Rsa(file.Read(entryKeys.offset + 32 + 7 * 32 + 3 * 256, 256), keys.derived);
+            const auto& image = get(0x20);
+            Require(image.size == 256, "image_key invalido.");
+            auto hashInput = image.raw; hashInput.insert(hashInput.end(), derived.begin(), derived.end());
+            auto ivKey = PkgCrypto::Hash(hashInput);
+            auto imageKey = PkgCrypto::Aes(file.Read(image.offset, 256), std::span(ivKey).subspan(16), std::span(ivKey).first(16));
+            auto ekpfs = PkgCrypto::Rsa(imageKey, keys.fake);
+            auto seed = file.Read(pfsOffset + 0x370, 16);
+            Bytes hmacInput{1, 0, 0, 0}; hmacInput.insert(hmacInput.end(), seed.begin(), seed.end());
+            xtsKey = PkgCrypto::Hash(hmacInput, ekpfs);
+        }
         Require(pfsSize >= 65536 && pfsSize % 4096 == 0, "Imagem PFS invalida.");
-        auto seed = file.Read(pfsOffset + 0x370, 16);
-        Bytes hmacInput{1, 0, 0, 0}; hmacInput.insert(hmacInput.end(), seed.begin(), seed.end());
-        xtsKey = PkgCrypto::Hash(hmacInput, ekpfs);
         // Reference layout has PFSC aligned to 64 KiB. Search a bounded prefix.
         bool found = false;
         for (uint64_t pos = 0x20000; pos + 4096 <= std::min<uint64_t>(pfsSize, 16 * 1024 * 1024); pos += 65536) {
@@ -278,15 +286,22 @@ bool PackageNeedsKeys(const std::filesystem::path& path) {
     const auto table = Number(header, 0x18, 4, true);
     Require(count > 0 && count <= 100000, "Tabela PKG invalida.");
     Range(table, count * 32, file.size);
-    bool foundKeys = false;
+    bool encryptedPfs = false;
     for (uint64_t i = 0; i < count; ++i) {
         auto entry = file.Read(table + i * 32, 32);
         const auto id = Number(entry, 0, 4, true);
         const auto offset = Number(entry, 16, 4, true);
         const auto size = Number(entry, 20, 4, true);
         Range(offset, size, file.size);
-        foundKeys |= id == 0x10 || id == 0x20;
+        (void)id;
     }
-    return foundKeys;
+    const auto pfsOffset = Number(header, 0x410, 8, true);
+    const auto pfsSize = Number(header, 0x418, 8, true);
+    Range(pfsOffset, pfsSize, file.size);
+    if (pfsSize >= 0x20) {
+        const auto pfsHeader = file.Read(pfsOffset, 0x20);
+        encryptedPfs = (Number(pfsHeader, 0x1C, 2) & 0x0004) != 0;
+    }
+    return encryptedPfs;
 }
 }
