@@ -37,6 +37,7 @@ def pkg(kind):
         struct.pack_into('<Q', blocks[1], at+8, size)
         struct.pack_into('<II', blocks[1], at+96, count, loc)
     def directory(block, entries):
+        blocks[block] = bytearray(65536)
         offset = 0
         for inode, typ, name in entries:
             raw = name.encode(); length = (16 + len(raw) + 3) & ~3

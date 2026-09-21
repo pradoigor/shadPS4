@@ -27,7 +27,11 @@ int main(int argc, char** argv) {
                 auto source = root / (std::string((std::string(name) == "missing_keys" || std::string(name) == "cancel") ? "valid" : name) + ".pkg");
                 ExtractPackage(source, target, std::string(name) == "missing_keys" ? PackageKeys{} : keys, progress);
                 success = true;
-            } catch (const std::exception& e) { std::cout << name << ": " << e.what() << '\n'; }
+            } catch (const std::exception& e) {
+                std::cout << name << ": " << e.what() << '\n';
+                if (std::string(name) == "cycle" && std::string(e.what()).find("Ciclo") == std::string::npos)
+                    throw std::runtime_error("cycle fixture did not exercise cycle detection");
+            }
             if (success != (std::string(name) == "valid")) throw std::runtime_error(std::string("unexpected result: ") + name);
             if (success) {
                 if (Read(target / "eboot.bin") != Read(root / "expected-eboot.bin") ||
