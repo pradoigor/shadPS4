@@ -85,6 +85,7 @@ struct ControlledLoadResult {
   bool hle_directory_probe_passed{};
   bool hle_metadata_probe_passed{};
   bool hle_directory_enumeration_probe_passed{};
+  bool hle_synchronization_probe_passed{};
   std::uint64_t hle_pointer_probe_return{};
   std::uint64_t hle_pointer_probe_guest_address{};
   std::uint64_t relocation_dry_run_checksum{};

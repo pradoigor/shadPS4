@@ -329,6 +329,92 @@ void RunProbe(Test &test, std::wstring const &executablePath,
       }
     }
   }
+  std::unordered_map<std::string, void *> synchronizationOperations;
+  for (auto const &name : {
+           "pthread_mutexattr_init", "pthread_mutexattr_settype",
+           "pthread_mutex_init", "pthread_mutex_destroy", "pthread_mutex_lock",
+           "pthread_mutex_trylock", "pthread_mutex_unlock", "pthread_cond_init",
+           "pthread_cond_destroy", "pthread_cond_signal", "pthread_cond_broadcast",
+           "sem_init", "sem_destroy", "sem_trywait", "sem_wait", "sem_getvalue",
+           "sem_post"}) {
+    for (auto const &mapping : result.hle_symbol_mappings) {
+      const auto suffix = std::string("=") + name;
+      if (mapping.size() > suffix.size() &&
+          mapping.compare(mapping.size() - suffix.size(), suffix.size(), suffix) == 0)
+        synchronizationOperations[name] = hleDispatcher.AddressFor(
+            mapping.substr(0, mapping.size() - suffix.size()));
+    }
+  }
+  if (synchronizationOperations.size() == 17 &&
+      result.guest_memory_writable_bytes >= 64) {
+    std::uint64_t guestAddress = 0;
+    for (auto const &segment : result.guest_segments) {
+      if ((segment.flags & 0x2u) != 0 && segment.size >= 64) {
+        guestAddress = guestMemory.RuntimeAddress(segment.address);
+        break;
+      }
+    }
+    auto *memory = static_cast<std::uint8_t *>(
+        guestMemory.TranslateWritable(guestAddress, 64));
+    if (memory) {
+      std::memset(memory, 0, 64);
+      auto operation = [&](char const *name) {
+        return synchronizationOperations.at(name);
+      };
+      const auto attributeInitialized = InvokeSysv2(
+          operation("pthread_mutexattr_init"), guestAddress + 8, 0);
+      const auto attributeTyped = InvokeSysv2(
+          operation("pthread_mutexattr_settype"), guestAddress + 8, 2);
+      const auto mutexInitialized = InvokeSysv2(
+          operation("pthread_mutex_init"), guestAddress, guestAddress + 8);
+      const auto firstLock =
+          InvokeSysv2(operation("pthread_mutex_lock"), guestAddress, 0);
+      const auto recursiveTryLock =
+          InvokeSysv2(operation("pthread_mutex_trylock"), guestAddress, 0);
+      const auto firstUnlock =
+          InvokeSysv2(operation("pthread_mutex_unlock"), guestAddress, 0);
+      const auto secondUnlock =
+          InvokeSysv2(operation("pthread_mutex_unlock"), guestAddress, 0);
+      const auto mutexDestroyed =
+          InvokeSysv2(operation("pthread_mutex_destroy"), guestAddress, 0);
+      const auto conditionInitialized = InvokeSysv2(
+          operation("pthread_cond_init"), guestAddress + 32, 0);
+      const auto conditionSignaled = InvokeSysv2(
+          operation("pthread_cond_signal"), guestAddress + 32, 0);
+      const auto conditionBroadcast = InvokeSysv2(
+          operation("pthread_cond_broadcast"), guestAddress + 32, 0);
+      const auto conditionDestroyed = InvokeSysv2(
+          operation("pthread_cond_destroy"), guestAddress + 32, 0);
+      const auto semaphoreInitialized = InvokeSysv3(
+          operation("sem_init"), guestAddress + 16, 0, 1);
+      const auto initialValue = InvokeSysv2(
+          operation("sem_getvalue"), guestAddress + 16, guestAddress + 24);
+      std::int32_t valueBefore{};
+      std::memcpy(&valueBefore, memory + 24, sizeof(valueBefore));
+      const auto semaphoreTryWait = InvokeSysv2(
+          operation("sem_trywait"), guestAddress + 16, 0);
+      const auto emptyValue = InvokeSysv2(
+          operation("sem_getvalue"), guestAddress + 16, guestAddress + 24);
+      std::int32_t valueAfter{};
+      std::memcpy(&valueAfter, memory + 24, sizeof(valueAfter));
+      const auto semaphorePosted =
+          InvokeSysv2(operation("sem_post"), guestAddress + 16, 0);
+      const auto semaphoreWaited =
+          InvokeSysv2(operation("sem_wait"), guestAddress + 16, 0);
+      const auto semaphoreDestroyed =
+          InvokeSysv2(operation("sem_destroy"), guestAddress + 16, 0);
+      result.hle_synchronization_probe_passed =
+          attributeInitialized == 0 && attributeTyped == 0 &&
+          mutexInitialized == 0 && firstLock == 0 && recursiveTryLock == 0 &&
+          firstUnlock == 0 && secondUnlock == 0 && mutexDestroyed == 0 &&
+          conditionInitialized == 0 && conditionSignaled == 0 &&
+          conditionBroadcast == 0 && conditionDestroyed == 0 &&
+          semaphoreInitialized == 0 && initialValue == 0 && valueBefore == 1 &&
+          semaphoreTryWait == 0 && emptyValue == 0 && valueAfter == 0 &&
+          semaphorePosted == 0 && semaphoreWaited == 0 &&
+          semaphoreDestroyed == 0;
+    }
+  }
   auto gate = EvaluateRuntimeGate(result);
   result.runtime_preflight_ready = gate.ready;
   result.runtime_blockers = gate.blockers;
@@ -495,6 +581,9 @@ void RunProbe(Test &test, std::wstring const &executablePath,
       L"hle_directory_enumeration_probe_passed",
       JsonValue::CreateBooleanValue(
           result.hle_directory_enumeration_probe_passed));
+  test.measurements.Insert(
+      L"hle_synchronization_probe_passed",
+      JsonValue::CreateBooleanValue(result.hle_synchronization_probe_passed));
   test.measurements.Insert(L"hle_pointer_probe_return",
                            JsonValue::CreateNumberValue(static_cast<double>(
                                result.hle_pointer_probe_return)));
@@ -632,6 +721,8 @@ void RunProbe(Test &test, std::wstring const &executablePath,
       L", enumeração de diretórios HLE=" +
       (result.hle_directory_enumeration_probe_passed ? L"aprovado"
                                                       : L"pendente") +
+      L", sincronização POSIX HLE=" +
+      (result.hle_synchronization_probe_passed ? L"aprovado" : L"pendente") +
       L", TLS pending=" + std::to_wstring(result.tls_relocations_pending) +
       std::wstring(L". Gate de runtime=") +
       (result.runtime_preflight_ready ? L"pronto" : L"bloqueado") +
