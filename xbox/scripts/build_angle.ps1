@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$angleCommit = 'bec384b13132ec5768cb42cdfe0795a67f8860b5'
+$angleCommit = 'dba7ad242852bfb3775c490cb8c567f234e2a649'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $work = Join-Path $env:RUNNER_TEMP 'shadps4-angle'
 $tools = Join-Path $work 'depot_tools'
@@ -20,6 +20,8 @@ if (-not (Test-Path $gitShim)) {
 }
 git clone --filter=blob:none https://chromium.googlesource.com/angle/angle $source
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao obter ANGLE.' }
+git -C $source fetch --depth 1 origin $angleCommit
+if ($LASTEXITCODE -ne 0) { throw 'Falha ao obter revisão ANGLE fixada.' }
 git -C $source checkout --detach $angleCommit
 if ($LASTEXITCODE -ne 0) { throw 'Commit ANGLE indisponível.' }
 

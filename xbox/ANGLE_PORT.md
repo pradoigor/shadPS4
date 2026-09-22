@@ -6,7 +6,9 @@ sessão `1790118963-6581734-5872` terminou com `-1` sem imagem. O alvo desktop
 do shadPS4 não implementa as 76 funções EGL/OpenGL importadas pelo Apollo.
 
 O ANGLE oficial fornece EGL/OpenGL ES sobre Direct3D 11 e mantém alvo UWP.
-O workflow `xbox-angle-uwp.yml` compila um commit fixo, sem usar o pacote
+O workflow `xbox-angle-uwp.yml` compila o commit
+`dba7ad242852bfb3775c490cb8c567f234e2a649` (linha Chromium 7700,
+SDK Windows 10.0.26100), sem usar o pacote
 `ANGLE.WindowsStore` antigo, e guarda DLLs, bibliotecas, cabeçalhos, licença e
 hashes. A compilação da dependência não a instala no APPX nem declara o
 Piglet implementado.
