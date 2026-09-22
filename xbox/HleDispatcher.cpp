@@ -7,15 +7,90 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
+#include <cstring>
 #include <stdexcept>
 #include <string>
 #include <thread>
-#include <cstring>
 
 namespace Lab {
 namespace {
 
 constexpr std::uint64_t OrbisEnosys = 0x8002004Eull;
+
+struct OrbisTimespec {
+    std::int64_t seconds{};
+    std::int64_t nanoseconds{};
+};
+
+struct OrbisStat {
+    std::uint32_t device{};
+    std::uint32_t inode{};
+    std::uint16_t mode{};
+    std::uint16_t links{};
+    std::uint32_t uid{};
+    std::uint32_t gid{};
+    std::uint32_t specialDevice{};
+    OrbisTimespec accessed{};
+    OrbisTimespec modified{};
+    OrbisTimespec changed{};
+    std::int64_t size{};
+    std::int64_t blocks{};
+    std::uint32_t blockSize{};
+    std::uint32_t flags{};
+    std::uint32_t generation{};
+    std::int32_t spare{};
+    OrbisTimespec created{};
+};
+
+struct OrbisDirentHeader {
+    std::uint32_t fileNumber{};
+    std::uint16_t recordLength{};
+    std::uint8_t type{};
+    std::uint8_t nameLength{};
+};
+
+static_assert(sizeof(OrbisTimespec) == 16);
+static_assert(sizeof(OrbisStat) == 120);
+static_assert(offsetof(OrbisStat, size) == 72);
+static_assert(sizeof(OrbisDirentHeader) == 8);
+
+bool PopulateStat(std::filesystem::path const& path, OrbisStat& output) noexcept {
+    try {
+        std::error_code error;
+        const auto status = std::filesystem::status(path, error);
+        if (error || !std::filesystem::exists(status)) return false;
+        const bool directory = std::filesystem::is_directory(status);
+        std::error_code timeError;
+        const auto fileTime = std::filesystem::last_write_time(path, timeError);
+        if (!timeError) {
+            const auto systemTime = std::chrono::system_clock::now() +
+                                    (fileTime - std::filesystem::file_time_type::clock::now());
+            const auto sinceEpoch = systemTime.time_since_epoch();
+            const auto seconds =
+                std::chrono::duration_cast<std::chrono::seconds>(sinceEpoch);
+            output.modified.seconds = seconds.count();
+            output.modified.nanoseconds =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(sinceEpoch - seconds)
+                    .count();
+        }
+        output.mode = static_cast<std::uint16_t>((directory ? 0040000 : 0100000) | 0777);
+        output.links = 1;
+        output.blockSize = directory ? 65536u : 512u;
+        if (!directory) {
+            const auto size = std::filesystem::file_size(path, error);
+            if (error || size > static_cast<std::uintmax_t>(INT64_MAX)) return false;
+            output.size = static_cast<std::int64_t>(size);
+            output.blocks = static_cast<std::int64_t>((size + 511u) / 512u);
+        } else {
+            output.size = 65536;
+            output.blocks = 128;
+        }
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
 
 std::string BaseNid(std::string_view encoded) {
     const auto separator = encoded.find('#');
@@ -87,6 +162,10 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "unlink") use(&FileUnlink);
     if (name == "chmod") use(&FileChmod);
     if (name == "flock") use(&FileFlock);
+    if (name == "stat") use(&FileStat);
+    if (name == "_fstat") use(&FileFstat);
+    if (name == "ftruncate") use(&FileFtruncate);
+    if (name == "getdents") use(&FileGetdents);
 
     const auto slot = static_cast<std::uint64_t>(entries_.size());
     entries_.push_back(Entry{encoded, nid, implemented, handler, nullptr});
@@ -570,7 +649,22 @@ std::uint64_t HleDispatcher::KernelOpen(HleDispatcher& dispatcher,
             if (!create) return OrbisEacces;
         }
         GuestFile file;
+        file.path = hostPath;
         file.writable = writable;
+        file.directory = std::filesystem::is_directory(hostPath);
+        if ((flags & 0x20000u) != 0 && !file.directory) return OrbisEinval;
+        if (file.directory) {
+            if (writable) return OrbisEacces;
+            for (auto const& entry : std::filesystem::directory_iterator(hostPath)) {
+                const auto name = entry.path().filename().u8string();
+                if (name.size() <= 255)
+                    file.directoryEntries.push_back(
+                        {std::string(name.begin(), name.end()), entry.is_directory()});
+            }
+            const auto descriptor = dispatcher.nextFileDescriptor_++;
+            dispatcher.files_.emplace(descriptor, std::move(file));
+            return static_cast<std::uint64_t>(descriptor);
+        }
         file.stream.open(hostPath, mode);
         if (!file.stream) return OrbisEinval;
         const auto descriptor = dispatcher.nextFileDescriptor_++;
@@ -598,7 +692,7 @@ std::uint64_t HleDispatcher::KernelRead(HleDispatcher& dispatcher,
     constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
     const auto size = static_cast<std::size_t>(frame.gpr[2]);
     auto found = dispatcher.files_.find(static_cast<std::int32_t>(frame.gpr[0]));
-    if (found == dispatcher.files_.end()) return OrbisEbadf;
+    if (found == dispatcher.files_.end() || found->second.directory) return OrbisEbadf;
     auto* output = dispatcher.memory_ ? dispatcher.memory_->TranslateWritable(frame.gpr[1], size)
                                       : nullptr;
     if (size != 0 && !output) return OrbisEfault;
@@ -612,7 +706,9 @@ std::uint64_t HleDispatcher::KernelWrite(HleDispatcher& dispatcher,
     constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
     const auto size = static_cast<std::size_t>(frame.gpr[2]);
     auto found = dispatcher.files_.find(static_cast<std::int32_t>(frame.gpr[0]));
-    if (found == dispatcher.files_.end() || !found->second.writable) return OrbisEbadf;
+    if (found == dispatcher.files_.end() || found->second.directory ||
+        !found->second.writable)
+        return OrbisEbadf;
     auto* input = dispatcher.memory_ ? dispatcher.memory_->Translate(frame.gpr[1], size) : nullptr;
     if (size != 0 && !input) return OrbisEfault;
     found->second.stream.write(static_cast<char const*>(input),
@@ -626,6 +722,11 @@ std::uint64_t HleDispatcher::KernelLseek(HleDispatcher& dispatcher,
     constexpr std::uint64_t OrbisEinval = 0x80020016ull;
     auto found = dispatcher.files_.find(static_cast<std::int32_t>(frame.gpr[0]));
     if (found == dispatcher.files_.end()) return OrbisEbadf;
+    if (found->second.directory) {
+        if (frame.gpr[2] != 0 || frame.gpr[1] != 0) return OrbisEinval;
+        found->second.directoryIndex = 0;
+        return 0;
+    }
     std::ios::seekdir direction;
     if (frame.gpr[2] == 0) direction = std::ios::beg;
     else if (frame.gpr[2] == 1) direction = std::ios::cur;
@@ -646,6 +747,7 @@ std::uint64_t HleDispatcher::KernelFsync(HleDispatcher& dispatcher,
     constexpr std::uint64_t OrbisEbadf = 0x80020009ull;
     auto found = dispatcher.files_.find(static_cast<std::int32_t>(frame.gpr[0]));
     if (found == dispatcher.files_.end()) return OrbisEbadf;
+    if (found->second.directory) return 0;
     found->second.stream.flush();
     return found->second.stream ? 0 : OrbisEbadf;
 }
@@ -745,6 +847,104 @@ std::uint64_t HleDispatcher::FileFlock(HleDispatcher& dispatcher,
                                        GuestCallFrame const& frame) noexcept {
     return dispatcher.files_.contains(static_cast<std::int32_t>(frame.gpr[0])) ? 0
                                                                                : UINT64_MAX;
+}
+
+std::uint64_t HleDispatcher::FileStat(HleDispatcher& dispatcher,
+                                      GuestCallFrame const& frame) noexcept {
+    try {
+        std::string guestPath;
+        if (!dispatcher.ReadGuestString(frame.gpr[0], guestPath)) return UINT64_MAX;
+        std::filesystem::path hostPath;
+        if (!dispatcher.ResolveGuestPath(guestPath, false, hostPath)) return UINT64_MAX;
+        auto* output = dispatcher.memory_
+                           ? static_cast<OrbisStat*>(dispatcher.memory_->TranslateWritable(
+                                 frame.gpr[1], sizeof(OrbisStat)))
+                           : nullptr;
+        if (!output) return UINT64_MAX;
+        OrbisStat value{};
+        if (!PopulateStat(hostPath, value)) return UINT64_MAX;
+        std::memcpy(output, &value, sizeof(value));
+        return 0;
+    } catch (...) {
+        return UINT64_MAX;
+    }
+}
+
+std::uint64_t HleDispatcher::FileFstat(HleDispatcher& dispatcher,
+                                       GuestCallFrame const& frame) noexcept {
+    try {
+        const auto found = dispatcher.files_.find(static_cast<std::int32_t>(frame.gpr[0]));
+        if (found == dispatcher.files_.end()) return UINT64_MAX;
+        auto* output = dispatcher.memory_
+                           ? static_cast<OrbisStat*>(dispatcher.memory_->TranslateWritable(
+                                 frame.gpr[1], sizeof(OrbisStat)))
+                           : nullptr;
+        if (!output) return UINT64_MAX;
+        found->second.stream.flush();
+        OrbisStat value{};
+        if (!PopulateStat(found->second.path, value)) return UINT64_MAX;
+        std::memcpy(output, &value, sizeof(value));
+        return 0;
+    } catch (...) {
+        return UINT64_MAX;
+    }
+}
+
+std::uint64_t HleDispatcher::FileFtruncate(HleDispatcher& dispatcher,
+                                           GuestCallFrame const& frame) noexcept {
+    try {
+        auto found = dispatcher.files_.find(static_cast<std::int32_t>(frame.gpr[0]));
+        const auto length = static_cast<std::int64_t>(frame.gpr[1]);
+        if (found == dispatcher.files_.end() || !found->second.writable || length < 0)
+            return UINT64_MAX;
+        auto& file = found->second;
+        file.stream.flush();
+        file.stream.close();
+        std::error_code error;
+        std::filesystem::resize_file(file.path, static_cast<std::uintmax_t>(length), error);
+        file.stream.open(file.path, std::ios::binary | std::ios::in | std::ios::out);
+        return !error && file.stream ? 0 : UINT64_MAX;
+    } catch (...) {
+        return UINT64_MAX;
+    }
+}
+
+std::uint64_t HleDispatcher::FileGetdents(HleDispatcher& dispatcher,
+                                          GuestCallFrame const& frame) noexcept {
+    try {
+        auto found = dispatcher.files_.find(static_cast<std::int32_t>(frame.gpr[0]));
+        if (found == dispatcher.files_.end() || !found->second.directory)
+            return UINT64_MAX;
+        const auto capacity = static_cast<std::size_t>(frame.gpr[2]);
+        if (capacity < 512) return UINT64_MAX;
+        auto* output = dispatcher.memory_
+                           ? static_cast<std::uint8_t*>(
+                                 dispatcher.memory_->TranslateWritable(frame.gpr[1], capacity))
+                           : nullptr;
+        if (capacity != 0 && !output) return UINT64_MAX;
+        std::size_t written = 0;
+        auto& directory = found->second;
+        while (directory.directoryIndex < directory.directoryEntries.size()) {
+            auto const& entry = directory.directoryEntries[directory.directoryIndex];
+            const auto rawLength = sizeof(OrbisDirentHeader) + entry.name.size() + 1;
+            const auto recordLength = (rawLength + 3u) & ~std::size_t{3u};
+            if (recordLength > capacity - written) break;
+            OrbisDirentHeader header{};
+            header.fileNumber = static_cast<std::uint32_t>(directory.directoryIndex + 1);
+            header.recordLength = static_cast<std::uint16_t>(recordLength);
+            header.type = entry.directory ? 4u : 8u;
+            header.nameLength = static_cast<std::uint8_t>(entry.name.size());
+            std::memcpy(output + written, &header, sizeof(header));
+            std::memcpy(output + written + sizeof(header), entry.name.c_str(),
+                        entry.name.size() + 1);
+            std::memset(output + written + rawLength, 0, recordLength - rawLength);
+            written += recordLength;
+            ++directory.directoryIndex;
+        }
+        return static_cast<std::uint64_t>(written);
+    } catch (...) {
+        return UINT64_MAX;
+    }
 }
 
 } // namespace Lab

@@ -115,6 +115,10 @@ private:
     static std::uint64_t FileUnlink(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t FileChmod(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t FileFlock(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t FileStat(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t FileFstat(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t FileFtruncate(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t FileGetdents(HleDispatcher&, GuestCallFrame const&) noexcept;
 
     bool ReadGuestString(std::uint64_t address, std::string& value,
                          std::size_t limit = 1024) const noexcept;
@@ -126,7 +130,15 @@ private:
     GuestMemory* memory_{};
     std::unordered_map<std::uint32_t, std::vector<std::uint8_t>> registry_;
     struct GuestFile {
+        struct DirectoryEntry {
+            std::string name;
+            bool directory{};
+        };
         std::fstream stream;
+        std::filesystem::path path;
+        std::vector<DirectoryEntry> directoryEntries;
+        std::size_t directoryIndex{};
+        bool directory{};
         bool writable{};
     };
     std::filesystem::path appRoot_;

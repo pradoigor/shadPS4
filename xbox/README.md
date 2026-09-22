@@ -4,7 +4,7 @@ Aplicativo **UWP x64 / C++/WinRT / XAML** para medir a viabilidade de portar
 shadPS4 ao Xbox Series X em Dev Mode. **Ainda não é um emulador PS4 no Xbox.**
 O alvo é independente do CMake e das dependências desktop do núcleo.
 
-A versão **0.42.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
+A versão **0.43.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
 PKG/ELF, keysets FPKG embutidos, importação de chaves personalizadas, extração em
 segundo plano e um probe de execução controlada com auditoria de requisitos runtime,
 relocação e inventário de NIDs HLE. O ELF/SELF selecionado é apenas
@@ -71,6 +71,9 @@ As variantes POSIX de abertura, leitura, escrita, busca, sincronização e fecha
 usam o mesmo VFS. `access`, `mkdir`, `rmdir`, `rename`, `unlink`, `chmod` e `flock`
 foram ligados ao armazenamento confinado; permissões Unix são aceitas como
 compatibilidade sem ampliar as permissões reais do AppContainer.
+`stat` e `_fstat` escrevem o layout Orbis de 120 bytes, `ftruncate` redimensiona
+somente descritores graváveis e `getdents` enumera diretórios em registros Orbis.
+O probe valida tamanho, tipo e nome recebidos pelo mesmo caminho SysV do homebrew.
 O dispatcher também reconhece `sceKernelMprotect`, mas só altera proteção de
 faixas `PF_W` coerentes e rejeita qualquer pedido de execução; isso permite
 exercitar a semântica de proteção sem abrir uma transição para código convidado.

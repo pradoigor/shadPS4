@@ -207,16 +207,16 @@ void RunProbe(Test &test, std::wstring const &executablePath,
         fileSymbols[name] = mapping.substr(0, mapping.size() - suffix.size());
     }
   }
-  if (fileSymbols.size() == 6 && result.guest_memory_writable_bytes >= 256) {
+  if (fileSymbols.size() == 6 && result.guest_memory_writable_bytes >= 1024) {
     std::uint64_t guestAddress = 0;
     for (auto const &segment : result.guest_segments) {
-      if ((segment.flags & 0x2u) != 0 && segment.size >= 256) {
+      if ((segment.flags & 0x2u) != 0 && segment.size >= 1024) {
         guestAddress = guestMemory.RuntimeAddress(segment.address);
         break;
       }
     }
     auto *memory = static_cast<std::uint8_t *>(
-        guestMemory.TranslateWritable(guestAddress, 256));
+        guestMemory.TranslateWritable(guestAddress, 1024));
     if (memory) {
       constexpr char path[] = "/data/shadps4-fs-probe.bin";
       constexpr std::uint64_t pattern = 0x1029384756AABBCCull;
@@ -226,6 +226,17 @@ void RunProbe(Test &test, std::wstring const &executablePath,
       auto thunk = [&](char const *name) {
         return hleDispatcher.AddressFor(fileSymbols.at(name));
       };
+      std::unordered_map<std::string, void *> metadataOperations;
+      for (auto const &name : {"stat", "_fstat", "ftruncate"}) {
+        for (auto const &mapping : result.hle_symbol_mappings) {
+          const auto suffix = std::string("=") + name;
+          if (mapping.size() > suffix.size() &&
+              mapping.compare(mapping.size() - suffix.size(), suffix.size(),
+                              suffix) == 0)
+            metadataOperations[name] = hleDispatcher.AddressFor(
+                mapping.substr(0, mapping.size() - suffix.size()));
+        }
+      }
       const auto descriptor = InvokeSysv3(
           thunk("sceKernelOpen"), guestAddress, 0x2u | 0x200u | 0x400u, 0600);
       const auto wrote = InvokeSysv3(thunk("sceKernelWrite"), descriptor,
@@ -234,6 +245,13 @@ void RunProbe(Test &test, std::wstring const &executablePath,
       const auto sought = InvokeSysv3(thunk("sceKernelLseek"), descriptor, 0, 0);
       const auto read = InvokeSysv3(thunk("sceKernelRead"), descriptor,
                                     guestAddress + 80, sizeof(pattern));
+      auto truncated = UINT64_MAX;
+      auto descriptorStat = UINT64_MAX;
+      if (metadataOperations.size() == 3) {
+        truncated = InvokeSysv2(metadataOperations["ftruncate"], descriptor, 4);
+        descriptorStat = InvokeSysv2(metadataOperations["_fstat"], descriptor,
+                                      guestAddress + 256);
+      }
       const auto closed = InvokeSysv2(thunk("sceKernelClose"), descriptor, 0);
       std::uint64_t restored{};
       std::memcpy(&restored, memory + 80, sizeof(restored));
@@ -242,7 +260,7 @@ void RunProbe(Test &test, std::wstring const &executablePath,
           sought == 0 && read == sizeof(pattern) && closed == 0 && restored == pattern;
       std::unordered_map<std::string, void *> operations;
       for (auto const &name : {"access", "mkdir", "rmdir", "rename", "unlink",
-                               "chmod"}) {
+                               "chmod", "getdents"}) {
         for (auto const &mapping : result.hle_symbol_mappings) {
           const auto suffix = std::string("=") + name;
           if (mapping.size() > suffix.size() &&
@@ -252,13 +270,24 @@ void RunProbe(Test &test, std::wstring const &executablePath,
                 mapping.substr(0, mapping.size() - suffix.size()));
         }
       }
-      if (operations.size() == 6) {
+      if (operations.size() == 7) {
         constexpr char target[] = "/data/shadps4-fs-renamed.bin";
         constexpr char directory[] = "/data/shadps4-fs-directory";
         std::memcpy(memory + 128, target, sizeof(target));
         std::memcpy(memory + 192, directory, sizeof(directory));
         const auto renamed = InvokeSysv2(operations["rename"], guestAddress,
                                          guestAddress + 128);
+        auto pathStat = UINT64_MAX;
+        if (metadataOperations.size() == 3)
+          pathStat = InvokeSysv2(metadataOperations["stat"], guestAddress + 128,
+                                 guestAddress + 384);
+        std::int64_t descriptorSize{};
+        std::int64_t pathSize{};
+        std::memcpy(&descriptorSize, memory + 256 + 72, sizeof(descriptorSize));
+        std::memcpy(&pathSize, memory + 384 + 72, sizeof(pathSize));
+        result.hle_metadata_probe_passed =
+            truncated == 0 && descriptorStat == 0 && pathStat == 0 &&
+            descriptorSize == 4 && pathSize == 4;
         const auto accessed = InvokeSysv2(operations["access"],
                                           guestAddress + 128, 0);
         const auto chmodded = InvokeSysv2(operations["chmod"],
@@ -269,11 +298,34 @@ void RunProbe(Test &test, std::wstring const &executablePath,
             InvokeSysv2(operations["mkdir"], guestAddress + 192, 0700);
         const auto directoryAccessed =
             InvokeSysv2(operations["access"], guestAddress + 192, 0);
+        constexpr char nestedFile[] =
+            "/data/shadps4-fs-directory/item.bin";
+        std::memcpy(memory, nestedFile, sizeof(nestedFile));
+        const auto nestedDescriptor = InvokeSysv3(
+            thunk("sceKernelOpen"), guestAddress, 0x2u | 0x200u | 0x400u, 0600);
+        const auto nestedClosed =
+            InvokeSysv2(thunk("sceKernelClose"), nestedDescriptor, 0);
+        const auto directoryDescriptor = InvokeSysv3(
+            thunk("sceKernelOpen"), guestAddress + 192, 0x20000u, 0);
+        const auto directoryBytes = InvokeSysv3(
+            operations["getdents"], directoryDescriptor, guestAddress + 512, 512);
+        const bool directoryEntryValid =
+            directoryBytes >= 20 && memory[512 + 6] == 8 &&
+            memory[512 + 7] == 8 &&
+            std::memcmp(memory + 512 + 8, "item.bin", 8) == 0;
+        const auto directoryClosed =
+            InvokeSysv2(thunk("sceKernelClose"), directoryDescriptor, 0);
+        const auto nestedUnlinked =
+            InvokeSysv2(operations["unlink"], guestAddress, 0);
         const auto removed =
             InvokeSysv2(operations["rmdir"], guestAddress + 192, 0);
         result.hle_directory_probe_passed =
             renamed == 0 && accessed == 0 && chmodded == 0 && unlinked == 0 &&
             made == 0 && directoryAccessed == 0 && removed == 0;
+        result.hle_directory_enumeration_probe_passed =
+            nestedDescriptor < 0x80000000ull && nestedClosed == 0 &&
+            directoryDescriptor < 0x80000000ull && directoryEntryValid &&
+            directoryClosed == 0 && nestedUnlinked == 0;
       }
     }
   }
@@ -436,6 +488,13 @@ void RunProbe(Test &test, std::wstring const &executablePath,
   test.measurements.Insert(
       L"hle_directory_probe_passed",
       JsonValue::CreateBooleanValue(result.hle_directory_probe_passed));
+  test.measurements.Insert(
+      L"hle_metadata_probe_passed",
+      JsonValue::CreateBooleanValue(result.hle_metadata_probe_passed));
+  test.measurements.Insert(
+      L"hle_directory_enumeration_probe_passed",
+      JsonValue::CreateBooleanValue(
+          result.hle_directory_enumeration_probe_passed));
   test.measurements.Insert(L"hle_pointer_probe_return",
                            JsonValue::CreateNumberValue(static_cast<double>(
                                result.hle_pointer_probe_return)));
@@ -568,6 +627,11 @@ void RunProbe(Test &test, std::wstring const &executablePath,
       (result.hle_filesystem_probe_passed ? L"aprovado" : L"pendente") +
       L", diretórios e manutenção HLE=" +
       (result.hle_directory_probe_passed ? L"aprovado" : L"pendente") +
+      L", metadados e truncamento HLE=" +
+      (result.hle_metadata_probe_passed ? L"aprovado" : L"pendente") +
+      L", enumeração de diretórios HLE=" +
+      (result.hle_directory_enumeration_probe_passed ? L"aprovado"
+                                                      : L"pendente") +
       L", TLS pending=" + std::to_wstring(result.tls_relocations_pending) +
       std::wstring(L". Gate de runtime=") +
       (result.runtime_preflight_ready ? L"pronto" : L"bloqueado") +

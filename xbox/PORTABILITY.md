@@ -24,7 +24,7 @@ que o carregador tenha uma ponte ABI SysV compatível, endereços HLE reais e um
 renderer UWP para Piglet. O aplicativo deve manter essa barreira e nunca saltar
 para o `e_entry` enquanto algum desses requisitos faltar.
 
-A build `0.42.0.0` corrige o alocador de thunks SysV→Windows para preservar os
+A build `0.43.0.0` corrige o alocador de thunks SysV→Windows para preservar os
 seis registradores inteiros, a pilha convidada e os registradores XMM em uma área
 separada do shadow space exigido pelo ABI Windows. Um chamador de máquina gerado
 pelo projeto injeta padrões distintos em registradores e argumentos de pilha e
@@ -66,6 +66,10 @@ garantida pela rejeição explícita de componentes absolutos, `..` e barras inv
 As aliases POSIX usadas pelo Apollo agora compartilham os descritores do VFS.
 Operações de existência, criação/remoção de diretório, renomeação, remoção,
 permissão compatível e lock validam os mesmos limites; o probe cobre o ciclo completo.
+`stat`, `_fstat` e `ftruncate` completam o bloco de metadados básicos com o layout
+binário Orbis. Diretórios abertos mantêm estado próprio e `getdents` devolve
+registros tipados sem expor caminhos do host. O probe da versão 0.43 valida essas
+operações no armazenamento real do AppContainer.
 O handler `sceKernelMprotect` foi acrescentado para a camada de memória: ele
 aceita somente proteções sem execução dentro das faixas `PF_W` coerentes e
 retorna erro para `PROT_EXEC` ou endereços fora dessas faixas. A mudança é
