@@ -5,6 +5,7 @@
 #include "core/platform_memory.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -20,6 +21,7 @@ std::filesystem::path gCrashStateFile;
 std::uint64_t gGuestHostBase{};
 std::uint64_t gGuestVirtualBase{};
 std::uint64_t gGuestImageSize{};
+std::atomic_bool gGuestCrashRecorded{};
 std::uint32_t gGuestTlsSlot{UINT32_MAX};
 std::uint64_t gExpectedTcb{};
 std::uint64_t UnixSeconds() noexcept;
@@ -69,12 +71,30 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
   if (!exception || !exception->ExceptionRecord || !exception->ContextRecord ||
       gCrashStateFile.empty())
     return EXCEPTION_EXECUTE_HANDLER;
-  char payload[896]{};
+  // A vectored handler sees the original fault. The later SEH filter must not
+  // replace that evidence with a second exception during unwinding.
+  if (gGuestCrashRecorded.exchange(true))
+    return EXCEPTION_EXECUTE_HANDLER;
+  char payload[1200]{};
   const auto *record = exception->ExceptionRecord;
   const auto fault = record->NumberParameters > 1
                          ? record->ExceptionInformation[1]
                          : 0;
   const auto rip = static_cast<std::uint64_t>(exception->ContextRecord->Rip);
+  char instructionBytes[33]{};
+  if (rip >= gGuestHostBase && rip - gGuestHostBase < gGuestImageSize) {
+    const auto remaining = gGuestImageSize - (rip - gGuestHostBase);
+    const auto count = static_cast<std::size_t>((std::min<std::uint64_t>)(16, remaining));
+    auto const* instruction = reinterpret_cast<std::uint8_t const*>(rip);
+    constexpr char digits[] = "0123456789abcdef";
+    for (std::size_t index = 0; index < count; ++index) {
+      instructionBytes[index * 2] = digits[instruction[index] >> 4];
+      instructionBytes[index * 2 + 1] = digits[instruction[index] & 15];
+    }
+  }
+  MEMORY_BASIC_INFORMATION tcbMemory{};
+  VirtualQueryFromApp(reinterpret_cast<void const*>(exception->ContextRecord->Rcx),
+                      &tcbMemory, sizeof(tcbMemory));
   const auto tlsOffset = gGuestTlsSlot < 64
                              ? 0x1480u + gGuestTlsSlot * sizeof(void*)
                              : 0u;
@@ -96,6 +116,9 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
       "\"exception_address\":%llu,\"rip\":%llu,\"rsp\":%llu,"
       "\"rcx\":%llu,\"tls_slot\":%lu,\"expected_tcb\":%llu,"
       "\"observed_tcb\":%llu,"
+      "\"rax\":%llu,\"rdx\":%llu,\"rdi\":%llu,"
+      "\"instruction_bytes\":\"%s\",\"tcb_page_state\":%lu,"
+      "\"tcb_page_protection\":%lu,"
       "\"exception_parameters\":%lu,\"access_kind\":%llu,"
       "\"fault_address\":%llu,\"guest_virtual_rip\":%llu,"
       "\"guest_virtual_fault\":%llu,\"timestamp\":%llu}",
@@ -108,6 +131,12 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
       static_cast<unsigned long>(gGuestTlsSlot),
       static_cast<unsigned long long>(gExpectedTcb),
       static_cast<unsigned long long>(observedTcb),
+      static_cast<unsigned long long>(exception->ContextRecord->Rax),
+      static_cast<unsigned long long>(exception->ContextRecord->Rdx),
+      static_cast<unsigned long long>(exception->ContextRecord->Rdi),
+      instructionBytes,
+      static_cast<unsigned long>(tcbMemory.State),
+      static_cast<unsigned long>(tcbMemory.Protect),
       static_cast<unsigned long>(record->NumberParameters),
       static_cast<unsigned long long>(accessKind),
       static_cast<unsigned long long>(fault),
@@ -121,7 +150,7 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
                               FILE_SHARE_READ, CREATE_ALWAYS, &parameters);
     if (file != INVALID_HANDLE_VALUE) {
       DWORD written{};
-      WriteFile(file, payload, static_cast<DWORD>(length < 895 ? length : 895),
+      WriteFile(file, payload, static_cast<DWORD>(length < 1199 ? length : 1199),
                 &written, nullptr);
       FlushFileBuffers(file);
       CloseHandle(file);
@@ -309,6 +338,7 @@ void HomebrewRuntime::RunEntry() noexcept {
     running_.store(false);
     return;
   }
+  gGuestCrashRecorded.store(false);
   using AddVectoredHandler = PVOID(WINAPI *)(
       ULONG, PVECTORED_EXCEPTION_HANDLER);
   using RemoveVectoredHandler = ULONG(WINAPI *)(PVOID);
