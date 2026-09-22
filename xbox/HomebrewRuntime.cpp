@@ -14,6 +14,9 @@ namespace Lab {
 namespace {
 
 std::filesystem::path gCrashStateFile;
+std::uint64_t gGuestHostBase{};
+std::uint64_t gGuestVirtualBase{};
+std::uint64_t gGuestImageSize{};
 std::uint64_t UnixSeconds() noexcept;
 
 int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
@@ -25,17 +28,29 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
   const auto fault = record->NumberParameters > 1
                          ? record->ExceptionInformation[1]
                          : 0;
+  const auto rip = static_cast<std::uint64_t>(exception->ContextRecord->Rip);
+  const auto guestRip = rip >= gGuestHostBase &&
+                                rip - gGuestHostBase < gGuestImageSize
+                            ? gGuestVirtualBase + (rip - gGuestHostBase)
+                            : 0;
+  const auto guestFault = fault >= gGuestHostBase &&
+                                  fault - gGuestHostBase < gGuestImageSize
+                              ? gGuestVirtualBase + (fault - gGuestHostBase)
+                              : 0;
   const int length = std::snprintf(
       payload, sizeof(payload),
       "{\"stage\":\"guest_exception\",\"exception_code\":%lu,"
       "\"exception_address\":%llu,\"rip\":%llu,\"rsp\":%llu,"
-      "\"fault_address\":%llu,\"timestamp\":%llu}",
+      "\"fault_address\":%llu,\"guest_virtual_rip\":%llu,"
+      "\"guest_virtual_fault\":%llu,\"timestamp\":%llu}",
       static_cast<unsigned long>(record->ExceptionCode),
       static_cast<unsigned long long>(
           reinterpret_cast<std::uintptr_t>(record->ExceptionAddress)),
-      static_cast<unsigned long long>(exception->ContextRecord->Rip),
+      static_cast<unsigned long long>(rip),
       static_cast<unsigned long long>(exception->ContextRecord->Rsp),
       static_cast<unsigned long long>(fault),
+      static_cast<unsigned long long>(guestRip),
+      static_cast<unsigned long long>(guestFault),
       static_cast<unsigned long long>(UnixSeconds()));
   if (length > 0) {
     CREATEFILE2_EXTENDED_PARAMETERS parameters{sizeof(parameters)};
@@ -53,8 +68,28 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
   return EXCEPTION_EXECUTE_HANDLER;
 }
 
-// Keep SEH in a function without C++ objects that require unwinding. UWP does
-// not expose vectored exception registration, but MSVC SEH remains available.
+LONG CALLBACK RecordGuestVectoredException(EXCEPTION_POINTERS *exception) noexcept {
+  if (!exception || !exception->ExceptionRecord)
+    return EXCEPTION_CONTINUE_SEARCH;
+  switch (exception->ExceptionRecord->ExceptionCode) {
+  case EXCEPTION_ACCESS_VIOLATION:
+  case EXCEPTION_ARRAY_BOUNDS_EXCEEDED:
+  case EXCEPTION_DATATYPE_MISALIGNMENT:
+  case EXCEPTION_ILLEGAL_INSTRUCTION:
+  case EXCEPTION_IN_PAGE_ERROR:
+  case EXCEPTION_INT_DIVIDE_BY_ZERO:
+  case EXCEPTION_STACK_OVERFLOW:
+    RecordGuestException(exception);
+    break;
+  default:
+    break;
+  }
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
+// Keep SEH in a function without C++ objects that require unwinding. The
+// vectored handler records faults before Windows attempts to unwind guest code;
+// this wrapper still handles faults that can cross the generated launcher.
 std::uint64_t InvokeGuestProtected(void *entry, std::uint64_t argument0,
                                    bool *crashed, bool *exited) noexcept {
   __try {
@@ -154,6 +189,9 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
   params_.argc = 1;
   params_.argv[0] = guestPath_.c_str();
   params_.entry_addr = entry;
+  gGuestHostBase = memory_->RuntimeAddress(load_.min_virtual_address);
+  gGuestVirtualBase = load_.min_virtual_address;
+  gGuestImageSize = load_.private_image.size();
   Record("ready", "Imagem real relocada; iniciando o ponto de entrada.");
   gCrashStateFile = stateFile_;
   running_.store(true);
@@ -162,6 +200,8 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
 
 void HomebrewRuntime::RunEntry() noexcept {
   Record("entry_started", "Controle transferido ao e_entry do homebrew.");
+  auto *vectoredHandler = AddVectoredExceptionHandler(
+      1, &RecordGuestVectoredException);
   try {
     bool crashed = false;
     bool exited = false;
@@ -178,6 +218,8 @@ void HomebrewRuntime::RunEntry() noexcept {
   } catch (...) {
     Record("host_exception", "Exceção desconhecida durante a execução.");
   }
+  if (vectoredHandler)
+    RemoveVectoredExceptionHandler(vectoredHandler);
   running_.store(false);
 }
 
