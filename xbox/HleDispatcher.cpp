@@ -18,6 +18,7 @@ namespace {
 
 constexpr std::uint64_t OrbisEnosys = 0x8002004Eull;
 thread_local std::uint64_t CurrentGuestThreadId = 1;
+thread_local std::int32_t GuestPosixErrno = 0;
 thread_local std::unordered_map<std::uint32_t, std::uint64_t> GuestSpecificValues;
 struct GuestRwlockOwnership {
     bool write{};
@@ -210,6 +211,26 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "pthread_rwlock_rdlock") use(&PthreadRwlockReadLock);
     if (name == "pthread_rwlock_wrlock") use(&PthreadRwlockWriteLock);
     if (name == "pthread_rwlock_unlock") use(&PthreadRwlockUnlock);
+    if (name == "__error") use(&KernelErrorPointer);
+    if (name == "sysconf") use(&KernelSysconf);
+    if (name == "sceKernelGetFsSandboxRandomWord") use(&KernelSandboxWord);
+    if (name == "_nanosleep") use(&KernelNanosleep);
+    if (name == "sceAudioOutOpen" || name == "scePadOpen") use(&GenericHandle);
+    if (name == "setuid" || name == "madvise" || name == "fchmod" ||
+        name == "sceSysmoduleLoadModule" ||
+        name == "sceSysmoduleLoadModuleInternal" ||
+        name == "sceSysmoduleUnloadModuleInternal" ||
+        name == "sceCommonDialogInitialize" ||
+        name == "sceAudioOutInit" || name == "sceAudioOutClose" ||
+        name == "sceAudioOutOutput" || name == "scePadInit" ||
+        name == "scePadClose" || name == "sceUserServiceGetRegisteredUserIdList" ||
+        name == "sceUserServiceGetNpAccountId" ||
+        name == "sceSystemServiceParamGetString" ||
+        name == "sceKernelSync" || name == "pthread_setcancelstate" ||
+        name == "pthread_setcanceltype" ||
+        name == "__pthread_cleanup_push_imp" ||
+        name == "__pthread_cleanup_pop_imp" ||
+        name == "pthread_set_name_np") use(&GenericSuccess);
 
     const auto slot = static_cast<std::uint64_t>(entries_.size());
     entries_.push_back(Entry{encoded, nid, implemented, handler, nullptr});
@@ -249,6 +270,13 @@ void HleDispatcher::ConfigureFileSystem(std::filesystem::path appRoot,
     std::filesystem::create_directories(dataRoot_);
 }
 
+void HleDispatcher::ConfigureTrace(std::filesystem::path path) {
+    tracePath_ = std::move(path);
+    traceHistoryPath_ = tracePath_.parent_path() / L"homebrew-hle-trace.jsonl";
+    std::error_code ignored;
+    std::filesystem::remove(traceHistoryPath_, ignored);
+}
+
 std::size_t HleDispatcher::implementedCount() const noexcept {
     return static_cast<std::size_t>(std::count_if(entries_.begin(), entries_.end(),
         [](auto const& entry) { return entry.implemented; }));
@@ -274,6 +302,14 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
                   << "\",\"implemented\":" << (entry.implemented ? "true" : "false")
                   << "}";
             trace.flush();
+            std::ofstream history(self->traceHistoryPath_,
+                                  std::ios::binary | std::ios::app);
+            history << "{\"sequence\":" << self->callSequence_
+                    << ",\"symbol\":\"" << entry.encoded
+                    << "\",\"nid\":\"" << entry.nid
+                    << "\",\"implemented\":"
+                    << (entry.implemented ? "true" : "false") << "}\n";
+            history.flush();
         } catch (...) {
         }
     }
@@ -282,6 +318,67 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
 
 std::uint64_t HleDispatcher::Unimplemented(HleDispatcher&, GuestCallFrame const&) noexcept {
     return OrbisEnosys;
+}
+
+std::uint64_t HleDispatcher::KernelErrorPointer(HleDispatcher&,
+                                                 GuestCallFrame const&) noexcept {
+    return reinterpret_cast<std::uint64_t>(&GuestPosixErrno);
+}
+
+std::uint64_t HleDispatcher::GenericSuccess(HleDispatcher&,
+                                             GuestCallFrame const&) noexcept {
+    return 0;
+}
+
+std::uint64_t HleDispatcher::GenericHandle(HleDispatcher&,
+                                            GuestCallFrame const&) noexcept {
+    return 1;
+}
+
+std::uint64_t HleDispatcher::KernelSysconf(HleDispatcher&,
+                                            GuestCallFrame const& frame) noexcept {
+    switch (static_cast<std::uint32_t>(frame.gpr[0])) {
+    case 0: return 0x20000;
+    case 1: return 0x588bc000;
+    case 2: return 0x64;
+    case 3: return 0x20;
+    case 4: return 0x644;
+    case 5: return static_cast<std::uint64_t>(-1ll);
+    case 26: return 0x7fffffff;
+    case 47: return 0x4000;
+    case 85: return 4;
+    case 86: return 128;
+    case 93: return 0x4000;
+    case 94: return 2048;
+    default: return 0;
+    }
+}
+
+std::uint64_t HleDispatcher::KernelSandboxWord(HleDispatcher&,
+                                                GuestCallFrame const&) noexcept {
+    static constexpr char Sandbox[] = "sys";
+    return reinterpret_cast<std::uint64_t>(Sandbox);
+}
+
+std::uint64_t HleDispatcher::KernelNanosleep(HleDispatcher& self,
+                                              GuestCallFrame const& frame) noexcept {
+    struct Timespec { std::int64_t seconds; std::int64_t nanoseconds; };
+    auto const* request = static_cast<Timespec const*>(
+        self.memory_ ? self.memory_->Translate(frame.gpr[0], sizeof(Timespec)) : nullptr);
+    if (!request || request->seconds < 0 || request->nanoseconds < 0 ||
+        request->nanoseconds >= 1'000'000'000) {
+        GuestPosixErrno = 22;
+        return static_cast<std::uint64_t>(-1ll);
+    }
+    auto duration = std::chrono::seconds((std::min<std::int64_t>)(request->seconds, 2)) +
+                    std::chrono::nanoseconds(request->nanoseconds);
+    std::this_thread::sleep_for(duration);
+    if (frame.gpr[1] && self.memory_) {
+        if (auto* remaining = static_cast<Timespec*>(
+                self.memory_->TranslateWritable(frame.gpr[1], sizeof(Timespec))))
+            *remaining = {};
+    }
+    return 0;
 }
 
 std::uint64_t HleDispatcher::KernelUsleep(HleDispatcher&, GuestCallFrame const& frame) noexcept {

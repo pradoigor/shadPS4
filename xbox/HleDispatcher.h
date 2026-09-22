@@ -54,7 +54,7 @@ public:
     void AttachGuestMemory(GuestMemory* memory) noexcept { memory_ = memory; }
     void ConfigureFileSystem(std::filesystem::path appRoot,
                              std::filesystem::path dataRoot);
-    void ConfigureTrace(std::filesystem::path path) { tracePath_ = std::move(path); }
+    void ConfigureTrace(std::filesystem::path path);
 
     std::size_t implementedCount() const noexcept;
     std::size_t unresolvedCount() const noexcept;
@@ -71,6 +71,12 @@ private:
     static std::uint64_t Dispatch(void* context, std::uint64_t slot,
                                   GuestCallFrame const* frame, void* guestStack) noexcept;
     static std::uint64_t Unimplemented(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelErrorPointer(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t GenericSuccess(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t GenericHandle(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelSysconf(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelSandboxWord(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelNanosleep(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelUsleep(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelGetUpdVersion(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelGetLowerLimitUpdVersion(HleDispatcher&, GuestCallFrame const&) noexcept;
@@ -185,6 +191,7 @@ private:
     std::unordered_map<std::int32_t, GuestFile> files_;
     std::int32_t nextFileDescriptor_{3};
     std::filesystem::path tracePath_;
+    std::filesystem::path traceHistoryPath_;
     std::uint64_t callSequence_{};
     struct GuestMutex {
         void lock() {
