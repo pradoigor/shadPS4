@@ -127,6 +127,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "getpid") handler = &KernelGetPid;
     if (name == "geteuid") handler = &KernelGetEuid;
     if (name == "sched_yield") use(&KernelSchedYield);
+    if (name == "_exit") use(&GenericSuccess);
     if (name == "pthread_self") use(&KernelThreadSelf);
     if (name == "eglGetError") handler = &EglGetError;
     if (name == "eglQueryAPI") handler = &EglQueryApi;
@@ -370,6 +371,8 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
     writeTrace("enter", 0, false);
     const auto result = entry.handler ? entry.handler(*self, *frame) : OrbisEnosys;
     writeTrace("return", result, true);
+    if (entry.nid == "6Z83sYWFlA8")
+        ExitGuestFromHle(static_cast<std::int32_t>(frame->gpr[0]));
     return result;
 }
 

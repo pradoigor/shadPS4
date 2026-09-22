@@ -4,13 +4,15 @@ Aplicativo **UWP x64 / C++/WinRT / XAML** para medir a viabilidade de portar
 shadPS4 ao Xbox Series X em Dev Mode. **Ainda não é um emulador PS4 no Xbox.**
 O alvo é independente do CMake e das dependências desktop do núcleo.
 
-A versão **0.60.0.0** inclui biblioteca horizontal inspirada no PS4, importação e
+A versão **0.61.0.0** inclui biblioteca horizontal inspirada no PS4, importação e
 extração de PKG/ELF, keysets FPKG embutidos e duas ações distintas. **Executar
 probe controlado** valida o arquivo selecionado e executa apenas um ELF mínimo
 gerado pelo projeto. **Iniciar homebrew** mapeia o `eboot.bin` extraído, aplica
 relocações, liga imports HLE e transfere controle ao `e_entry` real. Essa segunda
-ação é experimental: o Apollo ainda fecha durante a inicialização e não chegou à
-interface. O arquivo original permanece intocado.
+ação é experimental: o Apollo chega à criação do dispositivo gráfico, mas o
+carregamento de módulos e o renderer Piglet ainda não estão portados. O pedido
+de `_exit` agora encerra somente o convidado e registra o código de saída na
+interface e no relatório. O arquivo original permanece intocado.
 
 O diagnóstico registra segmentos, TLS, relocações, imports e o estado da ponte
 SysV/Windows. O runtime guarda a primeira exceção, registradores, instrução,

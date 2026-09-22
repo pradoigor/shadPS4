@@ -61,6 +61,7 @@ struct App : ApplicationT<App> {
     std::wstring selectedLoaderPath;
     std::shared_ptr<Lab::InstallProgress> extraction;
     std::unique_ptr<Lab::HomebrewRuntime> homebrew;
+    bool homebrewCompletionShown{};
     bool importing{}, listing{};
     Windows::System::Display::DisplayRequest displayRequest{nullptr};
 
@@ -154,6 +155,7 @@ struct App : ApplicationT<App> {
         }
         try {
             homebrew = std::make_unique<Lab::HomebrewRuntime>();
+            homebrewCompletionShown = false;
             homebrew->Start(std::filesystem::path(selectedLoaderPath),
                             std::filesystem::path(report->directory));
             libraryStatus.Text(L"Homebrew em execução. A saída gráfica PS4 ainda não está conectada ao Xbox; acompanhe o diagnóstico exportado.");
@@ -448,6 +450,20 @@ struct App : ApplicationT<App> {
                     Find<ProgressBar>(L"InstallProgress").Value(extraction->percent.load());
                     libraryStatus.Text(L"Extraindo · " + std::to_wstring(extraction->files.load()) + L" arquivos · " +
                         std::to_wstring(extraction->bytes.load() / (1024 * 1024)) + L" MiB · mantenha o aplicativo aberto");
+                }
+                if (homebrew && !homebrew->running() && !homebrewCompletionShown) {
+                    homebrewCompletionShown = true;
+                    auto statePath = std::filesystem::path(report->directory) / L"homebrew-runtime.json";
+                    try {
+                        std::ifstream input(statePath, std::ios::binary);
+                        std::string raw{std::istreambuf_iterator<char>(input), {}};
+                        auto state = Windows::Data::Json::JsonObject::Parse(to_hstring(raw));
+                        libraryStatus.Text(L"Homebrew encerrado: " + std::wstring(state.GetNamedString(L"detail")) +
+                                           L" Exporte o relatório para análise.");
+                    } catch (...) {
+                        libraryStatus.Text(L"Homebrew encerrado. Exporte o relatório para análise.");
+                    }
+                    Find<Button>(L"LaunchContent").IsEnabled(!selectedLoaderPath.empty());
                 }
             });
             timer.Start();

@@ -16,6 +16,7 @@ constexpr std::uint32_t FrameSize = 0xE8;
 constexpr std::uint8_t WindowsShadowSpace = 0x20;
 thread_local std::jmp_buf GuestExitContext;
 thread_local bool GuestExitContextActive = false;
+thread_local std::int32_t GuestExitStatus = 0;
 
 void GuestProgramExit() noexcept {
   if (GuestExitContextActive)
@@ -101,6 +102,11 @@ std::uint64_t ValidateDispatch(void *, std::uint64_t slot,
 }
 
 } // namespace
+
+void ExitGuestFromHle(std::int32_t status) noexcept {
+  GuestExitStatus = status;
+  GuestProgramExit();
+}
 
 SysvThunkArena::~SysvThunkArena() {
   for (auto *page : pages_)
@@ -487,12 +493,14 @@ std::uint64_t InvokeGuestEntry(void *entry, std::uint64_t entryParams,
   }
 
   *exited = false;
+  GuestExitStatus = 0;
   std::uint64_t result{};
   if (setjmp(GuestExitContext) == 0) {
     GuestExitContextActive = true;
     result = reinterpret_cast<std::uint64_t (*)()>(launcher)();
   } else {
     *exited = true;
+    result = static_cast<std::uint64_t>(static_cast<std::int64_t>(GuestExitStatus));
   }
   GuestExitContextActive = false;
   Core::PlatformMemory::Free(GetCurrentProcess(), launcher, 0, MEM_RELEASE);

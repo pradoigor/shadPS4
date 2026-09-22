@@ -535,7 +535,9 @@ void HomebrewRuntime::RunEntry() noexcept {
         reinterpret_cast<void *>(params_.entry_addr),
         reinterpret_cast<std::uint64_t>(&params_), &crashed, &exited);
     if (exited)
-      Record("entry_exited", "O runtime do homebrew solicitou encerramento controlado.");
+      Record("entry_exited", "O homebrew encerrou com código " +
+                                 std::to_string(static_cast<std::int64_t>(value)) +
+                                 ". O vídeo PS4 ainda não está conectado ao Xbox.");
     else if (!crashed)
       Record("entry_returned", "O e_entry retornou ao host com código " +
                                    std::to_string(value) + ".");
