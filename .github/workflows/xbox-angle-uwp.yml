@@ -1,6 +1,9 @@
 name: Xbox ANGLE UWP dependency
 on:
   workflow_dispatch:
+  push:
+    branches: [xbox-uwp]
+    paths: ['.github/workflows/xbox-angle-uwp.yml', 'xbox/scripts/build_angle.ps1']
 permissions:
   contents: read
 jobs:
