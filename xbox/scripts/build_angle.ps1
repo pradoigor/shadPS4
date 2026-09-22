@@ -36,6 +36,7 @@ target_os = "winuwp"
 target_cpu = "x64"
 is_component_build = false
 is_clang = false
+use_custom_libcxx = false
 is_debug = false
 angle_enable_d3d11 = true
 angle_enable_vulkan = false
