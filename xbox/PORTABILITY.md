@@ -9,6 +9,23 @@ de requisitos runtime e execução de um ELF mínimo gerado pelo próprio projet
 
 ## Marco de execução do Apollo
 
+Na build `0.62.0.0` (`824265f7`), o `eboot.bin` real chegou ao `e_entry`,
+registrou `INFO: PS4_CreateDevice` e encerrou de forma controlada com código
+`-1`. A chamada `_exit` não encerrou o aplicativo UWP. O traço da sessão
+`1790118963-6581734-5872` mostra `sceKernelLoadStartModule` e
+`scePigletSetConfigurationVSH` retornando `ENOSYS` antes da saída. Não houve
+imagem PS4; esse resultado comprova a execução inicial da CPU, não a
+compatibilidade gráfica.
+
+O Apollo usa `libScePigletv2VSH` (EGL/OpenGL). O renderizador existente no
+núcleo desktop é Vulkan para o caminho AMD GNM; não implementa Piglet. Portanto,
+o porte do renderizador GNM, necessário para jogos que usam esse caminho, não
+resolverá por si só a inicialização gráfica do Apollo. O trabalho gráfico deve
+seguir duas frentes explícitas: backend UWP para o caminho GNM do núcleo e
+implementação separada das chamadas Piglet usadas por homebrews como Apollo.
+Não tratar `ENOSYS` desses imports como sucesso: isso ocultaria o bloqueio e
+poderia fazer o convidado usar objetos gráficos inexistentes.
+
 O relatório do Apollo na build `0.14.1.0` confirmou 265 relocações de símbolo
 válidas, 265 NIDs conhecidos pelo registro AeroLib, zero NIDs desconhecidos,
 8.005 relocações suportadas, zero alvos fora dos segmentos e nenhuma pendência
@@ -19,10 +36,10 @@ O inventário delimitou o primeiro porte: 131 imports de `libkernel`, 76 funçõ
 EGL/OpenGL de `libScePigletv2VSH`, 7 funções FreeType, 5 de `libSceRegMgr` e os
 serviços de áudio, controle, usuário, sistema, rede, diálogos e salvamento. O
 registro de NIDs não é uma implementação: 107 desses símbolos ainda não têm
-registro `LIB_FUNCTION` no núcleo desktop. A execução permanece bloqueada até
-que o carregador tenha uma ponte ABI SysV compatível, endereços HLE reais e um
-renderer UWP para Piglet. O aplicativo deve manter essa barreira e nunca saltar
-para o `e_entry` enquanto algum desses requisitos faltar.
+registro `LIB_FUNCTION` no núcleo desktop. A ponte ABI SysV e o carregamento
+experimental de `e_entry` já foram exercitados; os imports ainda não portados
+retornam `ENOSYS`. A ausência do renderer UWP para Piglet impede que esse
+carregamento experimental exiba a interface do Apollo.
 
 A build `0.46.0.0` corrige o alocador de thunks SysV→Windows para preservar os
 seis registradores inteiros, a pilha convidada e os registradores XMM em uma área
