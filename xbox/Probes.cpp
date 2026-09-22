@@ -653,6 +653,9 @@ void RunProbe(Test &test, std::wstring const &executablePath,
       L"pthread_lifecycle_passed",
       JsonValue::CreateBooleanValue(execution.pthread_lifecycle_passed));
   test.measurements.Insert(
+      L"pthread_tls_once_rwlock_passed",
+      JsonValue::CreateBooleanValue(execution.pthread_tls_once_rwlock_passed));
+  test.measurements.Insert(
       L"guest_thread_returned_value",
       JsonValue::CreateNumberValue(
           static_cast<double>(execution.guest_thread_returned_value)));

@@ -120,6 +120,7 @@ struct GeneratedExecutionResult {
   bool sysv_abi_passed{};
   bool guest_thread_abi_passed{};
   bool pthread_lifecycle_passed{};
+  bool pthread_tls_once_rwlock_passed{};
   int returned_value{};
   std::uint64_t guest_thread_returned_value{};
   std::uint64_t hle_thunk_returned_value{};

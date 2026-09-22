@@ -18,6 +18,13 @@ namespace {
 
 constexpr std::uint64_t OrbisEnosys = 0x8002004Eull;
 thread_local std::uint64_t CurrentGuestThreadId = 1;
+thread_local std::unordered_map<std::uint32_t, std::uint64_t> GuestSpecificValues;
+struct GuestRwlockOwnership {
+    bool write{};
+    std::uint32_t count{};
+};
+thread_local std::unordered_map<std::uint64_t, GuestRwlockOwnership>
+    GuestRwlockOwnerships;
 
 struct OrbisTimespec {
     std::int64_t seconds{};
@@ -196,6 +203,13 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "pthread_create") use(&PthreadCreate);
     if (name == "pthread_join") use(&PthreadJoin);
     if (name == "pthread_detach") use(&PthreadDetach);
+    if (name == "pthread_key_create") use(&PthreadKeyCreate);
+    if (name == "pthread_getspecific") use(&PthreadGetSpecific);
+    if (name == "pthread_setspecific") use(&PthreadSetSpecific);
+    if (name == "pthread_once") use(&PthreadOnce);
+    if (name == "pthread_rwlock_rdlock") use(&PthreadRwlockReadLock);
+    if (name == "pthread_rwlock_wrlock") use(&PthreadRwlockWriteLock);
+    if (name == "pthread_rwlock_unlock") use(&PthreadRwlockUnlock);
 
     const auto slot = static_cast<std::uint64_t>(entries_.size());
     entries_.push_back(Entry{encoded, nid, implemented, handler, nullptr});
@@ -1441,6 +1455,178 @@ std::uint64_t HleDispatcher::PthreadDetach(
     if (found == dispatcher.threads_.end() || found->second->detached) return 22;
     found->second->detached = true;
     return 0;
+}
+
+std::uint64_t HleDispatcher::PthreadKeyCreate(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto* output = dispatcher.memory_
+                       ? static_cast<std::uint32_t*>(dispatcher.memory_->TranslateWritable(
+                             frame.gpr[0], sizeof(std::uint32_t)))
+                       : nullptr;
+    if (!output) return 22;
+    if (frame.gpr[1] != 0 &&
+        (!dispatcher.memory_ || !dispatcher.memory_->IsExecutable(frame.gpr[1])))
+        return 22;
+    std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+    if (dispatcher.nextKey_ == UINT32_MAX) return 11;
+    const auto key = dispatcher.nextKey_++;
+    dispatcher.keys_[key] = GuestKey{frame.gpr[1]};
+    *output = key;
+    return 0;
+}
+
+std::uint64_t HleDispatcher::PthreadGetSpecific(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    {
+        std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        if (!dispatcher.keys_.contains(static_cast<std::uint32_t>(frame.gpr[0])))
+            return 0;
+    }
+    const auto found = GuestSpecificValues.find(static_cast<std::uint32_t>(frame.gpr[0]));
+    return found == GuestSpecificValues.end() ? 0 : found->second;
+}
+
+std::uint64_t HleDispatcher::PthreadSetSpecific(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    {
+        std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        if (!dispatcher.keys_.contains(static_cast<std::uint32_t>(frame.gpr[0])))
+            return 22;
+    }
+    try {
+        GuestSpecificValues[static_cast<std::uint32_t>(frame.gpr[0])] = frame.gpr[1];
+        return 0;
+    } catch (...) {
+        return 12;
+    }
+}
+
+std::uint64_t HleDispatcher::PthreadOnce(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto* control = dispatcher.memory_
+                        ? static_cast<std::uint32_t*>(dispatcher.memory_->TranslateWritable(
+                              frame.gpr[0], sizeof(std::uint32_t)))
+                        : nullptr;
+    if (!control || !dispatcher.memory_ ||
+        !dispatcher.memory_->IsExecutable(frame.gpr[1]))
+        return 22;
+    try {
+        std::shared_ptr<GuestOnce> once;
+        {
+            std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+            auto& slot = dispatcher.onceControls_[frame.gpr[0]];
+            if (!slot) slot = std::make_shared<GuestOnce>();
+            once = slot;
+        }
+        {
+            std::unique_lock lock(once->mutex);
+            if (once->done) return 0;
+            if (once->running) {
+                once->completed.wait(lock, [&] { return once->done || !once->running; });
+                return once->done ? 0 : 22;
+            }
+            once->running = true;
+        }
+        bool completed = false;
+        try {
+            InvokeGuestSysv1(reinterpret_cast<void*>(frame.gpr[1]), 0);
+            completed = true;
+        } catch (...) {
+        }
+        {
+            std::scoped_lock lock(once->mutex);
+            once->running = false;
+            once->done = completed;
+            *control = completed ? 1u : 0u;
+        }
+        once->completed.notify_all();
+        return completed ? 0 : 22;
+    } catch (...) {
+        return 12;
+    }
+}
+
+std::uint64_t HleDispatcher::PthreadRwlockReadLock(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    try {
+        auto existing = GuestRwlockOwnerships.find(frame.gpr[0]);
+        if (existing != GuestRwlockOwnerships.end()) {
+            if (existing->second.write) return 35;
+            ++existing->second.count;
+            return 0;
+        }
+        std::shared_ptr<GuestRwlock> rwlock;
+        {
+            std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+            auto& slot = dispatcher.rwlocks_[frame.gpr[0]];
+            if (!slot) {
+                auto* guestSlot = dispatcher.memory_
+                                      ? dispatcher.memory_->TranslateWritable(
+                                            frame.gpr[0], sizeof(std::uint64_t))
+                                      : nullptr;
+                if (!guestSlot) return 22;
+                slot = std::make_shared<GuestRwlock>();
+            }
+            rwlock = slot;
+        }
+        rwlock->primitive.lock_shared();
+        GuestRwlockOwnerships[frame.gpr[0]] = GuestRwlockOwnership{false, 1};
+        return 0;
+    } catch (...) {
+        return 22;
+    }
+}
+
+std::uint64_t HleDispatcher::PthreadRwlockWriteLock(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    try {
+        if (GuestRwlockOwnerships.contains(frame.gpr[0])) return 35;
+        std::shared_ptr<GuestRwlock> rwlock;
+        {
+            std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+            auto& slot = dispatcher.rwlocks_[frame.gpr[0]];
+            if (!slot) {
+                auto* guestSlot = dispatcher.memory_
+                                      ? dispatcher.memory_->TranslateWritable(
+                                            frame.gpr[0], sizeof(std::uint64_t))
+                                      : nullptr;
+                if (!guestSlot) return 22;
+                slot = std::make_shared<GuestRwlock>();
+            }
+            rwlock = slot;
+        }
+        rwlock->primitive.lock();
+        GuestRwlockOwnerships[frame.gpr[0]] = GuestRwlockOwnership{true, 1};
+        return 0;
+    } catch (...) {
+        return 22;
+    }
+}
+
+std::uint64_t HleDispatcher::PthreadRwlockUnlock(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    try {
+        std::shared_ptr<GuestRwlock> rwlock;
+        {
+            std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+            auto found = dispatcher.rwlocks_.find(frame.gpr[0]);
+            if (found == dispatcher.rwlocks_.end()) return 22;
+            rwlock = found->second;
+        }
+        auto ownership = GuestRwlockOwnerships.find(frame.gpr[0]);
+        if (ownership == GuestRwlockOwnerships.end() || ownership->second.count == 0)
+            return 1;
+        if (--ownership->second.count == 0) {
+            if (ownership->second.write)
+                rwlock->primitive.unlock();
+            else
+                rwlock->primitive.unlock_shared();
+            GuestRwlockOwnerships.erase(ownership);
+        }
+        return 0;
+    } catch (...) {
+        return 1;
+    }
 }
 
 } // namespace Lab

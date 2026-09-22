@@ -858,6 +858,48 @@ ExecuteGeneratedProbe(std::filesystem::path const &directory) {
       threadResult == 42;
   if (!result.pthread_lifecycle_passed)
     throw std::runtime_error("Ciclo pthread próprio não retornou 42.");
+  constexpr char keyCreateSymbol[] = "mqULNdimTn0#B#B";
+  constexpr char getSpecificSymbol[] = "0-KXaS70xy4#B#B";
+  constexpr char setSpecificSymbol[] = "WrOLvHU0yQM#B#B";
+  constexpr char onceSymbol[] = "Z4QosVuAsA0#B#B";
+  constexpr char readLockSymbol[] = "iGjsr1WAtI0#B#B";
+  constexpr char writeLockSymbol[] = "sIlRvQqsN2Y#B#B";
+  constexpr char rwUnlockSymbol[] = "EgmLo6EWgso#B#B";
+  threadDispatcher.Bind({keyCreateSymbol, getSpecificSymbol, setSpecificSymbol,
+                         onceSymbol, readLockSymbol, writeLockSymbol,
+                         rwUnlockSymbol});
+  const auto keyCreated = InvokeSysv2(
+      threadDispatcher.AddressFor(keyCreateSymbol), threadStorage + 16, 0);
+  std::uint32_t key{};
+  auto *keyOutput = static_cast<std::uint32_t *>(
+      guestMemory.TranslateWritable(threadStorage + 16, sizeof(std::uint32_t)));
+  if (keyOutput)
+    key = *keyOutput;
+  const auto specificSet = InvokeSysv2(
+      threadDispatcher.AddressFor(setSpecificSymbol), key, 0xA5A55A5A);
+  const auto specificValue = InvokeSysv2(
+      threadDispatcher.AddressFor(getSpecificSymbol), key, 0);
+  const auto onceFirst = InvokeSysv2(
+      threadDispatcher.AddressFor(onceSymbol), threadStorage + 24,
+      guestMemory.RuntimeAddress(loaded.entry));
+  const auto onceSecond = InvokeSysv2(
+      threadDispatcher.AddressFor(onceSymbol), threadStorage + 24,
+      guestMemory.RuntimeAddress(loaded.entry));
+  const auto readLocked = InvokeSysv2(
+      threadDispatcher.AddressFor(readLockSymbol), threadStorage + 32, 0);
+  const auto readUnlocked = InvokeSysv2(
+      threadDispatcher.AddressFor(rwUnlockSymbol), threadStorage + 32, 0);
+  const auto writeLocked = InvokeSysv2(
+      threadDispatcher.AddressFor(writeLockSymbol), threadStorage + 32, 0);
+  const auto writeUnlocked = InvokeSysv2(
+      threadDispatcher.AddressFor(rwUnlockSymbol), threadStorage + 32, 0);
+  result.pthread_tls_once_rwlock_passed =
+      keyCreated == 0 && key != 0 && specificSet == 0 &&
+      specificValue == 0xA5A55A5A && onceFirst == 0 && onceSecond == 0 &&
+      readLocked == 0 && readUnlocked == 0 && writeLocked == 0 &&
+      writeUnlocked == 0;
+  if (!result.pthread_tls_once_rwlock_passed)
+    throw std::runtime_error("Probe pthread TLS/once/rwlock falhou.");
   HleDispatcher dispatcher;
   const auto hle = dispatcher.Resolve("1U-s6o8XOcE#B#B");
   if (!hle.address)

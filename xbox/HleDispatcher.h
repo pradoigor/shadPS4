@@ -12,6 +12,7 @@
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -149,6 +150,13 @@ private:
     static std::uint64_t PthreadCreate(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t PthreadJoin(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t PthreadDetach(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadKeyCreate(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadGetSpecific(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadSetSpecific(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadOnce(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadRwlockReadLock(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadRwlockWriteLock(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadRwlockUnlock(HleDispatcher&, GuestCallFrame const&) noexcept;
 
     bool ReadGuestString(std::uint64_t address, std::string& value,
                          std::size_t limit = 1024) const noexcept;
@@ -245,6 +253,22 @@ private:
     std::unordered_map<std::uint64_t, GuestThreadAttribute> threadAttributes_;
     std::unordered_map<std::uint64_t, std::shared_ptr<GuestThread>> threads_;
     std::uint64_t nextThreadId_{0x1000};
+    struct GuestKey {
+        std::uint64_t destructor{};
+    };
+    struct GuestOnce {
+        std::mutex mutex;
+        std::condition_variable completed;
+        bool running{};
+        bool done{};
+    };
+    struct GuestRwlock {
+        std::shared_mutex primitive;
+    };
+    std::unordered_map<std::uint32_t, GuestKey> keys_;
+    std::unordered_map<std::uint64_t, std::shared_ptr<GuestOnce>> onceControls_;
+    std::unordered_map<std::uint64_t, std::shared_ptr<GuestRwlock>> rwlocks_;
+    std::uint32_t nextKey_{1};
 };
 
 } // namespace Lab
