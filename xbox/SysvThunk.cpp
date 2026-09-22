@@ -399,6 +399,48 @@ std::uint64_t InvokeGuestSysv1(void *entry, std::uint64_t argument0) {
   return value;
 }
 
+std::uint64_t InvokeGuestSysv2(void *entry, std::uint64_t argument0,
+                               std::uint64_t argument1) {
+  if (!entry)
+    throw std::invalid_argument("Entrada convidada SysV ausente.");
+  auto *caller = static_cast<std::uint8_t *>(
+      Core::PlatformMemory::Allocate(GetCurrentProcess(), nullptr, PageSize,
+                                     MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+  if (!caller)
+    throw std::runtime_error("Não foi possível reservar o chamador convidado.");
+
+  std::size_t offset = 0;
+  Byte(caller, offset, 0x57);
+  Byte(caller, offset, 0x56);
+  Byte(caller, offset, 0x48); Byte(caller, offset, 0x81); Byte(caller, offset, 0xEC);
+  U32(caller, offset, 0xA8);
+  for (std::uint8_t reg = 6; reg != 16; ++reg)
+    MoveXmmStack(caller, offset, reg,
+                 static_cast<std::uint32_t>((reg - 6) * 16), false);
+  Byte(caller, offset, 0x48); Byte(caller, offset, 0xBF); U64(caller, offset, argument0);
+  Byte(caller, offset, 0x48); Byte(caller, offset, 0xBE); U64(caller, offset, argument1);
+  Byte(caller, offset, 0x48); Byte(caller, offset, 0xB8);
+  U64(caller, offset, reinterpret_cast<std::uint64_t>(entry));
+  Byte(caller, offset, 0xFF); Byte(caller, offset, 0xD0);
+  for (std::uint8_t reg = 6; reg != 16; ++reg)
+    MoveXmmStack(caller, offset, reg,
+                 static_cast<std::uint32_t>((reg - 6) * 16), true);
+  Byte(caller, offset, 0x48); Byte(caller, offset, 0x81); Byte(caller, offset, 0xC4);
+  U32(caller, offset, 0xA8);
+  Byte(caller, offset, 0x5E); Byte(caller, offset, 0x5F); Byte(caller, offset, 0xC3);
+
+  DWORD previous{};
+  if (!Core::PlatformMemory::Protect(GetCurrentProcess(), caller, PageSize,
+                                     PAGE_EXECUTE_READ, &previous) ||
+      !FlushInstructionCache(GetCurrentProcess(), caller, offset)) {
+    Core::PlatformMemory::Free(GetCurrentProcess(), caller, 0, MEM_RELEASE);
+    throw std::runtime_error("Não foi possível ativar o chamador convidado.");
+  }
+  const auto value = reinterpret_cast<std::uint64_t (*)()>(caller)();
+  Core::PlatformMemory::Free(GetCurrentProcess(), caller, 0, MEM_RELEASE);
+  return value;
+}
+
 std::uint64_t InvokeSysv4(void *entry, std::uint64_t argument0,
                           std::uint64_t argument1, std::uint64_t argument2,
                           std::uint64_t argument3) {

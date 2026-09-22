@@ -5,6 +5,7 @@
 #include "PkgProbe.h"
 #include "PkgExtractor.h"
 #include "PkgBuiltinKeys.h"
+#include "HomebrewRuntime.h"
 #include <windows.h>
 #include <fileapifromapp.h>
 #include <winrt/Windows.UI.Xaml.Media.Imaging.h>
@@ -58,6 +59,7 @@ struct App : ApplicationT<App> {
     std::vector<LibraryItem> libraryItems;
     std::wstring selectedLoaderPath;
     std::shared_ptr<Lab::InstallProgress> extraction;
+    std::unique_ptr<Lab::HomebrewRuntime> homebrew;
     bool importing{}, listing{};
     Windows::System::Display::DisplayRequest displayRequest{nullptr};
 
@@ -124,11 +126,12 @@ struct App : ApplicationT<App> {
                 selectedLoaderPath = item.path;
         }
         Find<TextBlock>(L"ContentTitle").Text(item.name);
-        Find<TextBlock>(L"ContentDetails").Text(item.installed ? L"Conteúdo extraído e persistido neste Xbox. O probe controlado valida o arquivo e executa somente o ELF mínimo do projeto." : DescribeContent(item.path));
+        Find<TextBlock>(L"ContentDetails").Text(item.installed ? L"Conteúdo extraído e persistido neste Xbox. Use Iniciar homebrew para carregar e transferir o controle ao eboot.bin real." : DescribeContent(item.path));
         auto extension = std::filesystem::path(item.path).extension().wstring();
         for (auto& c : extension) c = towlower(c);
         Find<Button>(L"ExtractContent").IsEnabled(!extraction && !importing && !item.installed && extension == L".pkg");
         Find<Button>(L"ValidateContent").IsEnabled(!extraction && !importing && !selectedLoaderPath.empty());
+        Find<Button>(L"LaunchContent").IsEnabled(!extraction && !importing && item.installed && !selectedLoaderPath.empty() && !(homebrew && homebrew->running()));
     }
     void ValidateSelectedContent() {
         if (selectedLoaderPath.empty()) {
@@ -138,6 +141,29 @@ struct App : ApplicationT<App> {
         ShowLibrary(false);
         list.SelectedIndex(0);
         RunSelected();
+    }
+    void StartHomebrew() {
+        if (selectedLoaderPath.empty()) {
+            libraryStatus.Text(L"Selecione um conteúdo extraído com eboot.bin.");
+            return;
+        }
+        if (homebrew && homebrew->running()) {
+            libraryStatus.Text(L"O homebrew já está em execução.");
+            return;
+        }
+        try {
+            homebrew = std::make_unique<Lab::HomebrewRuntime>();
+            homebrew->Start(std::filesystem::path(selectedLoaderPath),
+                            std::filesystem::path(report->directory));
+            libraryStatus.Text(L"Apollo iniciado: o e_entry real recebeu controle. Se o aplicativo fechar, abra novamente para ver o último estágio persistido.");
+            Find<Button>(L"LaunchContent").IsEnabled(false);
+        } catch (std::exception const& e) {
+            homebrew.reset();
+            libraryStatus.Text(L"Não foi possível iniciar o Apollo: " + std::wstring(to_hstring(e.what())));
+        } catch (hresult_error const& e) {
+            homebrew.reset();
+            libraryStatus.Text(L"Não foi possível iniciar o Apollo: " + std::wstring(e.message()));
+        }
     }
     void ExtractionRecord(std::wstring const& state, std::wstring const& message,
                           std::wstring const& name, std::wstring const& destination, double started,
@@ -348,6 +374,7 @@ struct App : ApplicationT<App> {
             Find<Button>(L"ImportKeys").Click([this](auto const&, auto const&) { ImportKeys(); });
             Find<Button>(L"ExtractContent").Click([this](auto const&, auto const&) { ExtractContent(); });
             Find<Button>(L"ValidateContent").Click([this](auto const&, auto const&) { ValidateSelectedContent(); });
+            Find<Button>(L"LaunchContent").Click([this](auto const&, auto const&) { StartHomebrew(); });
             Find<Button>(L"CancelExtraction").Click([this](auto const&, auto const&) { if (extraction) extraction->cancel.store(true); });
             libraryList.SelectionChanged([this](auto const&, auto const&) { LibrarySelection(); });
             Find<Button>(L"Export").Click([this](auto const&, auto const&) {
@@ -383,6 +410,17 @@ struct App : ApplicationT<App> {
                         libraryStatus.Text(L"A extração anterior foi interrompida. Relatório marcado como inconclusivo; importe ou selecione o PKG para tentar novamente.");
                     }
                 } catch (...) { libraryStatus.Text(L"Relatório anterior de extração ilegível; arquivo preservado."); }
+            }
+            auto runtimeReport = std::filesystem::path(report->directory) / L"homebrew-runtime.json";
+            if (std::filesystem::exists(runtimeReport)) {
+                try {
+                    std::ifstream input(runtimeReport, std::ios::binary);
+                    std::string raw{std::istreambuf_iterator<char>(input), {}};
+                    auto previous = Windows::Data::Json::JsonObject::Parse(to_hstring(raw));
+                    auto stage = previous.GetNamedString(L"stage", L"unknown");
+                    auto detail = previous.GetNamedString(L"detail", L"");
+                    libraryStatus.Text(L"Última execução · " + std::wstring(stage) + L"\n" + std::wstring(detail));
+                } catch (...) { libraryStatus.Text(L"O registro da última execução está ilegível."); }
             }
             ShowLibrary(true);
             Find<Button>(L"LibraryTab").Focus(FocusState::Programmatic);
