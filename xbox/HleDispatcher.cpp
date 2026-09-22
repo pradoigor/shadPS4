@@ -371,8 +371,14 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
     writeTrace("enter", 0, false);
     const auto result = entry.handler ? entry.handler(*self, *frame) : OrbisEnosys;
     writeTrace("return", result, true);
-    if (entry.nid == "6Z83sYWFlA8")
-        ExitGuestFromHle(static_cast<std::int32_t>(frame->gpr[0]));
+    if (entry.nid == "6Z83sYWFlA8") {
+        if (auto* slot = WritablePointer(*self, *frame, frame->guest_stack,
+                                         sizeof(std::uint64_t))) {
+            const auto target = reinterpret_cast<std::uint64_t>(
+                PrepareGuestExitFromHle(static_cast<std::int32_t>(frame->gpr[0])));
+            if (target) std::memcpy(slot, &target, sizeof(target));
+        }
+    }
     return result;
 }
 

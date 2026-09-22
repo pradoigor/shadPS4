@@ -17,6 +17,7 @@ constexpr std::uint8_t WindowsShadowSpace = 0x20;
 thread_local std::jmp_buf GuestExitContext;
 thread_local bool GuestExitContextActive = false;
 thread_local std::int32_t GuestExitStatus = 0;
+thread_local void* GuestExitTrampoline = nullptr;
 
 void GuestProgramExit() noexcept {
   if (GuestExitContextActive)
@@ -103,9 +104,9 @@ std::uint64_t ValidateDispatch(void *, std::uint64_t slot,
 
 } // namespace
 
-void ExitGuestFromHle(std::int32_t status) noexcept {
+void* PrepareGuestExitFromHle(std::int32_t status) noexcept {
   GuestExitStatus = status;
-  GuestProgramExit();
+  return GuestExitTrampoline;
 }
 
 SysvThunkArena::~SysvThunkArena() {
@@ -484,6 +485,14 @@ std::uint64_t InvokeGuestEntry(void *entry, std::uint64_t entryParams,
   U64(launcher, offset, reinterpret_cast<std::uint64_t>(entry));
   Byte(launcher, offset, 0xFF); Byte(launcher, offset, 0xE0); // jmp rax
 
+  // A thunk reaches this target via ret, so call supplies the Windows x64
+  // return slot expected by GuestProgramExit before it jumps to the host.
+  auto* exitTrampoline = launcher + offset;
+  Byte(launcher, offset, 0x48); Byte(launcher, offset, 0xB8);
+  U64(launcher, offset, reinterpret_cast<std::uint64_t>(&GuestProgramExit));
+  Byte(launcher, offset, 0xFF); Byte(launcher, offset, 0xD0); // call rax
+  Byte(launcher, offset, 0xCC); // unreachable
+
   DWORD previous{};
   if (!Core::PlatformMemory::Protect(GetCurrentProcess(), launcher, PageSize,
                                      PAGE_EXECUTE_READ, &previous) ||
@@ -494,6 +503,7 @@ std::uint64_t InvokeGuestEntry(void *entry, std::uint64_t entryParams,
 
   *exited = false;
   GuestExitStatus = 0;
+  GuestExitTrampoline = exitTrampoline;
   std::uint64_t result{};
   if (setjmp(GuestExitContext) == 0) {
     GuestExitContextActive = true;
@@ -503,6 +513,7 @@ std::uint64_t InvokeGuestEntry(void *entry, std::uint64_t entryParams,
     result = static_cast<std::uint64_t>(static_cast<std::int64_t>(GuestExitStatus));
   }
   GuestExitContextActive = false;
+  GuestExitTrampoline = nullptr;
   Core::PlatformMemory::Free(GetCurrentProcess(), launcher, 0, MEM_RELEASE);
   return result;
 }

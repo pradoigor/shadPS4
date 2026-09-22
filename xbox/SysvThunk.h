@@ -67,7 +67,8 @@ std::uint64_t InvokeGuestSysv2(void *entry, std::uint64_t argument0,
 std::uint64_t InvokeGuestEntry(void *entry, std::uint64_t entryParams,
                                bool *exited);
 
-// Completes a guest _exit call without terminating the UWP host process.
-void ExitGuestFromHle(std::int32_t status) noexcept;
+// Returns the existing guest-exit callback for a thunk to use as its return
+// target. The dispatcher must return normally before that callback runs.
+void* PrepareGuestExitFromHle(std::int32_t status) noexcept;
 
 } // namespace Lab
