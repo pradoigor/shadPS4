@@ -6,6 +6,7 @@
 #include "HleDispatcher.h"
 
 #include <atomic>
+#include <array>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -43,6 +44,10 @@ private:
   std::unique_ptr<GuestMemory> memory_;
   std::unique_ptr<HleDispatcher> dispatcher_;
   EntryParams params_{};
+  alignas(64) std::array<std::uint8_t, 128> mainTlsBlock_{};
+  std::array<std::uint64_t, 4> mainDtv_{};
+  std::uint32_t tlsSlot_{UINT32_MAX};
+  std::uint32_t patchedFsReads_{};
   std::thread worker_;
   std::atomic_bool running_{};
 };

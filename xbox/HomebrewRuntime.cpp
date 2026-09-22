@@ -3,6 +3,7 @@
 
 #include "SysvThunk.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -18,6 +19,47 @@ std::uint64_t gGuestHostBase{};
 std::uint64_t gGuestVirtualBase{};
 std::uint64_t gGuestImageSize{};
 std::uint64_t UnixSeconds() noexcept;
+
+std::uint32_t PatchFsTcbReads(std::vector<std::uint8_t>& image,
+                              std::uint64_t virtualBase,
+                              std::vector<GuestSegmentInfo> const& segments,
+                              std::uint32_t tlsSlot) {
+  // On Windows x64 the TEB is addressed through GS. Its first 64 TLS slots
+  // begin at 0x1480. Replace the nine-byte PS4 `mov reg, fs:[0]` form with the
+  // same-length `mov reg, gs:[tebTlsSlot]`; this is the compact form used by
+  // the upstream shadPS4 CPU patcher for Windows TCB access.
+  if (tlsSlot >= 64)
+    throw std::runtime_error("O slot TLS do Windows não cabe no acesso GS direto.");
+  const auto tebOffset = 0x1480u + tlsSlot * sizeof(void*);
+  std::uint32_t patched{};
+  for (auto const& segment : segments) {
+    if ((segment.flags & 0x1u) == 0 || segment.address < virtualBase)
+      continue;
+    const auto begin64 = segment.address - virtualBase;
+    if (begin64 >= image.size()) continue;
+    const auto begin = static_cast<std::size_t>(begin64);
+    const auto available = image.size() - begin;
+    const auto bytes = static_cast<std::size_t>((std::min<std::uint64_t>)(
+        segment.size, available));
+    if (bytes < 9) continue;
+    for (std::size_t index = begin; index + 9 <= begin + bytes; ++index) {
+      if (image[index] != 0x64 || image[index + 1] < 0x48 ||
+          image[index + 1] > 0x4F || image[index + 2] != 0x8B ||
+          (image[index + 3] & 0xC7u) != 0x04u ||
+          image[index + 4] != 0x25)
+        continue;
+      std::uint32_t displacement{};
+      std::memcpy(&displacement, image.data() + index + 5,
+                  sizeof(displacement));
+      if (displacement != 0) continue;
+      image[index] = 0x65;
+      std::memcpy(image.data() + index + 5, &tebOffset, sizeof(tebOffset));
+      ++patched;
+      index += 8;
+    }
+  }
+  return patched;
+}
 
 int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
   if (!exception || !exception->ExceptionRecord || !exception->ContextRecord ||
@@ -116,6 +158,8 @@ HomebrewRuntime::~HomebrewRuntime() {
     else
       worker_.join();
   }
+  if (!running_.load() && tlsSlot_ != UINT32_MAX)
+    TlsFree(tlsSlot_);
 }
 
 void HomebrewRuntime::Record(std::string const &stage,
@@ -141,6 +185,10 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
     throw std::runtime_error("Um homebrew já está em execução.");
   if (worker_.joinable())
     worker_.join();
+  if (tlsSlot_ != UINT32_MAX) {
+    TlsFree(tlsSlot_);
+    tlsSlot_ = UINT32_MAX;
+  }
 
   executable_ = std::move(executable);
   stateFile_ = stateRoot / L"homebrew-runtime.json";
@@ -174,6 +222,15 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
     std::memcpy(load_.private_image.data() + offset, &value, sizeof(value));
   }
 
+  tlsSlot_ = TlsAlloc();
+  if (tlsSlot_ == TLS_OUT_OF_INDEXES)
+    throw std::runtime_error("Não foi possível reservar o slot TLS convidado.");
+  patchedFsReads_ = PatchFsTcbReads(load_.private_image,
+                                    load_.min_virtual_address,
+                                    load_.guest_segments, tlsSlot_);
+  if (patchedFsReads_ == 0)
+    throw std::runtime_error("Nenhum acesso PS4 fs:[0] foi localizado para tradução.");
+
   memory_ = std::make_unique<GuestMemory>();
   if (!memory_->MapValidated(load_.private_image, load_.min_virtual_address,
                              load_.guest_segments,
@@ -200,6 +257,19 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
 
 void HomebrewRuntime::RunEntry() noexcept {
   Record("entry_started", "Controle transferido ao e_entry do homebrew.");
+  auto* tcb = mainTlsBlock_.data() + 64;
+  mainDtv_ = {1, 1, 0, 0};
+  std::memcpy(tcb, &tcb, sizeof(tcb));
+  auto* dtv = mainDtv_.data();
+  std::memcpy(tcb + 8, &dtv, sizeof(dtv));
+  std::memcpy(tcb + 16, &tcb, sizeof(tcb));
+  const auto threadId = static_cast<std::uint32_t>(GetCurrentThreadId());
+  std::memcpy(tcb + 56, &threadId, sizeof(threadId));
+  if (!TlsSetValue(tlsSlot_, tcb)) {
+    Record("host_exception", "Não foi possível ativar a base TLS convidada.");
+    running_.store(false);
+    return;
+  }
   using AddVectoredHandler = PVOID(WINAPI *)(
       ULONG, PVECTORED_EXCEPTION_HANDLER);
   using RemoveVectoredHandler = ULONG(WINAPI *)(PVOID);
