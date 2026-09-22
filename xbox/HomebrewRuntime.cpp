@@ -2,6 +2,7 @@
 #include "HomebrewRuntime.h"
 
 #include "SysvThunk.h"
+#include "core/platform_memory.h"
 
 #include <algorithm>
 #include <chrono>
@@ -68,7 +69,7 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
   if (!exception || !exception->ExceptionRecord || !exception->ContextRecord ||
       gCrashStateFile.empty())
     return EXCEPTION_EXECUTE_HANDLER;
-  char payload[768]{};
+  char payload[896]{};
   const auto *record = exception->ExceptionRecord;
   const auto fault = record->NumberParameters > 1
                          ? record->ExceptionInformation[1]
@@ -78,6 +79,9 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
                              ? 0x1480u + gGuestTlsSlot * sizeof(void*)
                              : 0u;
   const auto observedTcb = tlsOffset ? __readgsqword(tlsOffset) : 0;
+  const auto accessKind = record->NumberParameters > 0
+                              ? record->ExceptionInformation[0]
+                              : 0;
   const auto guestRip = rip >= gGuestHostBase &&
                                 rip - gGuestHostBase < gGuestImageSize
                             ? gGuestVirtualBase + (rip - gGuestHostBase)
@@ -92,6 +96,7 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
       "\"exception_address\":%llu,\"rip\":%llu,\"rsp\":%llu,"
       "\"rcx\":%llu,\"tls_slot\":%lu,\"expected_tcb\":%llu,"
       "\"observed_tcb\":%llu,"
+      "\"exception_parameters\":%lu,\"access_kind\":%llu,"
       "\"fault_address\":%llu,\"guest_virtual_rip\":%llu,"
       "\"guest_virtual_fault\":%llu,\"timestamp\":%llu}",
       static_cast<unsigned long>(record->ExceptionCode),
@@ -103,6 +108,8 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
       static_cast<unsigned long>(gGuestTlsSlot),
       static_cast<unsigned long long>(gExpectedTcb),
       static_cast<unsigned long long>(observedTcb),
+      static_cast<unsigned long>(record->NumberParameters),
+      static_cast<unsigned long long>(accessKind),
       static_cast<unsigned long long>(fault),
       static_cast<unsigned long long>(guestRip),
       static_cast<unsigned long long>(guestFault),
@@ -114,7 +121,7 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
                               FILE_SHARE_READ, CREATE_ALWAYS, &parameters);
     if (file != INVALID_HANDLE_VALUE) {
       DWORD written{};
-      WriteFile(file, payload, static_cast<DWORD>(length < 767 ? length : 767),
+      WriteFile(file, payload, static_cast<DWORD>(length < 895 ? length : 895),
                 &written, nullptr);
       FlushFileBuffers(file);
       CloseHandle(file);
@@ -173,6 +180,8 @@ HomebrewRuntime::~HomebrewRuntime() {
   }
   if (!running_.load() && tlsSlot_ != UINT32_MAX)
     TlsFree(tlsSlot_);
+  if (!running_.load() && mainTlsPage_)
+    Core::PlatformMemory::Free(GetCurrentProcess(), mainTlsPage_, 0, MEM_RELEASE);
 }
 
 void HomebrewRuntime::Record(std::string const &stage,
@@ -201,6 +210,10 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
   if (tlsSlot_ != UINT32_MAX) {
     TlsFree(tlsSlot_);
     tlsSlot_ = UINT32_MAX;
+  }
+  if (mainTlsPage_) {
+    Core::PlatformMemory::Free(GetCurrentProcess(), mainTlsPage_, 0, MEM_RELEASE);
+    mainTlsPage_ = nullptr;
   }
 
   executable_ = std::move(executable);
@@ -243,6 +256,10 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
                                     load_.guest_segments, tlsSlot_);
   if (patchedFsReads_ == 0)
     throw std::runtime_error("Nenhum acesso PS4 fs:[0] foi localizado para tradução.");
+  mainTlsPage_ = Core::PlatformMemory::Allocate(
+      GetCurrentProcess(), nullptr, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+  if (!mainTlsPage_)
+    throw std::runtime_error("Não foi possível reservar a página do TCB convidado.");
 
   memory_ = std::make_unique<GuestMemory>();
   if (!memory_->MapValidated(load_.private_image, load_.min_virtual_address,
@@ -270,7 +287,7 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
 
 void HomebrewRuntime::RunEntry() noexcept {
   Record("entry_started", "Controle transferido ao e_entry do homebrew.");
-  auto* tcb = mainTlsBlock_.data() + 64;
+  auto* tcb = static_cast<std::uint8_t*>(mainTlsPage_) + 64;
   mainDtv_ = {1, 1, 0, 0};
   std::memcpy(tcb, &tcb, sizeof(tcb));
   auto* dtv = mainDtv_.data();

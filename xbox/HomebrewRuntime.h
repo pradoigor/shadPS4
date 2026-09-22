@@ -44,7 +44,7 @@ private:
   std::unique_ptr<GuestMemory> memory_;
   std::unique_ptr<HleDispatcher> dispatcher_;
   EntryParams params_{};
-  alignas(64) std::array<std::uint8_t, 128> mainTlsBlock_{};
+  void* mainTlsPage_{};
   std::array<std::uint64_t, 4> mainDtv_{};
   std::uint32_t tlsSlot_{UINT32_MAX};
   std::uint32_t patchedFsReads_{};
