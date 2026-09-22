@@ -1003,6 +1003,11 @@ std::uint64_t HleDispatcher::PthreadMutexInit(
     try {
         auto mutex = std::make_shared<GuestMutex>();
         std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        if (frame.gpr[1] != 0) {
+            const auto attribute = dispatcher.mutexAttributes_.find(frame.gpr[1]);
+            if (attribute == dispatcher.mutexAttributes_.end()) return 22;
+            mutex->recursive = attribute->second == 2;
+        }
         dispatcher.mutexes_[frame.gpr[0]] = std::move(mutex);
         *slot = frame.gpr[0];
         return 0;
@@ -1019,6 +1024,8 @@ std::uint64_t HleDispatcher::PthreadMutexDestroy(
                      : nullptr;
     if (!slot) return 22;
     std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+    const auto found = dispatcher.mutexes_.find(frame.gpr[0]);
+    if (found != dispatcher.mutexes_.end() && found->second->isLocked()) return 16;
     dispatcher.mutexes_.erase(frame.gpr[0]);
     *slot = 2;
     return 0;
@@ -1045,7 +1052,8 @@ std::uint64_t HleDispatcher::PthreadMutexLock(
                 mutex = found->second;
             }
         }
-        mutex->primitive.lock();
+        if (mutex->ownedByCurrentThread() && !mutex->recursive) return 35;
+        mutex->lock();
         return 0;
     } catch (...) {
         return 22;
@@ -1062,7 +1070,8 @@ std::uint64_t HleDispatcher::PthreadMutexTryLock(
             if (found == dispatcher.mutexes_.end()) return 22;
             mutex = found->second;
         }
-        return mutex->primitive.try_lock() ? 0 : 16;
+        if (mutex->ownedByCurrentThread() && !mutex->recursive) return 16;
+        return mutex->try_lock() ? 0 : 16;
     } catch (...) {
         return 22;
     }
@@ -1078,7 +1087,7 @@ std::uint64_t HleDispatcher::PthreadMutexUnlock(
             if (found == dispatcher.mutexes_.end()) return 22;
             mutex = found->second;
         }
-        mutex->primitive.unlock();
+        mutex->unlock();
         return 0;
     } catch (...) {
         return 1;
@@ -1131,7 +1140,8 @@ std::uint64_t HleDispatcher::PthreadCondWait(
             condition = foundCondition->second;
             mutex = foundMutex->second;
         }
-        std::unique_lock<std::recursive_mutex> lock(mutex->primitive, std::adopt_lock);
+        if (!mutex->ownedByCurrentThread()) return 1;
+        std::unique_lock<GuestMutex> lock(*mutex, std::adopt_lock);
         condition->primitive.wait(lock);
         lock.release();
         return 0;

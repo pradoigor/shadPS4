@@ -11,8 +11,10 @@
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -168,7 +170,43 @@ private:
     std::unordered_map<std::int32_t, GuestFile> files_;
     std::int32_t nextFileDescriptor_{3};
     struct GuestMutex {
-        std::recursive_mutex primitive;
+        void lock() {
+            std::unique_lock lock(state);
+            const auto current = std::this_thread::get_id();
+            available.wait(lock, [&] { return depth == 0 || owner == current; });
+            owner = current;
+            ++depth;
+        }
+        bool try_lock() {
+            std::scoped_lock lock(state);
+            const auto current = std::this_thread::get_id();
+            if (depth != 0 && owner != current) return false;
+            owner = current;
+            ++depth;
+            return true;
+        }
+        void unlock() {
+            std::scoped_lock lock(state);
+            if (depth == 0 || owner != std::this_thread::get_id())
+                throw std::runtime_error("Mutex convidado não pertence à thread.");
+            if (--depth == 0) {
+                owner = {};
+                available.notify_one();
+            }
+        }
+        bool ownedByCurrentThread() {
+            std::scoped_lock lock(state);
+            return depth != 0 && owner == std::this_thread::get_id();
+        }
+        bool isLocked() {
+            std::scoped_lock lock(state);
+            return depth != 0;
+        }
+        std::mutex state;
+        std::condition_variable available;
+        std::thread::id owner;
+        std::uint32_t depth{};
+        bool recursive{};
     };
     struct GuestCondition {
         std::condition_variable_any primitive;
