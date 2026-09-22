@@ -4,7 +4,7 @@ Aplicativo **UWP x64 / C++/WinRT / XAML** para medir a viabilidade de portar
 shadPS4 ao Xbox Series X em Dev Mode. **Ainda não é um emulador PS4 no Xbox.**
 O alvo é independente do CMake e das dependências desktop do núcleo.
 
-A versão **0.45.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
+A versão **0.46.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
 PKG/ELF, keysets FPKG embutidos, importação de chaves personalizadas, extração em
 segundo plano e um probe de execução controlada com auditoria de requisitos runtime,
 relocação e inventário de NIDs HLE. O ELF/SELF selecionado é apenas
@@ -81,6 +81,9 @@ A ponte de entrada de threads preserva também XMM6–XMM15, exigidos pelo ABI
 Windows. `pthread_create`, `pthread_self`, `pthread_join` e `pthread_detach`
 mantêm identificadores convidados separados dos objetos do host; o teste executa
 somente a rotina própria `return 42` em uma thread e confere o retorno pelo join.
+Chaves TLS de pthread mantêm valores distintos por thread, `pthread_once` serializa
+a inicialização e rwlocks oferecem caminhos de leitura e escrita. O probe usa
+somente a rotina própria e memória anônima validada para exercitar esse conjunto.
 O dispatcher também reconhece `sceKernelMprotect`, mas só altera proteção de
 faixas `PF_W` coerentes e rejeita qualquer pedido de execução; isso permite
 exercitar a semântica de proteção sem abrir uma transição para código convidado.

@@ -24,7 +24,7 @@ que o carregador tenha uma ponte ABI SysV compatível, endereços HLE reais e um
 renderer UWP para Piglet. O aplicativo deve manter essa barreira e nunca saltar
 para o `e_entry` enquanto algum desses requisitos faltar.
 
-A build `0.45.0.0` corrige o alocador de thunks SysV→Windows para preservar os
+A build `0.46.0.0` corrige o alocador de thunks SysV→Windows para preservar os
 seis registradores inteiros, a pilha convidada e os registradores XMM em uma área
 separada do shadow space exigido pelo ABI Windows. Um chamador de máquina gerado
 pelo projeto injeta padrões distintos em registradores e argumentos de pilha e
@@ -76,6 +76,9 @@ objetos do host. A versão 0.44 valida o ciclo básico antes do porte de criaç�
 Na versão 0.45, a entrada de uma thread convidada preserva os registradores não
 voláteis do Windows, inclusive XMM6–XMM15. Um ELF próprio completa
 `pthread_create`/`pthread_join` e retorna `42`; o `e_entry` do Apollo permanece bloqueado.
+TLS específico por thread, `pthread_once` e rwlocks usam estado nativo separado da
+imagem convidada. A versão 0.46 valida set/get TLS, repetição de once e ciclos de
+lock/unlock de leitura e escrita antes de avançar para inicializadores do executável.
 O handler `sceKernelMprotect` foi acrescentado para a camada de memória: ele
 aceita somente proteções sem execução dentro das faixas `PF_W` coerentes e
 retorna erro para `PROT_EXEC` ou endereços fora dessas faixas. A mudança é
