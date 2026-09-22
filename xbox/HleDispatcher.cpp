@@ -339,6 +339,32 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
     return result;
 }
 
+void* HleDispatcher::WritablePointer(HleDispatcher& dispatcher,
+                                     GuestCallFrame const& frame,
+                                     std::uint64_t address,
+                                     std::size_t bytes) noexcept {
+    if (dispatcher.memory_) {
+        if (auto* translated = dispatcher.memory_->TranslateWritable(address, bytes))
+            return translated;
+    }
+    // Guest code runs directly on a native worker stack. OpenOrbis places
+    // short-lived pthread attributes, TLS keys and other ABI structures there,
+    // outside the mapped ELF image. Accept only the current thread's narrow
+    // stack neighbourhood; unrelated host pointers remain rejected.
+    constexpr std::uint64_t StackWindow = 2ull * 1024ull * 1024ull;
+    if (address == 0 || bytes > StackWindow || address > UINT64_MAX - bytes)
+        return nullptr;
+    const auto lower = frame.guest_stack > StackWindow
+                           ? frame.guest_stack - StackWindow
+                           : 0;
+    const auto upper = frame.guest_stack <= UINT64_MAX - StackWindow
+                           ? frame.guest_stack + StackWindow
+                           : UINT64_MAX;
+    if (address < lower || address > upper || bytes > upper - address)
+        return nullptr;
+    return reinterpret_cast<void*>(address);
+}
+
 std::uint64_t HleDispatcher::Unimplemented(HleDispatcher&, GuestCallFrame const&) noexcept {
     return OrbisEnosys;
 }
@@ -1137,10 +1163,8 @@ std::uint64_t HleDispatcher::FileGetdents(HleDispatcher& dispatcher,
 
 std::uint64_t HleDispatcher::PthreadMutexAttrInit(
     HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
-    auto* slot = dispatcher.memory_
-                     ? static_cast<std::uint64_t*>(dispatcher.memory_->TranslateWritable(
-                           frame.gpr[0], sizeof(std::uint64_t)))
-                     : nullptr;
+    auto* slot = static_cast<std::uint64_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[0], sizeof(std::uint64_t)));
     if (!slot) return 22;
     try {
         std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
@@ -1164,10 +1188,8 @@ std::uint64_t HleDispatcher::PthreadMutexAttrSetType(
 
 std::uint64_t HleDispatcher::PthreadMutexInit(
     HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
-    auto* slot = dispatcher.memory_
-                     ? static_cast<std::uint64_t*>(dispatcher.memory_->TranslateWritable(
-                           frame.gpr[0], sizeof(std::uint64_t)))
-                     : nullptr;
+    auto* slot = static_cast<std::uint64_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[0], sizeof(std::uint64_t)));
     if (!slot) return 22;
     try {
         auto mutex = std::make_shared<GuestMutex>();
@@ -1475,10 +1497,8 @@ std::uint64_t HleDispatcher::SemaphorePost(
 
 std::uint64_t HleDispatcher::PthreadAttrInit(
     HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
-    auto* slot = dispatcher.memory_
-                     ? static_cast<std::uint64_t*>(dispatcher.memory_->TranslateWritable(
-                           frame.gpr[0], sizeof(std::uint64_t)))
-                     : nullptr;
+    auto* slot = static_cast<std::uint64_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[0], sizeof(std::uint64_t)));
     if (!slot) return 22;
     try {
         std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
@@ -1512,10 +1532,8 @@ std::uint64_t HleDispatcher::PthreadAttrSetStackSize(
 
 std::uint64_t HleDispatcher::PthreadCreate(
     HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
-    auto* output = dispatcher.memory_
-                       ? static_cast<std::uint64_t*>(dispatcher.memory_->TranslateWritable(
-                             frame.gpr[0], sizeof(std::uint64_t)))
-                       : nullptr;
+    auto* output = static_cast<std::uint64_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[0], sizeof(std::uint64_t)));
     if (!output || !dispatcher.memory_ ||
         !dispatcher.memory_->IsExecutable(frame.gpr[2]))
         return 22;
@@ -1603,10 +1621,8 @@ std::uint64_t HleDispatcher::PthreadDetach(
 
 std::uint64_t HleDispatcher::PthreadKeyCreate(
     HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
-    auto* output = dispatcher.memory_
-                       ? static_cast<std::uint32_t*>(dispatcher.memory_->TranslateWritable(
-                             frame.gpr[0], sizeof(std::uint32_t)))
-                       : nullptr;
+    auto* output = static_cast<std::uint32_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[0], sizeof(std::uint32_t)));
     if (!output) return 22;
     if (frame.gpr[1] != 0 &&
         (!dispatcher.memory_ || !dispatcher.memory_->IsExecutable(frame.gpr[1])))

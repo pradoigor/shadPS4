@@ -1,4 +1,4 @@
-# Extração e runtime experimental UWP 0.51.0
+# Extração e runtime experimental UWP 0.52.0
 
 O aplicativo executa extração, inspeciona metadados e oferece carregamento controlado. A biblioteca
 abre ao iniciar, usa uma faixa horizontal navegável pelo controle e distingue

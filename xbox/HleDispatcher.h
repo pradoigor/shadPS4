@@ -70,6 +70,8 @@ private:
 
     static std::uint64_t Dispatch(void* context, std::uint64_t slot,
                                   GuestCallFrame const* frame, void* guestStack) noexcept;
+    static void* WritablePointer(HleDispatcher&, GuestCallFrame const&,
+                                 std::uint64_t address, std::size_t bytes) noexcept;
     static std::uint64_t Unimplemented(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelErrorPointer(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t GenericSuccess(HleDispatcher&, GuestCallFrame const&) noexcept;
