@@ -1,0 +1,21 @@
+name: Xbox ANGLE UWP dependency
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build pinned ANGLE for UWP x64
+        shell: pwsh
+        run: ./xbox/scripts/build_angle.ps1
+      - name: Upload ANGLE binaries and provenance
+        uses: actions/upload-artifact@v4
+        with:
+          name: angle-uwp-x64-${{ github.sha }}
+          path: xbox/angle-artifacts/
+          if-no-files-found: error
+          retention-days: 14
