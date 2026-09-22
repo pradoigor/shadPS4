@@ -271,9 +271,13 @@ void HleDispatcher::ConfigureFileSystem(std::filesystem::path appRoot,
     std::filesystem::create_directories(dataRoot_);
 }
 
-void HleDispatcher::ConfigureTrace(std::filesystem::path path) {
+void HleDispatcher::ConfigureTrace(std::filesystem::path path,
+                                   std::string const& sessionId) {
     tracePath_ = std::move(path);
     traceHistoryPath_ = tracePath_.parent_path() / L"homebrew-hle-trace.jsonl";
+    traceArchivePath_ = sessionId.empty()
+        ? std::filesystem::path{}
+        : tracePath_.parent_path() / ("homebrew-hle-" + sessionId + ".jsonl");
     std::error_code ignored;
     std::filesystem::remove(traceHistoryPath_, ignored);
 }
@@ -326,6 +330,13 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
                 write(history);
                 history << '\n';
                 history.flush();
+                if (!self->traceArchivePath_.empty()) {
+                    std::ofstream archive(self->traceArchivePath_,
+                                         std::ios::binary | std::ios::app);
+                    write(archive);
+                    archive << '\n';
+                    archive.flush();
+                }
             }
         } catch (...) {
         }

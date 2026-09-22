@@ -4,30 +4,18 @@ Aplicativo **UWP x64 / C++/WinRT / XAML** para medir a viabilidade de portar
 shadPS4 ao Xbox Series X em Dev Mode. **Ainda não é um emulador PS4 no Xbox.**
 O alvo é independente do CMake e das dependências desktop do núcleo.
 
-A versão **0.59.0.0** inclui biblioteca horizontal inspirada no PS4, importação de
-PKG/ELF, keysets FPKG embutidos, importação de chaves personalizadas, extração em
-segundo plano e um probe de execução controlada com auditoria de requisitos runtime,
-relocação e inventário de NIDs HLE. O ELF/SELF selecionado é apenas
-validado primeiro em buffer não executável e depois copiado para um mapa coerente
-com proteção por segmento; o único código que recebe controle de fluxo é um ELF
-mínimo gerado pelo próprio projeto, com retorno esperado `42`. O relatório também
-conta segmentos dynamic/TLS, relocações e dependências importadas, valida os tipos
-e os alvos das relocações em `PT_LOAD` e `PT_SCE_RELRO`, mas ainda não as aplica
-nem resolve todos os imports. As relocações relativas são conferidas em uma cópia
-privada e reaplicadas com a base escolhida pelo UWP no mapa coerente;
-o arquivo selecionado continua intocado.
-Os símbolos pendentes também têm seus índices e nomes conferidos contra as
-tabelas internas. O relatório cruza cada NID com o registro AeroLib derivado do
-núcleo e registra o nome conhecido ou a ausência de correspondência. Esse
-inventário identifica símbolos e o probe cria endereços HLE temporários, mas não
-altera relocações no arquivo nem executa o conteúdo. O relatório também lista os IDs codificados
-das bibliotecas/módulos importados para montar a ponte HLE. Os nomes das
-bibliotecas e versões são lidos da tabela de strings do ELF, sem executar o
-conteúdo.
+A versão **0.59.0.0** inclui biblioteca horizontal inspirada no PS4, importação e
+extração de PKG/ELF, keysets FPKG embutidos e duas ações distintas. **Executar
+probe controlado** valida o arquivo selecionado e executa apenas um ELF mínimo
+gerado pelo projeto. **Iniciar homebrew** mapeia o `eboot.bin` extraído, aplica
+relocações, liga imports HLE e transfere controle ao `e_entry` real. Essa segunda
+ação é experimental: o Apollo ainda fecha durante a inicialização e não chegou à
+interface. O arquivo original permanece intocado.
 
-O probe também calcula um gate de runtime. Enquanto a ponte ABI, os endereços HLE
-e o renderer UWP não estiverem prontos, o gate permanece bloqueado e registra os
-motivos no relatório; nenhum `e_entry` recebido pode ser chamado.
+O diagnóstico registra segmentos, TLS, relocações, imports e o estado da ponte
+SysV/Windows. O runtime guarda a primeira exceção, registradores, instrução,
+estado de memória e sequência HLE em arquivos por sessão. O botão **Exportar**
+reúne essas evidências em um JSON; veja [DEBUGGING.md](DEBUGGING.md).
 O código também contém um alocador de thunks SysV→Windows protegido como RX. A
 ponte preserva os seis argumentos inteiros, registradores XMM e o ponteiro da
 pilha convidada sem sobrepor o shadow space do ABI Windows. Uma chamada gerada

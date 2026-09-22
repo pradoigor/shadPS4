@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "HomebrewRuntime.h"
 
+#include "BuildInfo.h"
 #include "SysvThunk.h"
 #include "core/platform_memory.h"
 
@@ -12,19 +13,80 @@
 #include <fstream>
 #include <intrin.h>
 #include <stdexcept>
+#include <string_view>
 #include <windows.h>
 
 namespace Lab {
 namespace {
 
 std::filesystem::path gCrashStateFile;
+std::filesystem::path gCrashSessionFile;
+char gSessionId[64]{};
+char gBuildCommit[64]{};
 std::uint64_t gGuestHostBase{};
 std::uint64_t gGuestVirtualBase{};
 std::uint64_t gGuestImageSize{};
 std::atomic_bool gGuestCrashRecorded{};
+std::atomic<std::uint32_t> gGuestThreadId{};
 std::uint32_t gGuestTlsSlot{UINT32_MAX};
 std::uint64_t gExpectedTcb{};
 std::uint64_t UnixSeconds() noexcept;
+
+std::string EscapeJson(std::string_view input) {
+  std::string escaped;
+  escaped.reserve(input.size());
+  constexpr char digits[] = "0123456789abcdef";
+  for (unsigned char byte : input) {
+    if (byte == '"' || byte == '\\') {
+      escaped.push_back('\\');
+      escaped.push_back(static_cast<char>(byte));
+    } else if (byte < 0x20) {
+      escaped += "\\u00";
+      escaped.push_back(digits[byte >> 4]);
+      escaped.push_back(digits[byte & 15]);
+    } else {
+      escaped.push_back(static_cast<char>(byte));
+    }
+  }
+  return escaped;
+}
+
+SIZE_T QueryMemory(void const* address, MEMORY_BASIC_INFORMATION* information) noexcept {
+  using Query = SIZE_T(WINAPI*)(LPCVOID, PMEMORY_BASIC_INFORMATION, SIZE_T);
+  auto module = GetModuleHandleW(L"kernelbase.dll");
+  auto query = module ? reinterpret_cast<Query>(GetProcAddress(module, "VirtualQuery"))
+                      : nullptr;
+  return query ? query(address, information, sizeof(*information)) : 0;
+}
+
+bool Readable(MEMORY_BASIC_INFORMATION const& information, std::uint64_t address,
+              std::size_t bytes) noexcept {
+  if (information.State != MEM_COMMIT || (information.Protect & PAGE_GUARD) ||
+      information.Protect == PAGE_NOACCESS || information.Protect == 0 ||
+      information.Protect == PAGE_EXECUTE)
+    return false;
+  auto const begin = reinterpret_cast<std::uint64_t>(information.BaseAddress);
+  return address >= begin && bytes <= information.RegionSize &&
+         address - begin <= information.RegionSize - bytes;
+}
+
+void WriteCrashFile(std::filesystem::path const& path, char const* payload,
+                    DWORD length, DWORD disposition) noexcept {
+  if (path.empty()) return;
+  CREATEFILE2_EXTENDED_PARAMETERS parameters{sizeof(parameters)};
+  parameters.dwFileAttributes = FILE_ATTRIBUTE_NORMAL;
+  HANDLE file = CreateFile2(path.c_str(), GENERIC_WRITE,
+                            FILE_SHARE_READ, disposition, &parameters);
+  if (file == INVALID_HANDLE_VALUE) return;
+  if (disposition == OPEN_ALWAYS)
+    SetFilePointer(file, 0, nullptr, FILE_END);
+  DWORD written{};
+  WriteFile(file, payload, length, &written, nullptr);
+  if (disposition == OPEN_ALWAYS)
+    WriteFile(file, "\n", 1, &written, nullptr);
+  FlushFileBuffers(file);
+  CloseHandle(file);
+}
 
 std::uint32_t PatchFsTcbReads(std::vector<std::uint8_t>& image,
                               std::uint64_t virtualBase,
@@ -75,7 +137,7 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
   // replace that evidence with a second exception during unwinding.
   if (gGuestCrashRecorded.exchange(true))
     return EXCEPTION_EXECUTE_HANDLER;
-  char payload[1200]{};
+  char payload[3000]{};
   const auto *record = exception->ExceptionRecord;
   const auto fault = record->NumberParameters > 1
                          ? record->ExceptionInformation[1]
@@ -93,8 +155,22 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
     }
   }
   MEMORY_BASIC_INFORMATION tcbMemory{};
-  VirtualQueryFromApp(reinterpret_cast<void const*>(exception->ContextRecord->Rcx),
-                      &tcbMemory, sizeof(tcbMemory));
+  MEMORY_BASIC_INFORMATION stackMemory{};
+  MEMORY_BASIC_INFORMATION faultMemory{};
+  QueryMemory(reinterpret_cast<void const*>(exception->ContextRecord->Rcx), &tcbMemory);
+  QueryMemory(reinterpret_cast<void const*>(exception->ContextRecord->Rsp), &stackMemory);
+  if (fault)
+    QueryMemory(reinterpret_cast<void const*>(fault), &faultMemory);
+  std::uint64_t stackWords[8]{};
+  if (Readable(stackMemory, exception->ContextRecord->Rsp, sizeof(stackWords)))
+    std::memcpy(stackWords,
+                reinterpret_cast<void const*>(exception->ContextRecord->Rsp),
+                sizeof(stackWords));
+  std::uint32_t tcbThreadId{};
+  if (Readable(tcbMemory, exception->ContextRecord->Rcx, 60))
+    std::memcpy(&tcbThreadId,
+                reinterpret_cast<void const*>(exception->ContextRecord->Rcx + 56),
+                sizeof(tcbThreadId));
   const auto tlsOffset = gGuestTlsSlot < 64
                              ? 0x1480u + gGuestTlsSlot * sizeof(void*)
                              : 0u;
@@ -113,16 +189,26 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
   const int length = std::snprintf(
       payload, sizeof(payload),
       "{\"stage\":\"guest_exception\",\"exception_code\":%lu,"
+      "\"session_id\":\"%s\",\"build_commit\":\"%s\","
       "\"exception_address\":%llu,\"rip\":%llu,\"rsp\":%llu,"
       "\"rcx\":%llu,\"tls_slot\":%lu,\"expected_tcb\":%llu,"
       "\"observed_tcb\":%llu,"
       "\"rax\":%llu,\"rdx\":%llu,\"rdi\":%llu,"
+      "\"rbx\":%llu,\"rsi\":%llu,\"rbp\":%llu,"
+      "\"r8\":%llu,\"r9\":%llu,\"r10\":%llu,\"r11\":%llu,"
+      "\"r12\":%llu,\"r13\":%llu,\"r14\":%llu,\"r15\":%llu,"
+      "\"eflags\":%lu,\"thread_id\":%lu,"
       "\"instruction_bytes\":\"%s\",\"tcb_page_state\":%lu,"
-      "\"tcb_page_protection\":%lu,"
+      "\"tcb_page_protection\":%lu,\"tcb_thread_id\":%lu,"
+      "\"stack_page_state\":%lu,\"stack_page_protection\":%lu,"
+      "\"fault_page_state\":%lu,\"fault_page_protection\":%lu,"
+      "\"stack_words\":[%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu],"
       "\"exception_parameters\":%lu,\"access_kind\":%llu,"
       "\"fault_address\":%llu,\"guest_virtual_rip\":%llu,"
-      "\"guest_virtual_fault\":%llu,\"timestamp\":%llu}",
+      "\"guest_virtual_fault\":%llu,\"fault_domain\":\"%s\","
+      "\"timestamp\":%llu}",
       static_cast<unsigned long>(record->ExceptionCode),
+      gSessionId, gBuildCommit,
       static_cast<unsigned long long>(
           reinterpret_cast<std::uintptr_t>(record->ExceptionAddress)),
       static_cast<unsigned long long>(rip),
@@ -134,33 +220,61 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
       static_cast<unsigned long long>(exception->ContextRecord->Rax),
       static_cast<unsigned long long>(exception->ContextRecord->Rdx),
       static_cast<unsigned long long>(exception->ContextRecord->Rdi),
+      static_cast<unsigned long long>(exception->ContextRecord->Rbx),
+      static_cast<unsigned long long>(exception->ContextRecord->Rsi),
+      static_cast<unsigned long long>(exception->ContextRecord->Rbp),
+      static_cast<unsigned long long>(exception->ContextRecord->R8),
+      static_cast<unsigned long long>(exception->ContextRecord->R9),
+      static_cast<unsigned long long>(exception->ContextRecord->R10),
+      static_cast<unsigned long long>(exception->ContextRecord->R11),
+      static_cast<unsigned long long>(exception->ContextRecord->R12),
+      static_cast<unsigned long long>(exception->ContextRecord->R13),
+      static_cast<unsigned long long>(exception->ContextRecord->R14),
+      static_cast<unsigned long long>(exception->ContextRecord->R15),
+      static_cast<unsigned long>(exception->ContextRecord->EFlags),
+      static_cast<unsigned long>(GetCurrentThreadId()),
       instructionBytes,
       static_cast<unsigned long>(tcbMemory.State),
       static_cast<unsigned long>(tcbMemory.Protect),
+      static_cast<unsigned long>(tcbThreadId),
+      static_cast<unsigned long>(stackMemory.State),
+      static_cast<unsigned long>(stackMemory.Protect),
+      static_cast<unsigned long>(faultMemory.State),
+      static_cast<unsigned long>(faultMemory.Protect),
+      static_cast<unsigned long long>(stackWords[0]),
+      static_cast<unsigned long long>(stackWords[1]),
+      static_cast<unsigned long long>(stackWords[2]),
+      static_cast<unsigned long long>(stackWords[3]),
+      static_cast<unsigned long long>(stackWords[4]),
+      static_cast<unsigned long long>(stackWords[5]),
+      static_cast<unsigned long long>(stackWords[6]),
+      static_cast<unsigned long long>(stackWords[7]),
       static_cast<unsigned long>(record->NumberParameters),
       static_cast<unsigned long long>(accessKind),
       static_cast<unsigned long long>(fault),
       static_cast<unsigned long long>(guestRip),
       static_cast<unsigned long long>(guestFault),
+      guestRip ? "guest_image" : "host_runtime",
       static_cast<unsigned long long>(UnixSeconds()));
   if (length > 0) {
-    CREATEFILE2_EXTENDED_PARAMETERS parameters{sizeof(parameters)};
-    parameters.dwFileAttributes = FILE_ATTRIBUTE_NORMAL;
-    HANDLE file = CreateFile2(gCrashStateFile.c_str(), GENERIC_WRITE,
-                              FILE_SHARE_READ, CREATE_ALWAYS, &parameters);
-    if (file != INVALID_HANDLE_VALUE) {
-      DWORD written{};
-      WriteFile(file, payload, static_cast<DWORD>(length < 1199 ? length : 1199),
-                &written, nullptr);
-      FlushFileBuffers(file);
-      CloseHandle(file);
+    if (length >= static_cast<int>(sizeof(payload))) {
+      length = std::snprintf(payload, sizeof(payload),
+          "{\"stage\":\"guest_exception\",\"session_id\":\"%s\","
+          "\"build_commit\":\"%s\",\"diagnostic_truncated\":true}",
+          gSessionId, gBuildCommit);
+    }
+    if (length > 0 && length < static_cast<int>(sizeof(payload))) {
+      WriteCrashFile(gCrashStateFile, payload, static_cast<DWORD>(length), CREATE_ALWAYS);
+      WriteCrashFile(gCrashSessionFile, payload, static_cast<DWORD>(length), OPEN_ALWAYS);
     }
   }
   return EXCEPTION_EXECUTE_HANDLER;
 }
 
 LONG CALLBACK RecordGuestVectoredException(EXCEPTION_POINTERS *exception) noexcept {
-  if (!exception || !exception->ExceptionRecord)
+  if (!exception || !exception->ExceptionRecord || !exception->ContextRecord)
+    return EXCEPTION_CONTINUE_SEARCH;
+  if (GetCurrentThreadId() != gGuestThreadId.load())
     return EXCEPTION_CONTINUE_SEARCH;
   switch (exception->ExceptionRecord->ExceptionCode) {
   case EXCEPTION_ACCESS_VIOLATION:
@@ -216,16 +330,35 @@ HomebrewRuntime::~HomebrewRuntime() {
 void HomebrewRuntime::Record(std::string const &stage,
                              std::string const &detail) noexcept {
   try {
+    const auto payload = std::string{"{\"stage\":\""} + EscapeJson(stage) +
+                         "\",\"detail\":\"" + EscapeJson(detail) +
+                         "\",\"session_id\":\"" + sessionId_ +
+                         "\",\"build_commit\":\"" + gBuildCommit +
+                         "\",\"session_file\":\"" +
+                         EscapeJson(sessionFile_.filename().string()) +
+                         "\",\"hle_trace_file\":\"homebrew-hle-" +
+                         sessionId_ + ".jsonl" +
+                         "\",\"thread_id\":" + std::to_string(GetCurrentThreadId()) +
+                         ",\"guest_entry\":" + std::to_string(load_.entry) +
+                         ",\"guest_image_base\":" +
+                         std::to_string(gGuestHostBase) +
+                         ",\"guest_image_size\":" +
+                         std::to_string(load_.private_image.size()) +
+                         ",\"patched_fs_reads\":" +
+                         std::to_string(patchedFsReads_) +
+                         ",\"timestamp\":" + std::to_string(UnixSeconds()) + "}";
     auto temporary = stateFile_;
     temporary += L".tmp";
     std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-    output << "{\"stage\":\"" << stage << "\",\"detail\":\"" << detail
-           << "\",\"timestamp\":" << UnixSeconds() << "}";
+    output << payload;
     output.flush();
     output.close();
     std::error_code ignored;
     std::filesystem::remove(stateFile_, ignored);
     std::filesystem::rename(temporary, stateFile_);
+    std::ofstream session(sessionFile_, std::ios::binary | std::ios::app);
+    session << payload << '\n';
+    session.flush();
   } catch (...) {
   }
 }
@@ -247,6 +380,25 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
 
   executable_ = std::move(executable);
   stateFile_ = stateRoot / L"homebrew-runtime.json";
+  sessionId_ = std::to_string(UnixSeconds()) + "-" +
+               std::to_string(GetTickCount64()) + "-" +
+               std::to_string(GetCurrentProcessId());
+  sessionFile_ = stateRoot / ("homebrew-session-" + sessionId_ + ".jsonl");
+  std::snprintf(gSessionId, sizeof(gSessionId), "%s", sessionId_.c_str());
+  std::size_t commitLength{};
+  while (XBOX_BUILD_COMMIT[commitLength] && commitLength < sizeof(gBuildCommit) - 1) {
+    gBuildCommit[commitLength] = static_cast<char>(XBOX_BUILD_COMMIT[commitLength]);
+    ++commitLength;
+  }
+  gBuildCommit[commitLength] = 0;
+  gCrashSessionFile = sessionFile_;
+  gGuestHostBase = 0;
+  gGuestVirtualBase = 0;
+  gGuestImageSize = 0;
+  gGuestTlsSlot = UINT32_MAX;
+  gExpectedTcb = 0;
+  gGuestThreadId.store(0);
+  patchedFsReads_ = 0;
   Record("loading", "Carregando o eboot.bin real.");
   load_ = LoadControlled(executable_);
   if (!load_.validated || !load_.mapped || load_.private_image.empty())
@@ -259,7 +411,7 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
   dispatcher_ = std::make_unique<HleDispatcher>();
   dispatcher_->ConfigureFileSystem(executable_.parent_path(),
                                     executable_.parent_path() / L"RuntimeData");
-  dispatcher_->ConfigureTrace(stateRoot / L"homebrew-last-hle.json");
+  dispatcher_->ConfigureTrace(stateRoot / L"homebrew-last-hle.json", sessionId_);
   const auto bindings = dispatcher_->Bind(load_.pending_symbol_names);
   if (bindings.executable_addresses != load_.pending_symbol_names.size())
     throw std::runtime_error("Nem todos os imports receberam thunk HLE.");
@@ -315,7 +467,8 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
 }
 
 void HomebrewRuntime::RunEntry() noexcept {
-  Record("entry_started", "Controle transferido ao e_entry do homebrew.");
+  gGuestThreadId.store(GetCurrentThreadId());
+  Record("thread_started", "Thread do homebrew criada; preparando TLS convidado.");
   auto* tcb = static_cast<std::uint8_t*>(mainTlsPage_) + 64;
   mainDtv_ = {1, 1, 0, 0};
   std::memcpy(tcb, &tcb, sizeof(tcb));
@@ -338,6 +491,14 @@ void HomebrewRuntime::RunEntry() noexcept {
     running_.store(false);
     return;
   }
+  std::uint32_t observedThreadId{};
+  std::memcpy(&observedThreadId, tcb + 56, sizeof(observedThreadId));
+  if (observedThreadId != threadId) {
+    Record("tls_invalid", "O campo de thread do TCB não foi preservado.");
+    running_.store(false);
+    return;
+  }
+  Record("entry_started", "TLS e TCB verificados; transferindo controle ao e_entry.");
   gGuestCrashRecorded.store(false);
   using AddVectoredHandler = PVOID(WINAPI *)(
       ULONG, PVECTORED_EXCEPTION_HANDLER);

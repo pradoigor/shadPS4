@@ -55,7 +55,7 @@ public:
     void AttachGuestMemory(GuestMemory* memory) noexcept { memory_ = memory; }
     void ConfigureFileSystem(std::filesystem::path appRoot,
                              std::filesystem::path dataRoot);
-    void ConfigureTrace(std::filesystem::path path);
+    void ConfigureTrace(std::filesystem::path path, std::string const& sessionId = {});
 
     std::size_t implementedCount() const noexcept;
     std::size_t unresolvedCount() const noexcept;
@@ -199,6 +199,7 @@ private:
     std::int32_t nextFileDescriptor_{3};
     std::filesystem::path tracePath_;
     std::filesystem::path traceHistoryPath_;
+    std::filesystem::path traceArchivePath_;
     std::mutex traceMutex_;
     std::uint64_t callSequence_{};
     struct GuestSignalAction {

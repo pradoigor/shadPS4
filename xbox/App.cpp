@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <array>
 #include <fstream>
+#include <iterator>
 #include <chrono>
 #include <winrt/Windows.ApplicationModel.h>
 #include <winrt/Windows.ApplicationModel.Activation.h>
@@ -381,10 +382,45 @@ struct App : ApplicationT<App> {
                 if (!Save()) return;
                 try {
                     auto name = L"report-export-" + std::to_wstring(static_cast<uint64_t>(Lab::Now())) + L".json";
-                    std::string payload = to_string(report->Json().Stringify());
+                    auto exported = report->Json();
+                    Windows::Data::Json::JsonObject debug;
+                    auto directory = std::filesystem::path(report->directory);
+                    auto runtimePath = directory / L"homebrew-runtime.json";
+                    std::wstring sessionName;
+                    if (std::filesystem::is_regular_file(runtimePath)) {
+                        std::ifstream input(runtimePath, std::ios::binary);
+                        std::string raw{std::istreambuf_iterator<char>(input), {}};
+                        auto runtime = Windows::Data::Json::JsonObject::Parse(to_hstring(raw));
+                        sessionName = std::wstring(runtime.GetNamedString(L"session_file", L""));
+                        if (sessionName.empty()) {
+                            auto sessionId = runtime.GetNamedString(L"session_id", L"");
+                            if (!sessionId.empty())
+                                sessionName = L"homebrew-session-" + std::wstring(sessionId) + L".jsonl";
+                        }
+                        debug.SetNamedValue(L"runtime", runtime);
+                    }
+                    auto includeLines = [&](wchar_t const* field, std::filesystem::path const& path) {
+                        Windows::Data::Json::JsonArray events;
+                        if (std::filesystem::is_regular_file(path)) {
+                            std::ifstream input(path, std::ios::binary);
+                            std::string line;
+                            while (events.Size() < 8192 && std::getline(input, line)) {
+                                try {
+                                    events.Append(Windows::Data::Json::JsonObject::Parse(to_hstring(line)));
+                                } catch (...) {}
+                            }
+                        }
+                        debug.SetNamedValue(field, events);
+                    };
+                    includeLines(L"hle_trace", directory / L"homebrew-hle-trace.jsonl");
+                    if (!sessionName.empty())
+                        includeLines(L"session_events", directory / std::filesystem::path(sessionName).filename());
+                    exported.SetNamedValue(L"homebrew_debug", debug);
+                    std::string payload = to_string(exported.Stringify());
                     Lab::WriteDurable(report->directory + L"\\" + name, payload);
-                    status.Text(L"Exportado para LocalState\\" + name + L". Baixe pelo Device Portal.");
+                    status.Text(L"Diagnóstico completo exportado para LocalState\\" + name + L". Baixe pelo Device Portal.");
                 } catch (hresult_error const& e) { status.Text(L"Falha na exportação: " + e.message()); }
+                  catch (std::exception const& e) { status.Text(L"Falha na exportação: " + std::wstring(to_hstring(e.what()))); }
             });
             timer = DispatcherTimer(); timer.Interval(std::chrono::milliseconds(100));
             timer.Tick([this](auto const&, auto const&) {
@@ -419,7 +455,10 @@ struct App : ApplicationT<App> {
                     auto previous = Windows::Data::Json::JsonObject::Parse(to_hstring(raw));
                     auto stage = previous.GetNamedString(L"stage", L"unknown");
                     auto detail = previous.GetNamedString(L"detail", L"");
-                    libraryStatus.Text(L"Última execução · " + std::wstring(stage) + L"\n" + std::wstring(detail));
+                    auto session = previous.GetNamedString(L"session_file", L"");
+                    auto message = L"Última execução · " + std::wstring(stage) + L"\n" + std::wstring(detail);
+                    if (!session.empty()) message += L"\nSessão: " + std::wstring(session);
+                    libraryStatus.Text(message);
                 } catch (...) { libraryStatus.Text(L"O registro da última execução está ilegível."); }
             }
             ShowLibrary(true);
