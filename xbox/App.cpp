@@ -156,7 +156,7 @@ struct App : ApplicationT<App> {
             homebrew = std::make_unique<Lab::HomebrewRuntime>();
             homebrew->Start(std::filesystem::path(selectedLoaderPath),
                             std::filesystem::path(report->directory));
-            libraryStatus.Text(L"Apollo iniciado: o e_entry real recebeu controle. Se o aplicativo fechar, abra novamente para ver o último estágio persistido.");
+            libraryStatus.Text(L"Homebrew em execução. A saída gráfica PS4 ainda não está conectada ao Xbox; acompanhe o diagnóstico exportado.");
             Find<Button>(L"LaunchContent").IsEnabled(false);
         } catch (std::exception const& e) {
             homebrew.reset();
@@ -387,15 +387,16 @@ struct App : ApplicationT<App> {
                     auto directory = std::filesystem::path(report->directory);
                     auto runtimePath = directory / L"homebrew-runtime.json";
                     std::wstring sessionName;
+                    std::wstring sessionId;
                     if (std::filesystem::is_regular_file(runtimePath)) {
                         std::ifstream input(runtimePath, std::ios::binary);
                         std::string raw{std::istreambuf_iterator<char>(input), {}};
                         auto runtime = Windows::Data::Json::JsonObject::Parse(to_hstring(raw));
                         sessionName = std::wstring(runtime.GetNamedString(L"session_file", L""));
+                        sessionId = std::wstring(runtime.GetNamedString(L"session_id", L""));
                         if (sessionName.empty()) {
-                            auto sessionId = runtime.GetNamedString(L"session_id", L"");
                             if (!sessionId.empty())
-                                sessionName = L"homebrew-session-" + std::wstring(sessionId) + L".jsonl";
+                                sessionName = L"homebrew-session-" + sessionId + L".jsonl";
                         }
                         debug.SetNamedValue(L"runtime", runtime);
                     }
@@ -415,6 +416,25 @@ struct App : ApplicationT<App> {
                     includeLines(L"hle_trace", directory / L"homebrew-hle-trace.jsonl");
                     if (!sessionName.empty())
                         includeLines(L"session_events", directory / std::filesystem::path(sessionName).filename());
+                    auto lastHle = directory / L"homebrew-last-hle.json";
+                    if (std::filesystem::is_regular_file(lastHle)) {
+                        try {
+                            std::ifstream input(lastHle, std::ios::binary);
+                            std::string raw{std::istreambuf_iterator<char>(input), {}};
+                            debug.SetNamedValue(L"last_hle", Windows::Data::Json::JsonObject::Parse(to_hstring(raw)));
+                        } catch (...) {}
+                    }
+                    if (!sessionId.empty()) {
+                        auto console = directory / (L"homebrew-console-" + sessionId + L".log");
+                        if (std::filesystem::is_regular_file(console)) {
+                            std::ifstream input(console, std::ios::binary);
+                            std::string raw{std::istreambuf_iterator<char>(input), {}};
+                            try {
+                                debug.SetNamedValue(L"console_log",
+                                    Windows::Data::Json::JsonValue::CreateStringValue(to_hstring(raw)));
+                            } catch (...) {}
+                        }
+                    }
                     exported.SetNamedValue(L"homebrew_debug", debug);
                     std::string payload = to_string(exported.Stringify());
                     Lab::WriteDurable(report->directory + L"\\" + name, payload);

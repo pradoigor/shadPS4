@@ -126,6 +126,7 @@ private:
     static std::uint64_t KernelClose(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelRead(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelWrite(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelWritev(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelLseek(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelFsync(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t FileAccess(HleDispatcher&, GuestCallFrame const&) noexcept;
@@ -200,6 +201,10 @@ private:
     std::filesystem::path tracePath_;
     std::filesystem::path traceHistoryPath_;
     std::filesystem::path traceArchivePath_;
+    std::filesystem::path consolePath_;
+    std::mutex consoleMutex_;
+    std::size_t consoleBytes_{};
+    void AppendConsole(void const* bytes, std::size_t length) noexcept;
     std::mutex traceMutex_;
     std::uint64_t callSequence_{};
     struct GuestSignalAction {

@@ -4,7 +4,7 @@ Aplicativo **UWP x64 / C++/WinRT / XAML** para medir a viabilidade de portar
 shadPS4 ao Xbox Series X em Dev Mode. **Ainda não é um emulador PS4 no Xbox.**
 O alvo é independente do CMake e das dependências desktop do núcleo.
 
-A versão **0.59.0.0** inclui biblioteca horizontal inspirada no PS4, importação e
+A versão **0.60.0.0** inclui biblioteca horizontal inspirada no PS4, importação e
 extração de PKG/ELF, keysets FPKG embutidos e duas ações distintas. **Executar
 probe controlado** valida o arquivo selecionado e executa apenas um ELF mínimo
 gerado pelo projeto. **Iniciar homebrew** mapeia o `eboot.bin` extraído, aplica
@@ -16,6 +16,8 @@ O diagnóstico registra segmentos, TLS, relocações, imports e o estado da pont
 SysV/Windows. O runtime guarda a primeira exceção, registradores, instrução,
 estado de memória e sequência HLE em arquivos por sessão. O botão **Exportar**
 reúne essas evidências em um JSON; veja [DEBUGGING.md](DEBUGGING.md).
+O serviço `_writev` usa vetores de buffers validados, escreve nos descritores
+abertos e registra a saída de console dos descritores 0–2 em LocalState.
 O código também contém um alocador de thunks SysV→Windows protegido como RX. A
 ponte preserva os seis argumentos inteiros, registradores XMM e o ponteiro da
 pilha convidada sem sobrepor o shadow space do ABI Windows. Uma chamada gerada

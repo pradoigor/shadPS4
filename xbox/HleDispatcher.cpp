@@ -167,6 +167,8 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "close") use(&KernelClose);
     if (name == "read" || name == "_read") use(&KernelRead);
     if (name == "write" || name == "_write") use(&KernelWrite);
+    if (name == "_writev" || name == "writev" || name == "sceKernelWritev")
+        use(&KernelWritev);
     if (name == "lseek") use(&KernelLseek);
     if (name == "fsync") use(&KernelFsync);
     if (name == "access") use(&FileAccess);
@@ -278,8 +280,28 @@ void HleDispatcher::ConfigureTrace(std::filesystem::path path,
     traceArchivePath_ = sessionId.empty()
         ? std::filesystem::path{}
         : tracePath_.parent_path() / ("homebrew-hle-" + sessionId + ".jsonl");
+    consolePath_ = sessionId.empty()
+        ? std::filesystem::path{}
+        : tracePath_.parent_path() / ("homebrew-console-" + sessionId + ".log");
+    consoleBytes_ = 0;
     std::error_code ignored;
+    std::filesystem::remove(tracePath_, ignored);
     std::filesystem::remove(traceHistoryPath_, ignored);
+}
+
+void HleDispatcher::AppendConsole(void const* bytes, std::size_t length) noexcept {
+    constexpr std::size_t ConsoleLimit = 1024 * 1024;
+    if (!bytes || length == 0 || consolePath_.empty()) return;
+    try {
+        std::scoped_lock lock(consoleMutex_);
+        if (consoleBytes_ >= ConsoleLimit) return;
+        const auto accepted = (std::min)(length, ConsoleLimit - consoleBytes_);
+        std::ofstream output(consolePath_, std::ios::binary | std::ios::app);
+        output.write(static_cast<char const*>(bytes),
+                     static_cast<std::streamsize>(accepted));
+        output.flush();
+        if (output) consoleBytes_ += accepted;
+    } catch (...) {}
 }
 
 std::size_t HleDispatcher::implementedCount() const noexcept {
@@ -968,16 +990,78 @@ std::uint64_t HleDispatcher::KernelWrite(HleDispatcher& dispatcher,
                                          GuestCallFrame const& frame) noexcept {
     constexpr std::uint64_t OrbisEbadf = 0x80020009ull;
     constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    constexpr std::uint64_t OrbisEinval = 0x80020016ull;
     const auto size = static_cast<std::size_t>(frame.gpr[2]);
-    auto found = dispatcher.files_.find(static_cast<std::int32_t>(frame.gpr[0]));
+    if (size > 16u * 1024u * 1024u) return OrbisEinval;
+    auto* input = ReadablePointer(dispatcher, frame, frame.gpr[1], size);
+    if (size != 0 && !input) return OrbisEfault;
+    const auto descriptor = static_cast<std::int32_t>(frame.gpr[0]);
+    if (descriptor >= 0 && descriptor <= 2) {
+        dispatcher.AppendConsole(input, size);
+        return frame.gpr[2];
+    }
+    auto found = dispatcher.files_.find(descriptor);
     if (found == dispatcher.files_.end() || found->second.directory ||
         !found->second.writable)
         return OrbisEbadf;
-    auto* input = dispatcher.memory_ ? dispatcher.memory_->Translate(frame.gpr[1], size) : nullptr;
-    if (size != 0 && !input) return OrbisEfault;
     found->second.stream.write(static_cast<char const*>(input),
                                static_cast<std::streamsize>(size));
     return found->second.stream ? frame.gpr[2] : OrbisEbadf;
+}
+
+std::uint64_t HleDispatcher::KernelWritev(HleDispatcher& dispatcher,
+                                          GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEbadf = 0x80020009ull;
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    constexpr std::uint64_t OrbisEnomem = 0x8002000Cull;
+    constexpr std::uint64_t OrbisEinval = 0x80020016ull;
+    constexpr std::size_t MaxVectors = 1024;
+    constexpr std::size_t MaxTransfer = 16u * 1024u * 1024u;
+    struct GuestIovec {
+        std::uint64_t base;
+        std::uint64_t length;
+    };
+    static_assert(sizeof(GuestIovec) == 16);
+    const auto count = frame.gpr[2];
+    if (count > MaxVectors) return OrbisEinval;
+    if (count == 0) return 0;
+    auto const* vectors = static_cast<GuestIovec const*>(ReadablePointer(
+        dispatcher, frame, frame.gpr[1],
+        static_cast<std::size_t>(count) * sizeof(GuestIovec)));
+    if (!vectors) return OrbisEfault;
+    const auto descriptor = static_cast<std::int32_t>(frame.gpr[0]);
+    const bool console = descriptor >= 0 && descriptor <= 2;
+    auto file = dispatcher.files_.find(descriptor);
+    if (!console && (file == dispatcher.files_.end() || file->second.directory ||
+                     !file->second.writable))
+        return OrbisEbadf;
+    try {
+        std::vector<std::pair<void const*, std::size_t>> parts;
+        parts.reserve(static_cast<std::size_t>(count));
+        std::size_t total{};
+        for (std::size_t index = 0; index < count; ++index) {
+            GuestIovec vector{};
+            std::memcpy(&vector, vectors + index, sizeof(vector));
+            if (vector.length > MaxTransfer - total) return OrbisEinval;
+            const auto length = static_cast<std::size_t>(vector.length);
+            auto const* input = ReadablePointer(dispatcher, frame, vector.base, length);
+            if (length != 0 && !input) return OrbisEfault;
+            parts.emplace_back(input, length);
+            total += length;
+        }
+        for (auto const& [input, length] : parts) {
+            if (length == 0) continue;
+            if (console) dispatcher.AppendConsole(input, length);
+            else {
+                file->second.stream.write(static_cast<char const*>(input),
+                                          static_cast<std::streamsize>(length));
+                if (!file->second.stream) return OrbisEbadf;
+            }
+        }
+        return static_cast<std::uint64_t>(total);
+    } catch (...) {
+        return OrbisEnomem;
+    }
 }
 
 std::uint64_t HleDispatcher::KernelLseek(HleDispatcher& dispatcher,

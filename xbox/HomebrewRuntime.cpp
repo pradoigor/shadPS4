@@ -348,6 +348,8 @@ void HomebrewRuntime::Record(std::string const &stage,
                          EscapeJson(sessionFile_.filename().string()) +
                          "\",\"hle_trace_file\":\"homebrew-hle-" +
                          sessionId_ + ".jsonl" +
+                         "\",\"console_file\":\"homebrew-console-" +
+                         sessionId_ + ".log" +
                          "\",\"thread_id\":" + std::to_string(GetCurrentThreadId()) +
                          ",\"guest_entry\":" + std::to_string(load_.entry) +
                          ",\"guest_image_base\":" +
