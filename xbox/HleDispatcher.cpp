@@ -166,6 +166,25 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "_fstat") use(&FileFstat);
     if (name == "ftruncate") use(&FileFtruncate);
     if (name == "getdents") use(&FileGetdents);
+    if (name == "pthread_mutexattr_init") use(&PthreadMutexAttrInit);
+    if (name == "pthread_mutexattr_settype") use(&PthreadMutexAttrSetType);
+    if (name == "pthread_mutex_init") use(&PthreadMutexInit);
+    if (name == "pthread_mutex_destroy") use(&PthreadMutexDestroy);
+    if (name == "pthread_mutex_lock") use(&PthreadMutexLock);
+    if (name == "pthread_mutex_trylock") use(&PthreadMutexTryLock);
+    if (name == "pthread_mutex_unlock") use(&PthreadMutexUnlock);
+    if (name == "pthread_cond_init") use(&PthreadCondInit);
+    if (name == "pthread_cond_destroy") use(&PthreadCondDestroy);
+    if (name == "pthread_cond_wait") use(&PthreadCondWait);
+    if (name == "pthread_cond_signal") use(&PthreadCondSignal);
+    if (name == "pthread_cond_broadcast") use(&PthreadCondBroadcast);
+    if (name == "sem_init") use(&SemaphoreInit);
+    if (name == "sem_destroy") use(&SemaphoreDestroy);
+    if (name == "sem_trywait") use(&SemaphoreTryWait);
+    if (name == "sem_wait") use(&SemaphoreWait);
+    if (name == "sem_timedwait") use(&SemaphoreTimedWait);
+    if (name == "sem_getvalue") use(&SemaphoreGetValue);
+    if (name == "sem_post") use(&SemaphorePost);
 
     const auto slot = static_cast<std::uint64_t>(entries_.size());
     entries_.push_back(Entry{encoded, nid, implemented, handler, nullptr});
@@ -945,6 +964,333 @@ std::uint64_t HleDispatcher::FileGetdents(HleDispatcher& dispatcher,
     } catch (...) {
         return UINT64_MAX;
     }
+}
+
+std::uint64_t HleDispatcher::PthreadMutexAttrInit(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto* slot = dispatcher.memory_
+                     ? static_cast<std::uint64_t*>(dispatcher.memory_->TranslateWritable(
+                           frame.gpr[0], sizeof(std::uint64_t)))
+                     : nullptr;
+    if (!slot) return 22;
+    try {
+        std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        dispatcher.mutexAttributes_[frame.gpr[0]] = 1;
+        *slot = frame.gpr[0];
+        return 0;
+    } catch (...) {
+        return 12;
+    }
+}
+
+std::uint64_t HleDispatcher::PthreadMutexAttrSetType(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    if (frame.gpr[1] < 1 || frame.gpr[1] > 4) return 22;
+    std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+    auto found = dispatcher.mutexAttributes_.find(frame.gpr[0]);
+    if (found == dispatcher.mutexAttributes_.end()) return 22;
+    found->second = static_cast<std::uint32_t>(frame.gpr[1]);
+    return 0;
+}
+
+std::uint64_t HleDispatcher::PthreadMutexInit(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto* slot = dispatcher.memory_
+                     ? static_cast<std::uint64_t*>(dispatcher.memory_->TranslateWritable(
+                           frame.gpr[0], sizeof(std::uint64_t)))
+                     : nullptr;
+    if (!slot) return 22;
+    try {
+        auto mutex = std::make_shared<GuestMutex>();
+        std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        dispatcher.mutexes_[frame.gpr[0]] = std::move(mutex);
+        *slot = frame.gpr[0];
+        return 0;
+    } catch (...) {
+        return 12;
+    }
+}
+
+std::uint64_t HleDispatcher::PthreadMutexDestroy(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto* slot = dispatcher.memory_
+                     ? static_cast<std::uint64_t*>(dispatcher.memory_->TranslateWritable(
+                           frame.gpr[0], sizeof(std::uint64_t)))
+                     : nullptr;
+    if (!slot) return 22;
+    std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+    dispatcher.mutexes_.erase(frame.gpr[0]);
+    *slot = 2;
+    return 0;
+}
+
+std::uint64_t HleDispatcher::PthreadMutexLock(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    try {
+        std::shared_ptr<GuestMutex> mutex;
+        {
+            std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+            auto found = dispatcher.mutexes_.find(frame.gpr[0]);
+            if (found == dispatcher.mutexes_.end()) {
+                auto* slot = dispatcher.memory_
+                                 ? static_cast<std::uint64_t*>(
+                                       dispatcher.memory_->TranslateWritable(
+                                           frame.gpr[0], sizeof(std::uint64_t)))
+                                 : nullptr;
+                if (!slot || *slot == 2) return 22;
+                mutex = std::make_shared<GuestMutex>();
+                dispatcher.mutexes_[frame.gpr[0]] = mutex;
+                *slot = frame.gpr[0];
+            } else {
+                mutex = found->second;
+            }
+        }
+        mutex->primitive.lock();
+        return 0;
+    } catch (...) {
+        return 22;
+    }
+}
+
+std::uint64_t HleDispatcher::PthreadMutexTryLock(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    try {
+        std::shared_ptr<GuestMutex> mutex;
+        {
+            std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+            auto found = dispatcher.mutexes_.find(frame.gpr[0]);
+            if (found == dispatcher.mutexes_.end()) return 22;
+            mutex = found->second;
+        }
+        return mutex->primitive.try_lock() ? 0 : 16;
+    } catch (...) {
+        return 22;
+    }
+}
+
+std::uint64_t HleDispatcher::PthreadMutexUnlock(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    try {
+        std::shared_ptr<GuestMutex> mutex;
+        {
+            std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+            auto found = dispatcher.mutexes_.find(frame.gpr[0]);
+            if (found == dispatcher.mutexes_.end()) return 22;
+            mutex = found->second;
+        }
+        mutex->primitive.unlock();
+        return 0;
+    } catch (...) {
+        return 1;
+    }
+}
+
+std::uint64_t HleDispatcher::PthreadCondInit(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto* slot = dispatcher.memory_
+                     ? static_cast<std::uint64_t*>(dispatcher.memory_->TranslateWritable(
+                           frame.gpr[0], sizeof(std::uint64_t)))
+                     : nullptr;
+    if (!slot) return 22;
+    try {
+        auto condition = std::make_shared<GuestCondition>();
+        std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        dispatcher.conditions_[frame.gpr[0]] = std::move(condition);
+        *slot = frame.gpr[0];
+        return 0;
+    } catch (...) {
+        return 12;
+    }
+}
+
+std::uint64_t HleDispatcher::PthreadCondDestroy(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto* slot = dispatcher.memory_
+                     ? static_cast<std::uint64_t*>(dispatcher.memory_->TranslateWritable(
+                           frame.gpr[0], sizeof(std::uint64_t)))
+                     : nullptr;
+    if (!slot) return 22;
+    std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+    dispatcher.conditions_.erase(frame.gpr[0]);
+    *slot = 2;
+    return 0;
+}
+
+std::uint64_t HleDispatcher::PthreadCondWait(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    try {
+        std::shared_ptr<GuestCondition> condition;
+        std::shared_ptr<GuestMutex> mutex;
+        {
+            std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+            auto foundCondition = dispatcher.conditions_.find(frame.gpr[0]);
+            auto foundMutex = dispatcher.mutexes_.find(frame.gpr[1]);
+            if (foundCondition == dispatcher.conditions_.end() ||
+                foundMutex == dispatcher.mutexes_.end())
+                return 22;
+            condition = foundCondition->second;
+            mutex = foundMutex->second;
+        }
+        std::unique_lock<std::recursive_mutex> lock(mutex->primitive, std::adopt_lock);
+        condition->primitive.wait(lock);
+        lock.release();
+        return 0;
+    } catch (...) {
+        return 22;
+    }
+}
+
+std::uint64_t HleDispatcher::PthreadCondSignal(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    std::shared_ptr<GuestCondition> condition;
+    {
+        std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        auto found = dispatcher.conditions_.find(frame.gpr[0]);
+        if (found == dispatcher.conditions_.end()) return 22;
+        condition = found->second;
+    }
+    condition->primitive.notify_one();
+    return 0;
+}
+
+std::uint64_t HleDispatcher::PthreadCondBroadcast(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    std::shared_ptr<GuestCondition> condition;
+    {
+        std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        auto found = dispatcher.conditions_.find(frame.gpr[0]);
+        if (found == dispatcher.conditions_.end()) return 22;
+        condition = found->second;
+    }
+    condition->primitive.notify_all();
+    return 0;
+}
+
+std::uint64_t HleDispatcher::SemaphoreInit(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto* slot = dispatcher.memory_
+                     ? static_cast<std::uint64_t*>(dispatcher.memory_->TranslateWritable(
+                           frame.gpr[0], sizeof(std::uint64_t)))
+                     : nullptr;
+    if (!slot || frame.gpr[2] > 32767) return UINT64_MAX;
+    try {
+        auto semaphore = std::make_shared<GuestSemaphore>();
+        semaphore->value = static_cast<std::uint32_t>(frame.gpr[2]);
+        std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        dispatcher.semaphores_[frame.gpr[0]] = std::move(semaphore);
+        *slot = frame.gpr[0];
+        return 0;
+    } catch (...) {
+        return UINT64_MAX;
+    }
+}
+
+std::uint64_t HleDispatcher::SemaphoreDestroy(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto* slot = dispatcher.memory_
+                     ? static_cast<std::uint64_t*>(dispatcher.memory_->TranslateWritable(
+                           frame.gpr[0], sizeof(std::uint64_t)))
+                     : nullptr;
+    if (!slot) return UINT64_MAX;
+    std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+    if (dispatcher.semaphores_.erase(frame.gpr[0]) == 0) return UINT64_MAX;
+    *slot = 0;
+    return 0;
+}
+
+std::uint64_t HleDispatcher::SemaphoreTryWait(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    std::shared_ptr<GuestSemaphore> semaphore;
+    {
+        std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        auto found = dispatcher.semaphores_.find(frame.gpr[0]);
+        if (found == dispatcher.semaphores_.end()) return UINT64_MAX;
+        semaphore = found->second;
+    }
+    std::scoped_lock lock(semaphore->mutex);
+    if (semaphore->value == 0) return UINT64_MAX;
+    --semaphore->value;
+    return 0;
+}
+
+std::uint64_t HleDispatcher::SemaphoreWait(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    std::shared_ptr<GuestSemaphore> semaphore;
+    {
+        std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        auto found = dispatcher.semaphores_.find(frame.gpr[0]);
+        if (found == dispatcher.semaphores_.end()) return UINT64_MAX;
+        semaphore = found->second;
+    }
+    std::unique_lock lock(semaphore->mutex);
+    semaphore->condition.wait(lock, [&] { return semaphore->value != 0; });
+    --semaphore->value;
+    return 0;
+}
+
+std::uint64_t HleDispatcher::SemaphoreTimedWait(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto const* timeout = dispatcher.memory_
+                              ? static_cast<OrbisTimespec const*>(
+                                    dispatcher.memory_->Translate(frame.gpr[1],
+                                                                  sizeof(OrbisTimespec)))
+                              : nullptr;
+    if (!timeout || timeout->seconds < 0 || timeout->nanoseconds < 0 ||
+        timeout->nanoseconds >= 1'000'000'000)
+        return UINT64_MAX;
+    std::shared_ptr<GuestSemaphore> semaphore;
+    {
+        std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        auto found = dispatcher.semaphores_.find(frame.gpr[0]);
+        if (found == dispatcher.semaphores_.end()) return UINT64_MAX;
+        semaphore = found->second;
+    }
+    const auto deadline = std::chrono::system_clock::time_point{
+        std::chrono::seconds(timeout->seconds) +
+        std::chrono::nanoseconds(timeout->nanoseconds)};
+    std::unique_lock lock(semaphore->mutex);
+    if (!semaphore->condition.wait_until(lock, deadline,
+                                         [&] { return semaphore->value != 0; }))
+        return UINT64_MAX;
+    --semaphore->value;
+    return 0;
+}
+
+std::uint64_t HleDispatcher::SemaphoreGetValue(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto* output = dispatcher.memory_
+                       ? static_cast<std::int32_t*>(dispatcher.memory_->TranslateWritable(
+                             frame.gpr[1], sizeof(std::int32_t)))
+                       : nullptr;
+    if (!output) return UINT64_MAX;
+    std::shared_ptr<GuestSemaphore> semaphore;
+    {
+        std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        auto found = dispatcher.semaphores_.find(frame.gpr[0]);
+        if (found == dispatcher.semaphores_.end()) return UINT64_MAX;
+        semaphore = found->second;
+    }
+    std::scoped_lock lock(semaphore->mutex);
+    *output = static_cast<std::int32_t>(semaphore->value);
+    return 0;
+}
+
+std::uint64_t HleDispatcher::SemaphorePost(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    std::shared_ptr<GuestSemaphore> semaphore;
+    {
+        std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        auto found = dispatcher.semaphores_.find(frame.gpr[0]);
+        if (found == dispatcher.semaphores_.end()) return UINT64_MAX;
+        semaphore = found->second;
+    }
+    {
+        std::scoped_lock lock(semaphore->mutex);
+        if (semaphore->value >= 32767) return UINT64_MAX;
+        ++semaphore->value;
+    }
+    semaphore->condition.notify_one();
+    return 0;
 }
 
 } // namespace Lab

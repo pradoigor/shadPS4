@@ -6,8 +6,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <condition_variable>
 #include <filesystem>
 #include <fstream>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -119,6 +122,25 @@ private:
     static std::uint64_t FileFstat(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t FileFtruncate(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t FileGetdents(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadMutexAttrInit(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadMutexAttrSetType(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadMutexInit(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadMutexDestroy(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadMutexLock(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadMutexTryLock(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadMutexUnlock(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadCondInit(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadCondDestroy(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadCondWait(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadCondSignal(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadCondBroadcast(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t SemaphoreInit(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t SemaphoreDestroy(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t SemaphoreTryWait(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t SemaphoreWait(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t SemaphoreTimedWait(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t SemaphoreGetValue(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t SemaphorePost(HleDispatcher&, GuestCallFrame const&) noexcept;
 
     bool ReadGuestString(std::uint64_t address, std::string& value,
                          std::size_t limit = 1024) const noexcept;
@@ -145,6 +167,22 @@ private:
     std::filesystem::path dataRoot_;
     std::unordered_map<std::int32_t, GuestFile> files_;
     std::int32_t nextFileDescriptor_{3};
+    struct GuestMutex {
+        std::recursive_mutex primitive;
+    };
+    struct GuestCondition {
+        std::condition_variable_any primitive;
+    };
+    struct GuestSemaphore {
+        std::mutex mutex;
+        std::condition_variable condition;
+        std::uint32_t value{};
+    };
+    std::mutex synchronizationStateMutex_;
+    std::unordered_map<std::uint64_t, std::uint32_t> mutexAttributes_;
+    std::unordered_map<std::uint64_t, std::shared_ptr<GuestMutex>> mutexes_;
+    std::unordered_map<std::uint64_t, std::shared_ptr<GuestCondition>> conditions_;
+    std::unordered_map<std::uint64_t, std::shared_ptr<GuestSemaphore>> semaphores_;
 };
 
 } // namespace Lab
