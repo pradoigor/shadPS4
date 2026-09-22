@@ -293,29 +293,50 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
         frame->guest_stack != reinterpret_cast<std::uint64_t>(guestStack))
         return OrbisEnosys;
     const auto& entry = self->entries_[static_cast<std::size_t>(slot)];
-    if (!self->tracePath_.empty()) {
+    std::uint64_t sequence{};
+    const auto thread = static_cast<std::uint64_t>(GetCurrentThreadId());
+    auto writeTrace = [&](char const* phase, std::uint64_t result,
+                          bool includeResult) noexcept {
+        if (self->tracePath_.empty()) return;
         try {
-            std::ofstream trace(self->tracePath_, std::ios::binary | std::ios::trunc);
-            trace << "{\"sequence\":" << ++self->callSequence_
-                  << ",\"symbol\":\"" << entry.encoded
-                  << "\",\"nid\":\"" << entry.nid
-                  << "\",\"implemented\":" << (entry.implemented ? "true" : "false")
-                  << "}";
-            trace.flush();
-            if (self->callSequence_ <= 4096) {
+            std::scoped_lock traceLock(self->traceMutex_);
+            std::ofstream latest(self->tracePath_, std::ios::binary | std::ios::trunc);
+            auto write = [&](std::ostream& output) {
+                output << "{\"sequence\":" << sequence
+                       << ",\"thread\":" << thread
+                       << ",\"phase\":\"" << phase
+                       << "\",\"symbol\":\"" << entry.encoded
+                       << "\",\"nid\":\"" << entry.nid
+                       << "\",\"implemented\":"
+                       << (entry.implemented ? "true" : "false")
+                       << ",\"arguments\":[" << frame->gpr[0] << ','
+                       << frame->gpr[1] << ',' << frame->gpr[2] << ','
+                       << frame->gpr[3] << ',' << frame->gpr[4] << ','
+                       << frame->gpr[5] << ']'
+                       << ",\"guest_stack\":" << frame->guest_stack;
+                if (includeResult) output << ",\"result\":" << result;
+                output << '}';
+            };
+            write(latest);
+            latest.flush();
+            if (sequence <= 4096) {
                 std::ofstream history(self->traceHistoryPath_,
                                       std::ios::binary | std::ios::app);
-                history << "{\"sequence\":" << self->callSequence_
-                        << ",\"symbol\":\"" << entry.encoded
-                        << "\",\"nid\":\"" << entry.nid
-                        << "\",\"implemented\":"
-                        << (entry.implemented ? "true" : "false") << "}\n";
+                write(history);
+                history << '\n';
                 history.flush();
             }
         } catch (...) {
         }
+    };
+    if (!self->tracePath_.empty()) {
+        std::scoped_lock traceLock(self->traceMutex_);
+        sequence = ++self->callSequence_;
     }
-    return entry.handler ? entry.handler(*self, *frame) : OrbisEnosys;
+    writeTrace("enter", 0, false);
+    const auto result = entry.handler ? entry.handler(*self, *frame) : OrbisEnosys;
+    writeTrace("return", result, true);
+    return result;
 }
 
 std::uint64_t HleDispatcher::Unimplemented(HleDispatcher&, GuestCallFrame const&) noexcept {

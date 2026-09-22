@@ -192,6 +192,7 @@ private:
     std::int32_t nextFileDescriptor_{3};
     std::filesystem::path tracePath_;
     std::filesystem::path traceHistoryPath_;
+    std::mutex traceMutex_;
     std::uint64_t callSequence_{};
     struct GuestMutex {
         void lock() {
