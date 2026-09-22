@@ -302,14 +302,16 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
                   << "\",\"implemented\":" << (entry.implemented ? "true" : "false")
                   << "}";
             trace.flush();
-            std::ofstream history(self->traceHistoryPath_,
-                                  std::ios::binary | std::ios::app);
-            history << "{\"sequence\":" << self->callSequence_
-                    << ",\"symbol\":\"" << entry.encoded
-                    << "\",\"nid\":\"" << entry.nid
-                    << "\",\"implemented\":"
-                    << (entry.implemented ? "true" : "false") << "}\n";
-            history.flush();
+            if (self->callSequence_ <= 4096) {
+                std::ofstream history(self->traceHistoryPath_,
+                                      std::ios::binary | std::ios::app);
+                history << "{\"sequence\":" << self->callSequence_
+                        << ",\"symbol\":\"" << entry.encoded
+                        << "\",\"nid\":\"" << entry.nid
+                        << "\",\"implemented\":"
+                        << (entry.implemented ? "true" : "false") << "}\n";
+                history.flush();
+            }
         } catch (...) {
         }
     }
