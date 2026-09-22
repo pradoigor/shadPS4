@@ -98,7 +98,9 @@ std::uint32_t PatchFsTcbReads(std::vector<std::uint8_t>& image,
   // the upstream shadPS4 CPU patcher for Windows TCB access.
   if (tlsSlot >= 64)
     throw std::runtime_error("O slot TLS do Windows não cabe no acesso GS direto.");
-  const auto tebOffset = 0x1480u + tlsSlot * sizeof(void*);
+  const std::uint32_t tebOffset =
+      0x1480u + tlsSlot * static_cast<std::uint32_t>(sizeof(void*));
+  static_assert(sizeof(tebOffset) == 4);
   std::uint32_t patched{};
   for (auto const& segment : segments) {
     if ((segment.flags & 0x1u) == 0 || segment.address < virtualBase)
@@ -120,8 +122,15 @@ std::uint32_t PatchFsTcbReads(std::vector<std::uint8_t>& image,
       std::memcpy(&displacement, image.data() + index + 5,
                   sizeof(displacement));
       if (displacement != 0) continue;
+      std::uint8_t following[4]{};
+      const bool hasFollowing = index + 13 <= begin + bytes;
+      if (hasFollowing)
+        std::memcpy(following, image.data() + index + 9, sizeof(following));
       image[index] = 0x65;
-      std::memcpy(image.data() + index + 5, &tebOffset, sizeof(tebOffset));
+      std::memcpy(image.data() + index + 5, &tebOffset, sizeof(std::uint32_t));
+      if (hasFollowing &&
+          std::memcmp(following, image.data() + index + 9, sizeof(following)) != 0)
+        throw std::runtime_error("O patch TLS alterou a instrução seguinte.");
       ++patched;
       index += 8;
     }
@@ -172,7 +181,8 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
                 reinterpret_cast<void const*>(exception->ContextRecord->Rcx + 56),
                 sizeof(tcbThreadId));
   const auto tlsOffset = gGuestTlsSlot < 64
-                             ? 0x1480u + gGuestTlsSlot * sizeof(void*)
+                             ? 0x1480u + gGuestTlsSlot *
+                                 static_cast<std::uint32_t>(sizeof(void*))
                              : 0u;
   const auto observedTcb = tlsOffset ? __readgsqword(tlsOffset) : 0;
   const auto accessKind = record->NumberParameters > 0
@@ -186,7 +196,7 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
                                   fault - gGuestHostBase < gGuestImageSize
                               ? gGuestVirtualBase + (fault - gGuestHostBase)
                               : 0;
-  const int length = std::snprintf(
+  int length = std::snprintf(
       payload, sizeof(payload),
       "{\"stage\":\"guest_exception\",\"exception_code\":%lu,"
       "\"session_id\":\"%s\",\"build_commit\":\"%s\","
@@ -484,7 +494,8 @@ void HomebrewRuntime::RunEntry() noexcept {
   }
   gGuestTlsSlot = tlsSlot_;
   gExpectedTcb = reinterpret_cast<std::uint64_t>(tcb);
-  const auto tlsOffset = 0x1480u + tlsSlot_ * sizeof(void*);
+  const auto tlsOffset = 0x1480u + tlsSlot_ *
+      static_cast<std::uint32_t>(sizeof(void*));
   const auto observedTcb = __readgsqword(tlsOffset);
   if (TlsGetValue(tlsSlot_) != tcb || observedTcb != gExpectedTcb) {
     Record("tls_invalid", "A leitura GS do slot TLS não corresponde ao TCB instalado.");
