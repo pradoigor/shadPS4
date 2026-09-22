@@ -29,8 +29,18 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Bootstrap ANGLE falhou.' }
     gclient sync --no-history
     if ($LASTEXITCODE -ne 0) { throw 'Sincronização ANGLE falhou.' }
-    $gnArgs = 'target_os="winuwp" target_cpu="x64" is_component_build=false is_clang=false is_debug=false angle_enable_d3d11=true angle_enable_vulkan=false'
-    gn gen out/uwp --args=$gnArgs
+    $gnArgs = @'
+target_os = "winuwp"
+target_cpu = "x64"
+is_component_build = false
+is_clang = false
+is_debug = false
+angle_enable_d3d11 = true
+angle_enable_vulkan = false
+'@
+    New-Item -ItemType Directory -Force 'out/uwp' | Out-Null
+    Set-Content 'out/uwp/args.gn' $gnArgs -Encoding utf8
+    gn gen out/uwp
     if ($LASTEXITCODE -ne 0) { throw 'Geração GN falhou.' }
     autoninja -C out/uwp libEGL libGLESv2
     if ($LASTEXITCODE -ne 0) { throw 'Compilação ANGLE falhou.' }
