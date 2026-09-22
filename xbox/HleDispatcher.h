@@ -54,6 +54,7 @@ public:
     void AttachGuestMemory(GuestMemory* memory) noexcept { memory_ = memory; }
     void ConfigureFileSystem(std::filesystem::path appRoot,
                              std::filesystem::path dataRoot);
+    void ConfigureTrace(std::filesystem::path path) { tracePath_ = std::move(path); }
 
     std::size_t implementedCount() const noexcept;
     std::size_t unresolvedCount() const noexcept;
@@ -183,6 +184,8 @@ private:
     std::filesystem::path dataRoot_;
     std::unordered_map<std::int32_t, GuestFile> files_;
     std::int32_t nextFileDescriptor_{3};
+    std::filesystem::path tracePath_;
+    std::uint64_t callSequence_{};
     struct GuestMutex {
         void lock() {
             std::unique_lock lock(state);

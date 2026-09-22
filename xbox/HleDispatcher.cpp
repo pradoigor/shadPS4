@@ -265,6 +265,18 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
         frame->guest_stack != reinterpret_cast<std::uint64_t>(guestStack))
         return OrbisEnosys;
     const auto& entry = self->entries_[static_cast<std::size_t>(slot)];
+    if (!self->tracePath_.empty()) {
+        try {
+            std::ofstream trace(self->tracePath_, std::ios::binary | std::ios::trunc);
+            trace << "{\"sequence\":" << ++self->callSequence_
+                  << ",\"symbol\":\"" << entry.encoded
+                  << "\",\"nid\":\"" << entry.nid
+                  << "\",\"implemented\":" << (entry.implemented ? "true" : "false")
+                  << "}";
+            trace.flush();
+        } catch (...) {
+        }
+    }
     return entry.handler ? entry.handler(*self, *frame) : OrbisEnosys;
 }
 

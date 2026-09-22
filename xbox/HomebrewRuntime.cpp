@@ -4,12 +4,54 @@
 #include "SysvThunk.h"
 
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
+#include <windows.h>
 
 namespace Lab {
 namespace {
+
+std::filesystem::path gCrashStateFile;
+std::uint64_t UnixSeconds() noexcept;
+
+LONG WINAPI RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
+  if (!exception || !exception->ExceptionRecord || !exception->ContextRecord ||
+      gCrashStateFile.empty())
+    return EXCEPTION_CONTINUE_SEARCH;
+  char payload[512]{};
+  const auto *record = exception->ExceptionRecord;
+  const auto fault = record->NumberParameters > 1
+                         ? record->ExceptionInformation[1]
+                         : 0;
+  const int length = std::snprintf(
+      payload, sizeof(payload),
+      "{\"stage\":\"guest_exception\",\"exception_code\":%lu,"
+      "\"exception_address\":%llu,\"rip\":%llu,\"rsp\":%llu,"
+      "\"fault_address\":%llu,\"timestamp\":%llu}",
+      static_cast<unsigned long>(record->ExceptionCode),
+      static_cast<unsigned long long>(
+          reinterpret_cast<std::uintptr_t>(record->ExceptionAddress)),
+      static_cast<unsigned long long>(exception->ContextRecord->Rip),
+      static_cast<unsigned long long>(exception->ContextRecord->Rsp),
+      static_cast<unsigned long long>(fault),
+      static_cast<unsigned long long>(UnixSeconds()));
+  if (length > 0) {
+    CREATEFILE2_EXTENDED_PARAMETERS parameters{sizeof(parameters)};
+    parameters.dwFileAttributes = FILE_ATTRIBUTE_NORMAL;
+    HANDLE file = CreateFile2(gCrashStateFile.c_str(), GENERIC_WRITE,
+                              FILE_SHARE_READ, CREATE_ALWAYS, &parameters);
+    if (file != INVALID_HANDLE_VALUE) {
+      DWORD written{};
+      WriteFile(file, payload, static_cast<DWORD>(length < 511 ? length : 511),
+                &written, nullptr);
+      FlushFileBuffers(file);
+      CloseHandle(file);
+    }
+  }
+  return EXCEPTION_CONTINUE_SEARCH;
+}
 
 std::uint64_t UnixSeconds() noexcept {
   return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
@@ -32,6 +74,8 @@ HomebrewRuntime::~HomebrewRuntime() {
     else
       worker_.join();
   }
+  if (exceptionHandler_)
+    RemoveVectoredExceptionHandler(exceptionHandler_);
 }
 
 void HomebrewRuntime::Record(std::string const &stage,
@@ -59,7 +103,7 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
     worker_.join();
 
   executable_ = std::move(executable);
-  stateFile_ = std::move(stateRoot) / L"homebrew-runtime.json";
+  stateFile_ = stateRoot / L"homebrew-runtime.json";
   Record("loading", "Carregando o eboot.bin real.");
   load_ = LoadControlled(executable_);
   if (!load_.validated || !load_.mapped || load_.private_image.empty())
@@ -72,6 +116,7 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
   dispatcher_ = std::make_unique<HleDispatcher>();
   dispatcher_->ConfigureFileSystem(executable_.parent_path(),
                                     executable_.parent_path() / L"RuntimeData");
+  dispatcher_->ConfigureTrace(stateRoot / L"homebrew-last-hle.json");
   const auto bindings = dispatcher_->Bind(load_.pending_symbol_names);
   if (bindings.executable_addresses != load_.pending_symbol_names.size())
     throw std::runtime_error("Nem todos os imports receberam thunk HLE.");
@@ -105,6 +150,10 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
   params_.argv[0] = guestPath_.c_str();
   params_.entry_addr = entry;
   Record("ready", "Imagem real relocada; iniciando o ponto de entrada.");
+  gCrashStateFile = stateFile_;
+  exceptionHandler_ = AddVectoredExceptionHandler(1, RecordGuestException);
+  if (!exceptionHandler_)
+    throw std::runtime_error("Não foi possível ativar o registro de exceções convidadas.");
   running_.store(true);
   worker_ = std::thread([this] { RunEntry(); });
 }
@@ -124,6 +173,10 @@ void HomebrewRuntime::RunEntry() noexcept {
     Record("host_exception", "Exceção desconhecida durante a execução.");
   }
   running_.store(false);
+  if (exceptionHandler_) {
+    RemoveVectoredExceptionHandler(exceptionHandler_);
+    exceptionHandler_ = nullptr;
+  }
 }
 
 } // namespace Lab
