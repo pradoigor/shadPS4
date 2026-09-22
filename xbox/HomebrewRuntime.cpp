@@ -15,13 +15,10 @@ namespace {
 
 std::filesystem::path gCrashStateFile;
 std::uint64_t UnixSeconds() noexcept;
-constexpr DWORD GuestExitException = 0xE0425053ul;
 
 int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
   if (!exception || !exception->ExceptionRecord || !exception->ContextRecord ||
       gCrashStateFile.empty())
-    return EXCEPTION_EXECUTE_HANDLER;
-  if (exception->ExceptionRecord->ExceptionCode == GuestExitException)
     return EXCEPTION_EXECUTE_HANDLER;
   char payload[512]{};
   const auto *record = exception->ExceptionRecord;
@@ -59,13 +56,11 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
 // Keep SEH in a function without C++ objects that require unwinding. UWP does
 // not expose vectored exception registration, but MSVC SEH remains available.
 std::uint64_t InvokeGuestProtected(void *entry, std::uint64_t argument0,
-                                   std::uint64_t argument1,
                                    bool *crashed, bool *exited) noexcept {
   __try {
-    return InvokeGuestSysv2(entry, argument0, argument1);
+    return InvokeGuestEntry(entry, argument0, exited);
   } __except (RecordGuestException(GetExceptionInformation())) {
-    *exited = GetExceptionCode() == GuestExitException;
-    *crashed = !*exited;
+    *crashed = true;
     return 0;
   }
 }
@@ -73,12 +68,6 @@ std::uint64_t InvokeGuestProtected(void *entry, std::uint64_t argument0,
 std::uint64_t UnixSeconds() noexcept {
   return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
       std::chrono::system_clock::now().time_since_epoch()).count());
-}
-
-void GuestExit() noexcept {
-  // OpenOrbis treats this callback as noreturn. Raise a private SEH signal so
-  // the worker can leave guest frames without terminating the UWP process.
-  RaiseException(GuestExitException, 0, 0, nullptr);
 }
 
 } // namespace
@@ -178,8 +167,7 @@ void HomebrewRuntime::RunEntry() noexcept {
     bool exited = false;
     const auto value = InvokeGuestProtected(
         reinterpret_cast<void *>(params_.entry_addr),
-        reinterpret_cast<std::uint64_t>(&params_),
-        reinterpret_cast<std::uint64_t>(&GuestExit), &crashed, &exited);
+        reinterpret_cast<std::uint64_t>(&params_), &crashed, &exited);
     if (exited)
       Record("entry_exited", "O runtime do homebrew solicitou encerramento controlado.");
     else if (!crashed)

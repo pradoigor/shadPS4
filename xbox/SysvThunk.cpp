@@ -4,6 +4,7 @@
 
 #include <windows.h>
 
+#include <csetjmp>
 #include <cstring>
 #include <stdexcept>
 
@@ -13,6 +14,13 @@ namespace {
 constexpr std::size_t PageSize = 4096;
 constexpr std::uint32_t FrameSize = 0xE8;
 constexpr std::uint8_t WindowsShadowSpace = 0x20;
+thread_local std::jmp_buf GuestExitContext;
+thread_local bool GuestExitContextActive = false;
+
+void GuestProgramExit() noexcept {
+  if (GuestExitContextActive)
+    std::longjmp(GuestExitContext, 1);
+}
 
 void Byte(std::uint8_t *code, std::size_t &offset, std::uint8_t value) {
   code[offset++] = value;
@@ -439,6 +447,56 @@ std::uint64_t InvokeGuestSysv2(void *entry, std::uint64_t argument0,
   const auto value = reinterpret_cast<std::uint64_t (*)()>(caller)();
   Core::PlatformMemory::Free(GetCurrentProcess(), caller, 0, MEM_RELEASE);
   return value;
+}
+
+std::uint64_t InvokeGuestEntry(void *entry, std::uint64_t entryParams,
+                               bool *exited) {
+  if (!entry || !entryParams || !exited)
+    throw std::invalid_argument("Entrada OpenOrbis inválida.");
+  auto *launcher = static_cast<std::uint8_t *>(
+      Core::PlatformMemory::Allocate(GetCurrentProcess(), nullptr, PageSize,
+                                     MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+  if (!launcher)
+    throw std::runtime_error("Não foi possível reservar o launcher OpenOrbis.");
+
+  std::size_t offset = 0;
+  Byte(launcher, offset, 0x48); Byte(launcher, offset, 0x83);
+  Byte(launcher, offset, 0xE4); Byte(launcher, offset, 0xF0); // and rsp,-16
+  Byte(launcher, offset, 0x48); Byte(launcher, offset, 0x83);
+  Byte(launcher, offset, 0xEC); Byte(launcher, offset, 0x08); // sub rsp,8
+  Byte(launcher, offset, 0x48); Byte(launcher, offset, 0xB8);
+  U64(launcher, offset, entryParams);                         // mov rax,params
+  Byte(launcher, offset, 0xFF); Byte(launcher, offset, 0x70);
+  Byte(launcher, offset, 0x08);                              // push [rax+8]
+  Byte(launcher, offset, 0xFF); Byte(launcher, offset, 0x30); // push [rax]
+  Byte(launcher, offset, 0x48); Byte(launcher, offset, 0x89);
+  Byte(launcher, offset, 0xC7);                              // mov rdi,rax
+  Byte(launcher, offset, 0x48); Byte(launcher, offset, 0xBE);
+  U64(launcher, offset,
+      reinterpret_cast<std::uint64_t>(&GuestProgramExit));   // mov rsi,exit
+  Byte(launcher, offset, 0x48); Byte(launcher, offset, 0xB8);
+  U64(launcher, offset, reinterpret_cast<std::uint64_t>(entry));
+  Byte(launcher, offset, 0xFF); Byte(launcher, offset, 0xE0); // jmp rax
+
+  DWORD previous{};
+  if (!Core::PlatformMemory::Protect(GetCurrentProcess(), launcher, PageSize,
+                                     PAGE_EXECUTE_READ, &previous) ||
+      !FlushInstructionCache(GetCurrentProcess(), launcher, offset)) {
+    Core::PlatformMemory::Free(GetCurrentProcess(), launcher, 0, MEM_RELEASE);
+    throw std::runtime_error("Não foi possível ativar o launcher OpenOrbis.");
+  }
+
+  *exited = false;
+  std::uint64_t result{};
+  if (setjmp(GuestExitContext) == 0) {
+    GuestExitContextActive = true;
+    result = reinterpret_cast<std::uint64_t (*)()>(launcher)();
+  } else {
+    *exited = true;
+  }
+  GuestExitContextActive = false;
+  Core::PlatformMemory::Free(GetCurrentProcess(), launcher, 0, MEM_RELEASE);
+  return result;
 }
 
 std::uint64_t InvokeSysv4(void *entry, std::uint64_t argument0,
