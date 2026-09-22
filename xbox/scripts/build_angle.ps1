@@ -9,10 +9,15 @@ $output = Join-Path $root 'xbox\angle-artifacts'
 New-Item -ItemType Directory -Force $work, $output | Out-Null
 
 $env:DEPOT_TOOLS_WIN_TOOLCHAIN = '0'
-$env:DEPOT_TOOLS_UPDATE = '0'
 $env:PATH = "$tools;$env:PATH"
 git clone --filter=blob:none https://chromium.googlesource.com/chromium/tools/depot_tools.git $tools
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao obter depot_tools.' }
+# gclient_scm.py invokes git.bat on Windows; a fresh depot_tools clone does
+# not contain that generated shim yet. Use the runner's Git for Windows.
+$gitShim = Join-Path $tools 'git.bat'
+if (-not (Test-Path $gitShim)) {
+    Set-Content $gitShim "@echo off`r`ngit.exe %*`r`n" -Encoding ascii
+}
 git clone --filter=blob:none https://chromium.googlesource.com/angle/angle $source
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao obter ANGLE.' }
 git -C $source checkout --detach $angleCommit
