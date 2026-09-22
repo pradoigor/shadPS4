@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <array>
 #include <condition_variable>
 #include <filesystem>
 #include <fstream>
@@ -72,6 +73,9 @@ private:
                                   GuestCallFrame const* frame, void* guestStack) noexcept;
     static void* WritablePointer(HleDispatcher&, GuestCallFrame const&,
                                  std::uint64_t address, std::size_t bytes) noexcept;
+    static void const* ReadablePointer(HleDispatcher&, GuestCallFrame const&,
+                                       std::uint64_t address,
+                                       std::size_t bytes) noexcept;
     static std::uint64_t Unimplemented(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelErrorPointer(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t GenericSuccess(HleDispatcher&, GuestCallFrame const&) noexcept;
@@ -104,6 +108,7 @@ private:
     static std::uint64_t MemoryMunmap(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelMunmap(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t ClockGetTime(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t SignalAction(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t UserServiceInitialize(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t UserServiceGetInitialUser(HleDispatcher&,
                                                    GuestCallFrame const&) noexcept;
@@ -196,6 +201,14 @@ private:
     std::filesystem::path traceHistoryPath_;
     std::mutex traceMutex_;
     std::uint64_t callSequence_{};
+    struct GuestSignalAction {
+        std::uint64_t handler{};
+        std::int32_t flags{};
+        std::uint32_t mask[4]{};
+        std::uint32_t padding{};
+    };
+    static_assert(sizeof(GuestSignalAction) == 32);
+    std::array<GuestSignalAction, 128> signalActions_{};
     struct GuestMutex {
         void lock() {
             std::unique_lock lock(state);

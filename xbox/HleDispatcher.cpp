@@ -146,6 +146,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "munmap") use(&MemoryMunmap);
     if (name == "sceKernelMunmap") use(&KernelMunmap);
     if (name == "clock_gettime") use(&ClockGetTime);
+    if (name == "sigaction") use(&SignalAction);
     if (name == "sceUserServiceInitialize") use(&UserServiceInitialize);
     if (name == "sceUserServiceGetInitialUser") use(&UserServiceGetInitialUser);
     if (name == "sceUserServiceGetLoginUserIdList") use(&UserServiceGetLoginUsers);
@@ -363,6 +364,17 @@ void* HleDispatcher::WritablePointer(HleDispatcher& dispatcher,
     if (address < lower || address > upper || bytes > upper - address)
         return nullptr;
     return reinterpret_cast<void*>(address);
+}
+
+void const* HleDispatcher::ReadablePointer(HleDispatcher& dispatcher,
+                                           GuestCallFrame const& frame,
+                                           std::uint64_t address,
+                                           std::size_t bytes) noexcept {
+    if (dispatcher.memory_) {
+        if (auto* translated = dispatcher.memory_->Translate(address, bytes))
+            return translated;
+    }
+    return WritablePointer(dispatcher, frame, address, bytes);
 }
 
 std::uint64_t HleDispatcher::Unimplemented(HleDispatcher&, GuestCallFrame const&) noexcept {
@@ -668,9 +680,8 @@ std::uint64_t HleDispatcher::ClockGetTime(HleDispatcher& dispatcher,
         std::int64_t seconds;
         std::int64_t nanoseconds;
     } value{};
-    if (!dispatcher.memory_) return OrbisEfault;
-    auto* output = static_cast<Timespec*>(
-        dispatcher.memory_->TranslateWritable(frame.gpr[1], sizeof(Timespec)));
+    auto* output = static_cast<Timespec*>(WritablePointer(
+        dispatcher, frame, frame.gpr[1], sizeof(Timespec)));
     if (!output) return OrbisEfault;
     const auto now = std::chrono::system_clock::now().time_since_epoch();
     const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(now);
@@ -678,6 +689,34 @@ std::uint64_t HleDispatcher::ClockGetTime(HleDispatcher& dispatcher,
     value.seconds = seconds.count();
     value.nanoseconds = nanos.count();
     std::memcpy(output, &value, sizeof(value));
+    return 0;
+}
+
+std::uint64_t HleDispatcher::SignalAction(HleDispatcher& dispatcher,
+                                          GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t Failure = UINT64_MAX;
+    const auto signal = static_cast<std::int32_t>(frame.gpr[0]);
+    if (signal < 1 || signal > 128 || signal == 9 || signal == 17 || signal == 32) {
+        GuestPosixErrno = 22;
+        return Failure;
+    }
+    auto const* action = frame.gpr[1] == 0
+        ? nullptr
+        : static_cast<GuestSignalAction const*>(ReadablePointer(
+              dispatcher, frame, frame.gpr[1], sizeof(GuestSignalAction)));
+    auto* previous = frame.gpr[2] == 0
+        ? nullptr
+        : static_cast<GuestSignalAction*>(WritablePointer(
+              dispatcher, frame, frame.gpr[2], sizeof(GuestSignalAction)));
+    if ((frame.gpr[1] != 0 && !action) || (frame.gpr[2] != 0 && !previous)) {
+        GuestPosixErrno = 14;
+        return Failure;
+    }
+    const auto index = static_cast<std::size_t>(signal - 1);
+    std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+    const auto old = dispatcher.signalActions_[index];
+    if (action) dispatcher.signalActions_[index] = *action;
+    if (previous) *previous = old;
     return 0;
 }
 

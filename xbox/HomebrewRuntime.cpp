@@ -15,10 +15,13 @@ namespace {
 
 std::filesystem::path gCrashStateFile;
 std::uint64_t UnixSeconds() noexcept;
+constexpr DWORD GuestExitException = 0xE0425053ul;
 
 int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
   if (!exception || !exception->ExceptionRecord || !exception->ContextRecord ||
       gCrashStateFile.empty())
+    return EXCEPTION_EXECUTE_HANDLER;
+  if (exception->ExceptionRecord->ExceptionCode == GuestExitException)
     return EXCEPTION_EXECUTE_HANDLER;
   char payload[512]{};
   const auto *record = exception->ExceptionRecord;
@@ -57,11 +60,12 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
 // not expose vectored exception registration, but MSVC SEH remains available.
 std::uint64_t InvokeGuestProtected(void *entry, std::uint64_t argument0,
                                    std::uint64_t argument1,
-                                   bool *crashed) noexcept {
+                                   bool *crashed, bool *exited) noexcept {
   __try {
     return InvokeGuestSysv2(entry, argument0, argument1);
   } __except (RecordGuestException(GetExceptionInformation())) {
-    *crashed = true;
+    *exited = GetExceptionCode() == GuestExitException;
+    *crashed = !*exited;
     return 0;
   }
 }
@@ -72,8 +76,9 @@ std::uint64_t UnixSeconds() noexcept {
 }
 
 void GuestExit() noexcept {
-  // The PS4 kernel normally terminates the guest process here. Returning lets
-  // the experimental host worker record the result without killing the UWP UI.
+  // OpenOrbis treats this callback as noreturn. Raise a private SEH signal so
+  // the worker can leave guest frames without terminating the UWP process.
+  RaiseException(GuestExitException, 0, 0, nullptr);
 }
 
 } // namespace
@@ -170,11 +175,14 @@ void HomebrewRuntime::RunEntry() noexcept {
   Record("entry_started", "Controle transferido ao e_entry do homebrew.");
   try {
     bool crashed = false;
+    bool exited = false;
     const auto value = InvokeGuestProtected(
         reinterpret_cast<void *>(params_.entry_addr),
         reinterpret_cast<std::uint64_t>(&params_),
-        reinterpret_cast<std::uint64_t>(&GuestExit), &crashed);
-    if (!crashed)
+        reinterpret_cast<std::uint64_t>(&GuestExit), &crashed, &exited);
+    if (exited)
+      Record("entry_exited", "O runtime do homebrew solicitou encerramento controlado.");
+    else if (!crashed)
       Record("entry_returned", "O e_entry retornou ao host com código " +
                                    std::to_string(value) + ".");
   } catch (std::exception const &error) {
