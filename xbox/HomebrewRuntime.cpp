@@ -200,8 +200,21 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
 
 void HomebrewRuntime::RunEntry() noexcept {
   Record("entry_started", "Controle transferido ao e_entry do homebrew.");
-  auto *vectoredHandler = AddVectoredExceptionHandler(
-      1, &RecordGuestVectoredException);
+  using AddVectoredHandler = PVOID(WINAPI *)(
+      ULONG, PVECTORED_EXCEPTION_HANDLER);
+  using RemoveVectoredHandler = ULONG(WINAPI *)(PVOID);
+  auto module = GetModuleHandleW(L"kernelbase.dll");
+  auto addVectoredHandler = module
+      ? reinterpret_cast<AddVectoredHandler>(
+            GetProcAddress(module, "AddVectoredExceptionHandler"))
+      : nullptr;
+  auto removeVectoredHandler = module
+      ? reinterpret_cast<RemoveVectoredHandler>(
+            GetProcAddress(module, "RemoveVectoredExceptionHandler"))
+      : nullptr;
+  auto *vectoredHandler = addVectoredHandler
+      ? addVectoredHandler(1, &RecordGuestVectoredException)
+      : nullptr;
   try {
     bool crashed = false;
     bool exited = false;
@@ -218,8 +231,8 @@ void HomebrewRuntime::RunEntry() noexcept {
   } catch (...) {
     Record("host_exception", "Exceção desconhecida durante a execução.");
   }
-  if (vectoredHandler)
-    RemoveVectoredExceptionHandler(vectoredHandler);
+  if (vectoredHandler && removeVectoredHandler)
+    removeVectoredHandler(vectoredHandler);
   running_.store(false);
 }
 
