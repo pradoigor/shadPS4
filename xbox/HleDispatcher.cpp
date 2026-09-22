@@ -365,8 +365,15 @@ std::uint64_t HleDispatcher::KernelSandboxWord(HleDispatcher&,
 std::uint64_t HleDispatcher::KernelNanosleep(HleDispatcher& self,
                                               GuestCallFrame const& frame) noexcept {
     struct Timespec { std::int64_t seconds; std::int64_t nanoseconds; };
-    auto const* request = static_cast<Timespec const*>(
-        self.memory_ ? self.memory_->Translate(frame.gpr[0], sizeof(Timespec)) : nullptr);
+    auto const* request = static_cast<Timespec const*>(self.memory_
+        ? self.memory_->Translate(frame.gpr[0], sizeof(Timespec)) : nullptr);
+    // libc commonly creates timespec on the native guest thread stack. The
+    // thunk captured that RSP, so accept only a narrow range around it.
+    constexpr std::uint64_t StackWindow = 2ull * 1024ull * 1024ull;
+    const auto distance = frame.gpr[0] > frame.guest_stack
+        ? frame.gpr[0] - frame.guest_stack : frame.guest_stack - frame.gpr[0];
+    if (!request && frame.gpr[0] && distance <= StackWindow)
+        request = reinterpret_cast<Timespec const*>(frame.gpr[0]);
     if (!request || request->seconds < 0 || request->nanoseconds < 0 ||
         request->nanoseconds >= 1'000'000'000) {
         GuestPosixErrno = 22;
@@ -376,8 +383,13 @@ std::uint64_t HleDispatcher::KernelNanosleep(HleDispatcher& self,
                     std::chrono::nanoseconds(request->nanoseconds);
     std::this_thread::sleep_for(duration);
     if (frame.gpr[1] && self.memory_) {
-        if (auto* remaining = static_cast<Timespec*>(
-                self.memory_->TranslateWritable(frame.gpr[1], sizeof(Timespec))))
+        auto* remaining = static_cast<Timespec*>(
+            self.memory_->TranslateWritable(frame.gpr[1], sizeof(Timespec)));
+        const auto remainingDistance = frame.gpr[1] > frame.guest_stack
+            ? frame.gpr[1] - frame.guest_stack : frame.guest_stack - frame.gpr[1];
+        if (!remaining && remainingDistance <= StackWindow)
+            remaining = reinterpret_cast<Timespec*>(frame.gpr[1]);
+        if (remaining)
             *remaining = {};
     }
     return 0;

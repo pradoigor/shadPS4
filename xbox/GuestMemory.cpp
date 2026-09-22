@@ -35,31 +35,6 @@ DWORD ProtectionFor(std::uint64_t prot) noexcept {
   return PAGE_NOACCESS;
 }
 
-void *CurrentStackPointer(std::uint64_t address, std::size_t bytes,
-                          bool writable) noexcept {
-  if (!address || !bytes || address > UINT64_MAX - bytes)
-    return nullptr;
-  std::uint8_t stackMarker{};
-  MEMORY_BASIC_INFORMATION current{}, candidate{};
-  if (!VirtualQueryFromApp(&stackMarker, &current, sizeof(current)) ||
-      !VirtualQueryFromApp(reinterpret_cast<void *>(address), &candidate,
-                           sizeof(candidate)) ||
-      current.AllocationBase != candidate.AllocationBase ||
-      candidate.State != MEM_COMMIT || (candidate.Protect & PAGE_GUARD) != 0 ||
-      candidate.Protect == PAGE_NOACCESS)
-    return nullptr;
-  const auto region = reinterpret_cast<std::uint64_t>(candidate.BaseAddress);
-  if (address < region || address - region > candidate.RegionSize ||
-      bytes > candidate.RegionSize - (address - region))
-    return nullptr;
-  if (writable && candidate.Protect != PAGE_READWRITE &&
-      candidate.Protect != PAGE_WRITECOPY &&
-      candidate.Protect != PAGE_EXECUTE_READWRITE &&
-      candidate.Protect != PAGE_EXECUTE_WRITECOPY)
-    return nullptr;
-  return reinterpret_cast<void *>(address);
-}
-
 } // namespace
 
 GuestMemory::~GuestMemory() {
@@ -179,7 +154,7 @@ void *GuestMemory::Translate(std::uint64_t guestAddress,
   const auto offset = guestAddress - guestBase_;
   if (offset > static_cast<std::uint64_t>(size_) ||
       bytes > size_ - static_cast<std::size_t>(offset))
-    return CurrentStackPointer(guestAddress, bytes, false);
+    return nullptr;
   return static_cast<std::uint8_t *>(base_) + offset;
 }
 
@@ -208,7 +183,7 @@ void *GuestMemory::TranslateWritable(std::uint64_t guestAddress,
       return static_cast<std::uint8_t *>(range.host) +
              (guestAddress - range.address);
   }
-  return CurrentStackPointer(guestAddress, bytes, true);
+  return nullptr;
 }
 
 bool GuestMemory::IsExecutable(std::uint64_t guestAddress,
