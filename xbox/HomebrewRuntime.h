@@ -45,7 +45,6 @@ private:
   EntryParams params_{};
   std::thread worker_;
   std::atomic_bool running_{};
-  void *exceptionHandler_{};
 };
 
 } // namespace Lab

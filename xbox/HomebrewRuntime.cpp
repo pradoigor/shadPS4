@@ -16,10 +16,10 @@ namespace {
 std::filesystem::path gCrashStateFile;
 std::uint64_t UnixSeconds() noexcept;
 
-LONG WINAPI RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
+int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
   if (!exception || !exception->ExceptionRecord || !exception->ContextRecord ||
       gCrashStateFile.empty())
-    return EXCEPTION_CONTINUE_SEARCH;
+    return EXCEPTION_EXECUTE_HANDLER;
   char payload[512]{};
   const auto *record = exception->ExceptionRecord;
   const auto fault = record->NumberParameters > 1
@@ -50,7 +50,20 @@ LONG WINAPI RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
       CloseHandle(file);
     }
   }
-  return EXCEPTION_CONTINUE_SEARCH;
+  return EXCEPTION_EXECUTE_HANDLER;
+}
+
+// Keep SEH in a function without C++ objects that require unwinding. UWP does
+// not expose vectored exception registration, but MSVC SEH remains available.
+std::uint64_t InvokeGuestProtected(void *entry, std::uint64_t argument0,
+                                   std::uint64_t argument1,
+                                   bool *crashed) noexcept {
+  __try {
+    return InvokeGuestSysv2(entry, argument0, argument1);
+  } __except (RecordGuestException(GetExceptionInformation())) {
+    *crashed = true;
+    return 0;
+  }
 }
 
 std::uint64_t UnixSeconds() noexcept {
@@ -74,8 +87,6 @@ HomebrewRuntime::~HomebrewRuntime() {
     else
       worker_.join();
   }
-  if (exceptionHandler_)
-    RemoveVectoredExceptionHandler(exceptionHandler_);
 }
 
 void HomebrewRuntime::Record(std::string const &stage,
@@ -151,9 +162,6 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
   params_.entry_addr = entry;
   Record("ready", "Imagem real relocada; iniciando o ponto de entrada.");
   gCrashStateFile = stateFile_;
-  exceptionHandler_ = AddVectoredExceptionHandler(1, RecordGuestException);
-  if (!exceptionHandler_)
-    throw std::runtime_error("Não foi possível ativar o registro de exceções convidadas.");
   running_.store(true);
   worker_ = std::thread([this] { RunEntry(); });
 }
@@ -161,22 +169,20 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
 void HomebrewRuntime::RunEntry() noexcept {
   Record("entry_started", "Controle transferido ao e_entry do homebrew.");
   try {
-    const auto value = InvokeGuestSysv2(
+    bool crashed = false;
+    const auto value = InvokeGuestProtected(
         reinterpret_cast<void *>(params_.entry_addr),
         reinterpret_cast<std::uint64_t>(&params_),
-        reinterpret_cast<std::uint64_t>(&GuestExit));
-    Record("entry_returned", "O e_entry retornou ao host com código " +
-                                 std::to_string(value) + ".");
+        reinterpret_cast<std::uint64_t>(&GuestExit), &crashed);
+    if (!crashed)
+      Record("entry_returned", "O e_entry retornou ao host com código " +
+                                   std::to_string(value) + ".");
   } catch (std::exception const &error) {
     Record("host_exception", error.what());
   } catch (...) {
     Record("host_exception", "Exceção desconhecida durante a execução.");
   }
   running_.store(false);
-  if (exceptionHandler_) {
-    RemoveVectoredExceptionHandler(exceptionHandler_);
-    exceptionHandler_ = nullptr;
-  }
 }
 
 } // namespace Lab
