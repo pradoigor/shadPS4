@@ -47,10 +47,15 @@ angle_enable_vulkan = false
     if ($LASTEXITCODE -ne 0) { throw 'Geração GN falhou.' }
     autoninja -C out/uwp libEGL libGLESv2
     if ($LASTEXITCODE -ne 0) { throw 'Compilação ANGLE falhou.' }
-    foreach ($file in @('libEGL.dll', 'libGLESv2.dll', 'libEGL.lib', 'libGLESv2.lib')) {
+    foreach ($file in @('libEGL.dll', 'libGLESv2.dll')) {
         $built = Join-Path $source "out\uwp\$file"
         if (-not (Test-Path $built)) { throw "Artefato ausente: $file" }
         Copy-Item $built $output
+    }
+    foreach ($file in @('libEGL.lib', 'libGLESv2.lib')) {
+        $built = Get-ChildItem (Join-Path $source 'out\uwp') -Filter $file -Recurse -File |
+            Select-Object -First 1
+        if ($built) { Copy-Item $built.FullName $output }
     }
     Copy-Item LICENSE $output
     Copy-Item -Recurse include (Join-Path $output 'include')
