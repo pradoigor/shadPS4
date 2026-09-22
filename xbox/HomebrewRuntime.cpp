@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <intrin.h>
 #include <stdexcept>
 #include <windows.h>
 
@@ -18,6 +19,8 @@ std::filesystem::path gCrashStateFile;
 std::uint64_t gGuestHostBase{};
 std::uint64_t gGuestVirtualBase{};
 std::uint64_t gGuestImageSize{};
+std::uint32_t gGuestTlsSlot{UINT32_MAX};
+std::uint64_t gExpectedTcb{};
 std::uint64_t UnixSeconds() noexcept;
 
 std::uint32_t PatchFsTcbReads(std::vector<std::uint8_t>& image,
@@ -65,12 +68,16 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
   if (!exception || !exception->ExceptionRecord || !exception->ContextRecord ||
       gCrashStateFile.empty())
     return EXCEPTION_EXECUTE_HANDLER;
-  char payload[512]{};
+  char payload[768]{};
   const auto *record = exception->ExceptionRecord;
   const auto fault = record->NumberParameters > 1
                          ? record->ExceptionInformation[1]
                          : 0;
   const auto rip = static_cast<std::uint64_t>(exception->ContextRecord->Rip);
+  const auto tlsOffset = gGuestTlsSlot < 64
+                             ? 0x1480u + gGuestTlsSlot * sizeof(void*)
+                             : 0u;
+  const auto observedTcb = tlsOffset ? __readgsqword(tlsOffset) : 0;
   const auto guestRip = rip >= gGuestHostBase &&
                                 rip - gGuestHostBase < gGuestImageSize
                             ? gGuestVirtualBase + (rip - gGuestHostBase)
@@ -83,6 +90,8 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
       payload, sizeof(payload),
       "{\"stage\":\"guest_exception\",\"exception_code\":%lu,"
       "\"exception_address\":%llu,\"rip\":%llu,\"rsp\":%llu,"
+      "\"rcx\":%llu,\"tls_slot\":%lu,\"expected_tcb\":%llu,"
+      "\"observed_tcb\":%llu,"
       "\"fault_address\":%llu,\"guest_virtual_rip\":%llu,"
       "\"guest_virtual_fault\":%llu,\"timestamp\":%llu}",
       static_cast<unsigned long>(record->ExceptionCode),
@@ -90,6 +99,10 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
           reinterpret_cast<std::uintptr_t>(record->ExceptionAddress)),
       static_cast<unsigned long long>(rip),
       static_cast<unsigned long long>(exception->ContextRecord->Rsp),
+      static_cast<unsigned long long>(exception->ContextRecord->Rcx),
+      static_cast<unsigned long>(gGuestTlsSlot),
+      static_cast<unsigned long long>(gExpectedTcb),
+      static_cast<unsigned long long>(observedTcb),
       static_cast<unsigned long long>(fault),
       static_cast<unsigned long long>(guestRip),
       static_cast<unsigned long long>(guestFault),
@@ -101,7 +114,7 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
                               FILE_SHARE_READ, CREATE_ALWAYS, &parameters);
     if (file != INVALID_HANDLE_VALUE) {
       DWORD written{};
-      WriteFile(file, payload, static_cast<DWORD>(length < 511 ? length : 511),
+      WriteFile(file, payload, static_cast<DWORD>(length < 767 ? length : 767),
                 &written, nullptr);
       FlushFileBuffers(file);
       CloseHandle(file);
@@ -267,6 +280,15 @@ void HomebrewRuntime::RunEntry() noexcept {
   std::memcpy(tcb + 56, &threadId, sizeof(threadId));
   if (!TlsSetValue(tlsSlot_, tcb)) {
     Record("host_exception", "Não foi possível ativar a base TLS convidada.");
+    running_.store(false);
+    return;
+  }
+  gGuestTlsSlot = tlsSlot_;
+  gExpectedTcb = reinterpret_cast<std::uint64_t>(tcb);
+  const auto tlsOffset = 0x1480u + tlsSlot_ * sizeof(void*);
+  const auto observedTcb = __readgsqword(tlsOffset);
+  if (TlsGetValue(tlsSlot_) != tcb || observedTcb != gExpectedTcb) {
+    Record("tls_invalid", "A leitura GS do slot TLS não corresponde ao TCB instalado.");
     running_.store(false);
     return;
   }
