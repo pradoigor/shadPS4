@@ -1246,8 +1246,9 @@ std::uint64_t HleDispatcher::SemaphoreTimedWait(
         semaphore = found->second;
     }
     const auto deadline = std::chrono::system_clock::time_point{
-        std::chrono::seconds(timeout->seconds) +
-        std::chrono::nanoseconds(timeout->nanoseconds)};
+        std::chrono::duration_cast<std::chrono::system_clock::duration>(
+            std::chrono::seconds(timeout->seconds) +
+            std::chrono::nanoseconds(timeout->nanoseconds))};
     std::unique_lock lock(semaphore->mutex);
     if (!semaphore->condition.wait_until(lock, deadline,
                                          [&] { return semaphore->value != 0; }))
