@@ -40,7 +40,7 @@ using HleHandler = std::uint64_t (*)(HleDispatcher&, GuestCallFrame const&) noex
 class HleDispatcher {
 public:
     HleDispatcher() = default;
-    ~HleDispatcher() = default;
+    ~HleDispatcher();
 
     HleDispatcher(HleDispatcher const&) = delete;
     HleDispatcher& operator=(HleDispatcher const&) = delete;
@@ -143,6 +143,12 @@ private:
     static std::uint64_t SemaphoreTimedWait(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t SemaphoreGetValue(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t SemaphorePost(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadAttrInit(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadAttrSetDetachState(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadAttrSetStackSize(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadCreate(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadJoin(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadDetach(HleDispatcher&, GuestCallFrame const&) noexcept;
 
     bool ReadGuestString(std::uint64_t address, std::string& value,
                          std::size_t limit = 1024) const noexcept;
@@ -221,6 +227,24 @@ private:
     std::unordered_map<std::uint64_t, std::shared_ptr<GuestMutex>> mutexes_;
     std::unordered_map<std::uint64_t, std::shared_ptr<GuestCondition>> conditions_;
     std::unordered_map<std::uint64_t, std::shared_ptr<GuestSemaphore>> semaphores_;
+    struct GuestThreadAttribute {
+        bool detached{};
+        std::size_t stackSize{1024 * 1024};
+    };
+    struct GuestThread {
+        ~GuestThread() {
+            if (native.joinable()) native.join();
+        }
+        std::thread native;
+        std::mutex state;
+        std::condition_variable completed;
+        std::uint64_t result{};
+        bool finished{};
+        bool detached{};
+    };
+    std::unordered_map<std::uint64_t, GuestThreadAttribute> threadAttributes_;
+    std::unordered_map<std::uint64_t, std::shared_ptr<GuestThread>> threads_;
+    std::uint64_t nextThreadId_{0x1000};
 };
 
 } // namespace Lab

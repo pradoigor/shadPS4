@@ -17,6 +17,7 @@ namespace Lab {
 namespace {
 
 constexpr std::uint64_t OrbisEnosys = 0x8002004Eull;
+thread_local std::uint64_t CurrentGuestThreadId = 1;
 
 struct OrbisTimespec {
     std::int64_t seconds{};
@@ -99,6 +100,10 @@ std::string BaseNid(std::string_view encoded) {
 
 } // namespace
 
+HleDispatcher::~HleDispatcher() {
+    threads_.clear();
+}
+
 HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     const auto encoded = std::string(encodedSymbol);
     const auto nid = BaseNid(encoded);
@@ -114,7 +119,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "getpid") handler = &KernelGetPid;
     if (name == "geteuid") handler = &KernelGetEuid;
     if (name == "sched_yield") use(&KernelSchedYield);
-    if (name == "pthread_self") handler = &KernelThreadSelf;
+    if (name == "pthread_self") use(&KernelThreadSelf);
     if (name == "eglGetError") handler = &EglGetError;
     if (name == "eglQueryAPI") handler = &EglQueryApi;
     if (name == "glGetError") handler = &GlGetError;
@@ -185,6 +190,12 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sem_timedwait") use(&SemaphoreTimedWait);
     if (name == "sem_getvalue") use(&SemaphoreGetValue);
     if (name == "sem_post") use(&SemaphorePost);
+    if (name == "pthread_attr_init") use(&PthreadAttrInit);
+    if (name == "pthread_attr_setdetachstate") use(&PthreadAttrSetDetachState);
+    if (name == "pthread_attr_setstacksize") use(&PthreadAttrSetStackSize);
+    if (name == "pthread_create") use(&PthreadCreate);
+    if (name == "pthread_join") use(&PthreadJoin);
+    if (name == "pthread_detach") use(&PthreadDetach);
 
     const auto slot = static_cast<std::uint64_t>(entries_.size());
     entries_.push_back(Entry{encoded, nid, implemented, handler, nullptr});
@@ -277,7 +288,7 @@ std::uint64_t HleDispatcher::KernelSchedYield(HleDispatcher&, GuestCallFrame con
 }
 
 std::uint64_t HleDispatcher::KernelThreadSelf(HleDispatcher&, GuestCallFrame const&) noexcept {
-    return static_cast<std::uint64_t>(GetCurrentThreadId());
+    return CurrentGuestThreadId;
 }
 
 std::uint64_t HleDispatcher::EglGetError(HleDispatcher&, GuestCallFrame const&) noexcept {
@@ -1301,6 +1312,134 @@ std::uint64_t HleDispatcher::SemaphorePost(
         ++semaphore->value;
     }
     semaphore->condition.notify_one();
+    return 0;
+}
+
+std::uint64_t HleDispatcher::PthreadAttrInit(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto* slot = dispatcher.memory_
+                     ? static_cast<std::uint64_t*>(dispatcher.memory_->TranslateWritable(
+                           frame.gpr[0], sizeof(std::uint64_t)))
+                     : nullptr;
+    if (!slot) return 22;
+    try {
+        std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        dispatcher.threadAttributes_[frame.gpr[0]] = GuestThreadAttribute{};
+        *slot = frame.gpr[0];
+        return 0;
+    } catch (...) {
+        return 12;
+    }
+}
+
+std::uint64_t HleDispatcher::PthreadAttrSetDetachState(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    if (frame.gpr[1] > 1) return 22;
+    std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+    auto found = dispatcher.threadAttributes_.find(frame.gpr[0]);
+    if (found == dispatcher.threadAttributes_.end()) return 22;
+    found->second.detached = frame.gpr[1] != 0;
+    return 0;
+}
+
+std::uint64_t HleDispatcher::PthreadAttrSetStackSize(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    if (frame.gpr[1] < 16 * 1024 || frame.gpr[1] > 64 * 1024 * 1024) return 22;
+    std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+    auto found = dispatcher.threadAttributes_.find(frame.gpr[0]);
+    if (found == dispatcher.threadAttributes_.end()) return 22;
+    found->second.stackSize = static_cast<std::size_t>(frame.gpr[1]);
+    return 0;
+}
+
+std::uint64_t HleDispatcher::PthreadCreate(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto* output = dispatcher.memory_
+                       ? static_cast<std::uint64_t*>(dispatcher.memory_->TranslateWritable(
+                             frame.gpr[0], sizeof(std::uint64_t)))
+                       : nullptr;
+    if (!output || !dispatcher.memory_ ||
+        !dispatcher.memory_->IsExecutable(frame.gpr[2]))
+        return 22;
+    try {
+        GuestThreadAttribute attribute{};
+        std::uint64_t identifier{};
+        auto thread = std::make_shared<GuestThread>();
+        {
+            std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+            if (frame.gpr[1] != 0) {
+                const auto found = dispatcher.threadAttributes_.find(frame.gpr[1]);
+                if (found == dispatcher.threadAttributes_.end()) return 22;
+                attribute = found->second;
+            }
+            identifier = dispatcher.nextThreadId_++;
+            thread->detached = attribute.detached;
+            dispatcher.threads_[identifier] = thread;
+        }
+        auto* entry = reinterpret_cast<void*>(frame.gpr[2]);
+        const auto argument = frame.gpr[3];
+        thread->native = std::thread([thread, entry, argument, identifier] {
+            CurrentGuestThreadId = identifier;
+            std::uint64_t result = UINT64_MAX;
+            try {
+                result = InvokeGuestSysv1(entry, argument);
+            } catch (...) {
+            }
+            {
+                std::scoped_lock lock(thread->state);
+                thread->result = result;
+                thread->finished = true;
+            }
+            thread->completed.notify_all();
+        });
+        *output = identifier;
+        return 0;
+    } catch (...) {
+        return 11;
+    }
+}
+
+std::uint64_t HleDispatcher::PthreadJoin(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    if (frame.gpr[0] == CurrentGuestThreadId) return 35;
+    try {
+        std::shared_ptr<GuestThread> thread;
+        {
+            std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+            auto found = dispatcher.threads_.find(frame.gpr[0]);
+            if (found == dispatcher.threads_.end() || found->second->detached) return 22;
+            thread = found->second;
+        }
+        std::uint64_t result{};
+        {
+            std::unique_lock lock(thread->state);
+            thread->completed.wait(lock, [&] { return thread->finished; });
+            result = thread->result;
+        }
+        if (thread->native.joinable()) thread->native.join();
+        if (frame.gpr[1] != 0) {
+            auto* output = dispatcher.memory_
+                               ? static_cast<std::uint64_t*>(
+                                     dispatcher.memory_->TranslateWritable(
+                                         frame.gpr[1], sizeof(std::uint64_t)))
+                               : nullptr;
+            if (!output) return 14;
+            *output = result;
+        }
+        std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        dispatcher.threads_.erase(frame.gpr[0]);
+        return 0;
+    } catch (...) {
+        return 22;
+    }
+}
+
+std::uint64_t HleDispatcher::PthreadDetach(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+    auto found = dispatcher.threads_.find(frame.gpr[0]);
+    if (found == dispatcher.threads_.end() || found->second->detached) return 22;
+    found->second->detached = true;
     return 0;
 }
 

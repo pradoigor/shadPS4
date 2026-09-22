@@ -91,6 +91,7 @@ bool GuestMemory::MapValidated(
     const bool executable = (segment.flags & 0x1u) != 0;
     if (writable && executable) {
       writable_.clear();
+      executable_.clear();
       Core::PlatformMemory::Free(GetCurrentProcess(), allocation, 0,
                                  MEM_RELEASE);
       return false;
@@ -102,6 +103,7 @@ bool GuestMemory::MapValidated(
     if (!Core::PlatformMemory::Protect(GetCurrentProcess(), segmentHost,
                                        segment.size, protection, &previous)) {
       writable_.clear();
+      executable_.clear();
       Core::PlatformMemory::Free(GetCurrentProcess(), allocation, 0,
                                  MEM_RELEASE);
       return false;
@@ -110,10 +112,14 @@ bool GuestMemory::MapValidated(
       writable_.push_back(WritableRange{loadBias + segment.address,
                                         segment.size, segmentHost, protection});
     if (executable)
+      executable_.push_back(
+          ExecutableRange{loadBias + segment.address, segment.size});
+    if (executable)
       executableBytes_ += static_cast<std::size_t>(segment.size);
   }
   if (!FlushInstructionCache(GetCurrentProcess(), allocation, image.size())) {
     writable_.clear();
+    executable_.clear();
     executableBytes_ = 0;
     Core::PlatformMemory::Free(GetCurrentProcess(), allocation, 0, MEM_RELEASE);
     return false;
@@ -178,6 +184,17 @@ void *GuestMemory::TranslateWritable(std::uint64_t guestAddress,
              (guestAddress - range.address);
   }
   return nullptr;
+}
+
+bool GuestMemory::IsExecutable(std::uint64_t guestAddress,
+                               std::size_t bytes) const noexcept {
+  for (auto const &range : executable_) {
+    if (guestAddress >= range.address &&
+        guestAddress - range.address <= range.size &&
+        bytes <= range.size - (guestAddress - range.address))
+      return true;
+  }
+  return false;
 }
 
 bool GuestMemory::MapAnonymous(std::size_t bytes, std::uint64_t prot,

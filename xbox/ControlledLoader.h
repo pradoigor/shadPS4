@@ -118,7 +118,10 @@ ControlledLoadResult LoadControlled(std::filesystem::path const &path);
 struct GeneratedExecutionResult {
   bool passed{};
   bool sysv_abi_passed{};
+  bool guest_thread_abi_passed{};
+  bool pthread_lifecycle_passed{};
   int returned_value{};
+  std::uint64_t guest_thread_returned_value{};
   std::uint64_t hle_thunk_returned_value{};
   std::uint64_t sysv_abi_returned_value{};
   std::uint64_t executable_address{};

@@ -812,6 +812,8 @@ ExecuteGeneratedProbe(std::filesystem::path const &directory) {
 
   GeneratedExecutionResult result;
   result.returned_value = value;
+  result.guest_thread_returned_value = InvokeGuestSysv1(allocation.value, 0x1234);
+  result.guest_thread_abi_passed = result.guest_thread_returned_value == 42;
   result.executable_address = reinterpret_cast<std::uint64_t>(allocation.value);
   result.elf_file_size = image.size();
   result.passed = value == 42;
@@ -820,6 +822,42 @@ ExecuteGeneratedProbe(std::filesystem::path const &directory) {
   result.sysv_abi_returned_value = abi.returned_value;
   if (!abi.passed)
     throw std::runtime_error("Validação determinística da ABI SysV falhou.");
+  if (!result.guest_thread_abi_passed)
+    throw std::runtime_error("Ponte de entrada da thread convidada falhou.");
+  GuestMemory guestMemory;
+  Require(guestMemory.MapValidated(loaded.private_image,
+                                   loaded.min_virtual_address,
+                                   loaded.guest_segments,
+                                   loaded.pending_relative_relocations),
+          "Não foi possível mapear o ELF próprio para o probe pthread.");
+  HleDispatcher threadDispatcher;
+  threadDispatcher.AttachGuestMemory(&guestMemory);
+  constexpr char createSymbol[] = "OxhIB8LB-PQ#B#B";
+  constexpr char joinSymbol[] = "h9CcP3J0oVM#B#B";
+  threadDispatcher.Bind({createSymbol, joinSymbol});
+  std::uint64_t threadStorage{};
+  Require(guestMemory.MapAnonymous(0x4000, 0x3, 0, false, threadStorage),
+          "Não foi possível reservar estado convidado para o probe pthread.");
+  const auto created = InvokeSysv4(
+      threadDispatcher.AddressFor(createSymbol), threadStorage, 0,
+      guestMemory.RuntimeAddress(loaded.entry), 0x1234);
+  std::uint64_t threadIdentifier{};
+  auto *threadOutput = static_cast<std::uint64_t *>(
+      guestMemory.TranslateWritable(threadStorage, sizeof(std::uint64_t)));
+  if (threadOutput)
+    threadIdentifier = *threadOutput;
+  const auto joined = InvokeSysv2(threadDispatcher.AddressFor(joinSymbol),
+                                  threadIdentifier, threadStorage + 8);
+  std::uint64_t threadResult{};
+  auto *returnOutput = static_cast<std::uint64_t *>(
+      guestMemory.TranslateWritable(threadStorage + 8, sizeof(std::uint64_t)));
+  if (returnOutput)
+    threadResult = *returnOutput;
+  result.pthread_lifecycle_passed =
+      created == 0 && threadIdentifier >= 0x1000 && joined == 0 &&
+      threadResult == 42;
+  if (!result.pthread_lifecycle_passed)
+    throw std::runtime_error("Ciclo pthread próprio não retornou 42.");
   HleDispatcher dispatcher;
   const auto hle = dispatcher.Resolve("1U-s6o8XOcE#B#B");
   if (!hle.address)
@@ -834,7 +872,8 @@ ExecuteGeneratedProbe(std::filesystem::path const &directory) {
       result.passed ? L"ELF gerado pelo projeto foi validado, protegido como "
                       L"RX e retornou 42. "
                       L"A ponte SysV→Windows preservou argumentos inteiros, "
-                      L"XMM e pilha; o thunk HLE retornou 0. "
+                      L"XMM e pilha; a thread SysV própria retornou 42 e "
+                      L"completou create/join; o thunk HLE retornou 0. "
                       L"O eboot.bin selecionado não foi executado."
                     : L"O ELF gerado pelo projeto retornou um valor "
                       L"inesperado. O eboot.bin selecionado não foi executado.";

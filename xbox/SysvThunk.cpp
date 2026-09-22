@@ -50,6 +50,18 @@ void StoreXmm(std::uint8_t *code, std::size_t &offset, std::uint8_t reg,
   U32(code, offset, displacement);
 }
 
+void MoveXmmStack(std::uint8_t *code, std::size_t &offset, std::uint8_t reg,
+                  std::uint32_t displacement, bool load) {
+  Byte(code, offset, 0xF3);
+  if (reg >= 8)
+    Byte(code, offset, 0x44);
+  Byte(code, offset, 0x0F);
+  Byte(code, offset, load ? 0x6F : 0x7F);
+  Byte(code, offset, static_cast<std::uint8_t>(0x84 | ((reg & 7u) << 3)));
+  Byte(code, offset, 0x24);
+  U32(code, offset, displacement);
+}
+
 constexpr std::uint64_t ValidationReturn = 0xA81B'C2D3'E4F5'0617ull;
 constexpr std::uint64_t ValidationGpr[] = {
     0x1111'1111'1111'1111ull, 0x2222'2222'2222'2222ull,
@@ -327,6 +339,102 @@ std::uint64_t InvokeSysv3(void *entry, std::uint64_t argument0,
   Byte(caller, offset, 0x5F);
   Byte(caller, offset, 0xC3);
 
+  DWORD previous{};
+  if (!Core::PlatformMemory::Protect(GetCurrentProcess(), caller, PageSize,
+                                     PAGE_EXECUTE_READ, &previous) ||
+      !FlushInstructionCache(GetCurrentProcess(), caller, offset)) {
+    Core::PlatformMemory::Free(GetCurrentProcess(), caller, 0, MEM_RELEASE);
+    throw std::runtime_error("Não foi possível ativar o chamador SysV.");
+  }
+  const auto value = reinterpret_cast<std::uint64_t (*)()>(caller)();
+  Core::PlatformMemory::Free(GetCurrentProcess(), caller, 0, MEM_RELEASE);
+  return value;
+}
+
+std::uint64_t InvokeGuestSysv1(void *entry, std::uint64_t argument0) {
+  if (!entry)
+    throw std::invalid_argument("Entrada convidada SysV ausente.");
+  auto *caller = static_cast<std::uint8_t *>(
+      Core::PlatformMemory::Allocate(GetCurrentProcess(), nullptr, PageSize,
+                                     MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+  if (!caller)
+    throw std::runtime_error("Não foi possível reservar o chamador convidado.");
+
+  std::size_t offset = 0;
+  Byte(caller, offset, 0x57); // preserve Windows nonvolatile RDI
+  Byte(caller, offset, 0x56); // preserve Windows nonvolatile RSI
+  Byte(caller, offset, 0x48);
+  Byte(caller, offset, 0x81);
+  Byte(caller, offset, 0xEC);
+  U32(caller, offset, 0xA8); // align and reserve XMM6-XMM15
+  for (std::uint8_t reg = 6; reg != 16; ++reg)
+    MoveXmmStack(caller, offset, reg, static_cast<std::uint32_t>((reg - 6) * 16), false);
+  Byte(caller, offset, 0x48);
+  Byte(caller, offset, 0xBF);
+  U64(caller, offset, argument0); // SysV RDI
+  Byte(caller, offset, 0x48);
+  Byte(caller, offset, 0xB8);
+  U64(caller, offset, reinterpret_cast<std::uint64_t>(entry));
+  Byte(caller, offset, 0xFF);
+  Byte(caller, offset, 0xD0);
+  for (std::uint8_t reg = 6; reg != 16; ++reg)
+    MoveXmmStack(caller, offset, reg, static_cast<std::uint32_t>((reg - 6) * 16), true);
+  Byte(caller, offset, 0x48);
+  Byte(caller, offset, 0x81);
+  Byte(caller, offset, 0xC4);
+  U32(caller, offset, 0xA8);
+  Byte(caller, offset, 0x5E);
+  Byte(caller, offset, 0x5F);
+  Byte(caller, offset, 0xC3);
+
+  DWORD previous{};
+  if (!Core::PlatformMemory::Protect(GetCurrentProcess(), caller, PageSize,
+                                     PAGE_EXECUTE_READ, &previous) ||
+      !FlushInstructionCache(GetCurrentProcess(), caller, offset)) {
+    Core::PlatformMemory::Free(GetCurrentProcess(), caller, 0, MEM_RELEASE);
+    throw std::runtime_error("Não foi possível ativar o chamador convidado.");
+  }
+  const auto value = reinterpret_cast<std::uint64_t (*)()>(caller)();
+  Core::PlatformMemory::Free(GetCurrentProcess(), caller, 0, MEM_RELEASE);
+  return value;
+}
+
+std::uint64_t InvokeSysv4(void *entry, std::uint64_t argument0,
+                          std::uint64_t argument1, std::uint64_t argument2,
+                          std::uint64_t argument3) {
+  if (!entry)
+    throw std::invalid_argument("Entrada SysV ausente.");
+  auto *caller = static_cast<std::uint8_t *>(
+      Core::PlatformMemory::Allocate(GetCurrentProcess(), nullptr, PageSize,
+                                     MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+  if (!caller)
+    throw std::runtime_error("Não foi possível reservar o chamador SysV.");
+  std::size_t offset = 0;
+  Byte(caller, offset, 0x57);
+  Byte(caller, offset, 0x56);
+  Byte(caller, offset, 0x48);
+  Byte(caller, offset, 0x83);
+  Byte(caller, offset, 0xEC);
+  Byte(caller, offset, 0x28);
+  constexpr std::uint8_t opcodes[] = {0xBF, 0xBE, 0xBA, 0xB9};
+  const std::uint64_t arguments[] = {argument0, argument1, argument2, argument3};
+  for (std::size_t index = 0; index != 4; ++index) {
+    Byte(caller, offset, 0x48);
+    Byte(caller, offset, opcodes[index]);
+    U64(caller, offset, arguments[index]);
+  }
+  Byte(caller, offset, 0x48);
+  Byte(caller, offset, 0xB8);
+  U64(caller, offset, reinterpret_cast<std::uint64_t>(entry));
+  Byte(caller, offset, 0xFF);
+  Byte(caller, offset, 0xD0);
+  Byte(caller, offset, 0x48);
+  Byte(caller, offset, 0x83);
+  Byte(caller, offset, 0xC4);
+  Byte(caller, offset, 0x28);
+  Byte(caller, offset, 0x5E);
+  Byte(caller, offset, 0x5F);
+  Byte(caller, offset, 0xC3);
   DWORD previous{};
   if (!Core::PlatformMemory::Protect(GetCurrentProcess(), caller, PageSize,
                                      PAGE_EXECUTE_READ, &previous) ||

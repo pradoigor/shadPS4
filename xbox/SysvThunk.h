@@ -51,5 +51,12 @@ std::uint64_t InvokeSysv2(void *entry, std::uint64_t argument0,
                           std::uint64_t argument1);
 std::uint64_t InvokeSysv3(void *entry, std::uint64_t argument0,
                           std::uint64_t argument1, std::uint64_t argument2);
+std::uint64_t InvokeSysv4(void *entry, std::uint64_t argument0,
+                          std::uint64_t argument1, std::uint64_t argument2,
+                          std::uint64_t argument3);
+
+// Calls guest SysV code from a Windows worker thread while preserving every
+// nonvolatile register required by the Windows x64 ABI.
+std::uint64_t InvokeGuestSysv1(void *entry, std::uint64_t argument0);
 
 } // namespace Lab

@@ -29,6 +29,8 @@ public:
   void *Translate(std::uint64_t guestAddress, std::size_t bytes) const noexcept;
   void *TranslateWritable(std::uint64_t guestAddress,
                           std::size_t bytes) const noexcept;
+  bool IsExecutable(std::uint64_t guestAddress,
+                    std::size_t bytes = 1) const noexcept;
   bool MapAnonymous(std::size_t bytes, std::uint64_t prot,
                     std::uint64_t requestedAddress, bool fixed,
                     std::uint64_t &guestAddress) noexcept;
@@ -63,6 +65,11 @@ private:
     std::uint32_t protection{};
   };
   std::vector<WritableRange> writable_;
+  struct ExecutableRange {
+    std::uint64_t address{};
+    std::uint64_t size{};
+  };
+  std::vector<ExecutableRange> executable_;
   struct AnonymousRange {
     std::uint64_t address{};
     std::uint64_t size{};

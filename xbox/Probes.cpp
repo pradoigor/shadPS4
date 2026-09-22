@@ -646,6 +646,16 @@ void RunProbe(Test &test, std::wstring const &executablePath,
       JsonValue::CreateNumberValue(execution.returned_value));
   test.measurements.Insert(L"sysv_abi_passed", JsonValue::CreateBooleanValue(
                                                    execution.sysv_abi_passed));
+  test.measurements.Insert(
+      L"guest_thread_abi_passed",
+      JsonValue::CreateBooleanValue(execution.guest_thread_abi_passed));
+  test.measurements.Insert(
+      L"pthread_lifecycle_passed",
+      JsonValue::CreateBooleanValue(execution.pthread_lifecycle_passed));
+  test.measurements.Insert(
+      L"guest_thread_returned_value",
+      JsonValue::CreateNumberValue(
+          static_cast<double>(execution.guest_thread_returned_value)));
   test.measurements.Insert(L"sysv_abi_returned_value",
                            JsonValue::CreateNumberValue(static_cast<double>(
                                execution.sysv_abi_returned_value)));
