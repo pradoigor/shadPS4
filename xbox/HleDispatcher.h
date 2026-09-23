@@ -134,6 +134,8 @@ private:
     static std::uint64_t UserServiceGetLoginUsers(HleDispatcher&,
                                                   GuestCallFrame const&) noexcept;
     static std::uint64_t UserServiceGetUserName(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t UserServiceGetRegisteredUsers(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t UserServiceGetNpAccountId(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t SystemServiceParamGetInt(HleDispatcher&,
                                                   GuestCallFrame const&) noexcept;
     static std::uint64_t RegMgrGetBin(HleDispatcher&, GuestCallFrame const&) noexcept;

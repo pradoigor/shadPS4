@@ -154,7 +154,8 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sceUserServiceInitialize") use(&UserServiceInitialize);
     if (name == "sceUserServiceGetInitialUser") use(&UserServiceGetInitialUser);
     if (name == "sceUserServiceGetLoginUserIdList") use(&UserServiceGetLoginUsers);
-    if (name == "sceUserServiceGetRegisteredUserIdList") use(&UserServiceGetLoginUsers);
+    if (name == "sceUserServiceGetRegisteredUserIdList") use(&UserServiceGetRegisteredUsers);
+    if (name == "sceUserServiceGetNpAccountId") handler = &UserServiceGetNpAccountId;
     if (name == "sceUserServiceGetUserName") use(&UserServiceGetUserName);
     if (name == "sceSystemServiceParamGetInt") use(&SystemServiceParamGetInt);
     if (name == "sceRegMgrGetBin") use(&RegMgrGetBin);
@@ -228,7 +229,6 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
         name == "sceSysmoduleLoadModuleInternal" ||
         name == "sceSysmoduleUnloadModuleInternal" ||
         name == "sceCommonDialogInitialize" ||
-        name == "sceUserServiceGetNpAccountId" ||
         name == "sceSystemServiceParamGetString" ||
         name == "sceKernelSync" || name == "pthread_setcancelstate" ||
         name == "pthread_setcanceltype" ||
@@ -847,6 +847,27 @@ std::uint64_t HleDispatcher::UserServiceGetUserName(
     if (!output) return InvalidArgument;
     std::memcpy(output, name, sizeof(name));
     return 0;
+}
+
+std::uint64_t HleDispatcher::UserServiceGetRegisteredUsers(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    // Registered-user ABI has 16 slots, unlike the 4-slot login-user list.
+    std::array<std::int32_t, 16> users;
+    users.fill(-1); users[0] = 1;
+    auto* output = WritablePointer(dispatcher, frame, frame.gpr[0], sizeof(users));
+    if (!output) return 0x80960005ull;
+    std::memcpy(output, users.data(), sizeof(users));
+    return 0;
+}
+
+std::uint64_t HleDispatcher::UserServiceGetNpAccountId(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto* output = static_cast<std::uint64_t*>(WritablePointer(dispatcher, frame, frame.gpr[1], 8));
+    if (!output) return 0x80960005ull;
+    *output = 0;
+    // The local virtual user has no PSN identity. Do not report a successful
+    // lookup while leaving guest output memory uninitialized.
+    return 0x80960006ull;
 }
 
 std::uint64_t HleDispatcher::SystemServiceParamGetInt(
