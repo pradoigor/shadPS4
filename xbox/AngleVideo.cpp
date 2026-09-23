@@ -87,7 +87,17 @@ bool AngleVideo::Start(winrt::Windows::UI::Xaml::Controls::SwapChainPanel const&
 bool AngleVideo::ReleaseForGuest() noexcept {
     if (!Ready()) return false;
     auto makeCurrent = Proc<MakeCurrent>(egl_, "eglMakeCurrent");
-    return makeCurrent && makeCurrent(display_, nullptr, nullptr, nullptr) != 0;
+    auto clearColor = Proc<ClearColor>(gles_, "glClearColor");
+    auto clear = Proc<Clear>(gles_, "glClear");
+    auto swapBuffers = Proc<SwapBuffers>(egl_, "eglSwapBuffers");
+    if (!makeCurrent || !clearColor || !clear || !swapBuffers) return false;
+    // The blue frame belongs to the standalone ANGLE check. Leave the guest
+    // surface neutral until its first eglSwapBuffers, so it cannot be mistaken
+    // for graphics rendered by the homebrew.
+    clearColor(0.02f, 0.06f, 0.12f, 1.f);
+    clear(0x4000);
+    if (!swapBuffers(display_, surface_)) return false;
+    return makeCurrent(display_, nullptr, nullptr, nullptr) != 0;
 }
 
 void AngleVideo::Stop() noexcept {
