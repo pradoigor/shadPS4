@@ -354,12 +354,12 @@ struct App : ApplicationT<App> {
         }
         return false;
     }
-    void RecordAngle(bool passed, std::wstring const& detail) {
+    void RecordAngle(std::wstring const& state, std::wstring const& detail) {
         try {
             Windows::Data::Json::JsonObject result;
             using Windows::Data::Json::JsonValue;
             result.Insert(L"test", JsonValue::CreateStringValue(L"angle_egl_swapchainpanel"));
-            result.Insert(L"status", JsonValue::CreateStringValue(passed ? L"approved" : L"failed"));
+            result.Insert(L"status", JsonValue::CreateStringValue(state));
             result.Insert(L"detail", JsonValue::CreateStringValue(detail));
             result.Insert(L"commit", JsonValue::CreateStringValue(XBOX_BUILD_COMMIT));
             result.Insert(L"timestamp", JsonValue::CreateNumberValue(Lab::Now()));
@@ -371,6 +371,7 @@ struct App : ApplicationT<App> {
         Find<Grid>(L"AngleTestView").Visibility(Visibility::Visible);
         Find<TextBlock>(L"AngleStatus").Text(L"Preparando superfície EGL…");
         anglePending = true;
+        RecordAngle(L"running", L"Teste iniciado; ausência de resultado final indica interrupção do aplicativo.");
         Find<Button>(L"CloseAngleTest").Focus(FocusState::Programmatic);
     }
     void FinishAngleTest() {
@@ -491,7 +492,7 @@ struct App : ApplicationT<App> {
                       catch (std::exception const& e) { detail = std::wstring(to_hstring(e.what())); angleActive = false; }
                     Find<TextBlock>(L"AngleStatus").Text((angleActive ? L"Aprovado: " : L"Falhou: ") + detail +
                         L". Confira visualmente o fundo azul e exporte o JSON.");
-                    RecordAngle(angleActive, detail);
+                    RecordAngle(angleActive ? L"approved" : L"failed", detail);
                 }
                 if (extraction) {
                     Find<ProgressBar>(L"InstallProgress").Value(extraction->percent.load());
