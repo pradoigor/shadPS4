@@ -6,6 +6,7 @@
 #include "PkgExtractor.h"
 #include "PkgBuiltinKeys.h"
 #include "HomebrewRuntime.h"
+#include "AngleVideo.h"
 #include <windows.h>
 #include <fileapifromapp.h>
 #include <winrt/Windows.UI.Xaml.Media.Imaging.h>
@@ -61,6 +62,8 @@ struct App : ApplicationT<App> {
     std::wstring selectedLoaderPath;
     std::shared_ptr<Lab::InstallProgress> extraction;
     std::unique_ptr<Lab::HomebrewRuntime> homebrew;
+    Lab::AngleVideo angleVideo;
+    bool anglePending{}, angleActive{};
     bool homebrewCompletionShown{};
     bool importing{}, listing{};
     Windows::System::Display::DisplayRequest displayRequest{nullptr};
@@ -351,6 +354,31 @@ struct App : ApplicationT<App> {
         }
         return false;
     }
+    void RecordAngle(bool passed, std::wstring const& detail) {
+        try {
+            Windows::Data::Json::JsonObject result;
+            using Windows::Data::Json::JsonValue;
+            result.Insert(L"test", JsonValue::CreateStringValue(L"angle_egl_swapchainpanel"));
+            result.Insert(L"status", JsonValue::CreateStringValue(passed ? L"approved" : L"failed"));
+            result.Insert(L"detail", JsonValue::CreateStringValue(detail));
+            result.Insert(L"commit", JsonValue::CreateStringValue(XBOX_BUILD_COMMIT));
+            result.Insert(L"timestamp", JsonValue::CreateNumberValue(Lab::Now()));
+            Lab::WriteDurable(report->directory + L"\\angle-video.json", to_string(result.Stringify()));
+        } catch (...) { Find<TextBlock>(L"AngleStatus").Text(detail + L" · falha ao gravar o resultado"); }
+    }
+    void StartAngleTest() {
+        angleVideo.Stop(); angleActive = false;
+        Find<Grid>(L"AngleTestView").Visibility(Visibility::Visible);
+        Find<TextBlock>(L"AngleStatus").Text(L"Preparando superfície EGL…");
+        anglePending = true;
+        Find<Button>(L"CloseAngleTest").Focus(FocusState::Programmatic);
+    }
+    void FinishAngleTest() {
+        anglePending = false; angleActive = false;
+        angleVideo.Stop();
+        Find<Grid>(L"AngleTestView").Visibility(Visibility::Collapsed);
+        Find<Button>(L"TestAngle").Focus(FocusState::Programmatic);
+    }
     void OnLaunched(Windows::ApplicationModel::Activation::LaunchActivatedEventArgs const&) {
         StartupLog(L"OnLaunched entered");
         if (root) { Window::Current().Activate(); return; }
@@ -378,6 +406,8 @@ struct App : ApplicationT<App> {
             Find<Button>(L"ExtractContent").Click([this](auto const&, auto const&) { ExtractContent(); });
             Find<Button>(L"ValidateContent").Click([this](auto const&, auto const&) { ValidateSelectedContent(); });
             Find<Button>(L"LaunchContent").Click([this](auto const&, auto const&) { StartHomebrew(); });
+            Find<Button>(L"TestAngle").Click([this](auto const&, auto const&) { StartAngleTest(); });
+            Find<Button>(L"CloseAngleTest").Click([this](auto const&, auto const&) { FinishAngleTest(); });
             Find<Button>(L"CancelExtraction").Click([this](auto const&, auto const&) { if (extraction) extraction->cancel.store(true); });
             libraryList.SelectionChanged([this](auto const&, auto const&) { LibrarySelection(); });
             Find<Button>(L"Export").Click([this](auto const&, auto const&) {
@@ -419,6 +449,12 @@ struct App : ApplicationT<App> {
                     if (!sessionName.empty())
                         includeLines(L"session_events", directory / std::filesystem::path(sessionName).filename());
                     auto lastHle = directory / L"homebrew-last-hle.json";
+                    auto anglePath = directory / L"angle-video.json";
+                    if (std::filesystem::is_regular_file(anglePath)) {
+                        std::ifstream input(anglePath, std::ios::binary);
+                        std::string raw{std::istreambuf_iterator<char>(input), {}};
+                        exported.SetNamedValue(L"angle_video", Windows::Data::Json::JsonObject::Parse(to_hstring(raw)));
+                    }
                     if (std::filesystem::is_regular_file(lastHle)) {
                         try {
                             std::ifstream input(lastHle, std::ios::binary);
@@ -446,6 +482,17 @@ struct App : ApplicationT<App> {
             });
             timer = DispatcherTimer(); timer.Interval(std::chrono::milliseconds(100));
             timer.Tick([this](auto const&, auto const&) {
+                if (anglePending) {
+                    anglePending = false;
+                    std::wstring detail;
+                    try {
+                        angleActive = angleVideo.Start(Find<SwapChainPanel>(L"AnglePanel"), detail);
+                    } catch (winrt::hresult_error const& e) { detail = std::wstring(e.message()); angleActive = false; }
+                      catch (std::exception const& e) { detail = std::wstring(to_hstring(e.what())); angleActive = false; }
+                    Find<TextBlock>(L"AngleStatus").Text((angleActive ? L"Aprovado: " : L"Falhou: ") + detail +
+                        L". Confira visualmente o fundo azul e exporte o JSON.");
+                    RecordAngle(angleActive, detail);
+                }
                 if (extraction) {
                     Find<ProgressBar>(L"InstallProgress").Value(extraction->percent.load());
                     libraryStatus.Text(L"Extraindo · " + std::to_wstring(extraction->files.load()) + L" arquivos · " +

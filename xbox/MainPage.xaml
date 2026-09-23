@@ -18,7 +18,7 @@
         <ListView x:Name="LibraryList" Grid.Row="1" Height="285" Margin="-10,12,-10,12" SelectionMode="Single" ScrollViewer.HorizontalScrollMode="Enabled" ScrollViewer.HorizontalScrollBarVisibility="Auto" ScrollViewer.VerticalScrollMode="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled" XYFocusKeyboardNavigation="Enabled"><ListView.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ListView.ItemsPanel></ListView>
         <Grid Grid.Row="2"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="250"/></Grid.ColumnDefinitions>
           <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,0,24,0"><StackPanel Spacing="8"><TextBlock x:Name="ContentTitle" Text="Comece pela sua biblioteca" FontSize="26" FontWeight="Light" TextWrapping="Wrap"/><TextBlock x:Name="ContentDetails" Text="Importe um PKG, extraia e selecione Iniciar homebrew." FontSize="15" Foreground="#D4E7FF" TextWrapping="Wrap"/></StackPanel></ScrollViewer>
-          <StackPanel Grid.Column="1" Spacing="10"><Button x:Name="LaunchContent" Content="Iniciar homebrew" IsEnabled="False" HorizontalAlignment="Stretch" Background="#2D8CFF"/><Button x:Name="ExtractContent" Content="Extrair pacote" IsEnabled="False" HorizontalAlignment="Stretch"/><Button x:Name="ValidateContent" Content="Diagnóstico técnico" IsEnabled="False" HorizontalAlignment="Stretch"/><Button x:Name="CancelExtraction" Content="Cancelar extração" IsEnabled="False" HorizontalAlignment="Stretch"/><ProgressBar x:Name="InstallProgress" Minimum="0" Maximum="100" Value="0" Foreground="#9AE9FF" Height="5"/><TextBlock Text="Iniciar homebrew transfere o controle ao e_entry real do conteúdo selecionado." FontSize="12" Foreground="#B9D9FF" TextWrapping="Wrap"/></StackPanel>
+          <StackPanel Grid.Column="1" Spacing="10"><Button x:Name="LaunchContent" Content="Iniciar homebrew" IsEnabled="False" HorizontalAlignment="Stretch" Background="#2D8CFF"/><Button x:Name="TestAngle" Content="Testar vídeo ANGLE" HorizontalAlignment="Stretch"/><Button x:Name="ExtractContent" Content="Extrair pacote" IsEnabled="False" HorizontalAlignment="Stretch"/><Button x:Name="ValidateContent" Content="Diagnóstico técnico" IsEnabled="False" HorizontalAlignment="Stretch"/><Button x:Name="CancelExtraction" Content="Cancelar extração" IsEnabled="False" HorizontalAlignment="Stretch"/><ProgressBar x:Name="InstallProgress" Minimum="0" Maximum="100" Value="0" Foreground="#9AE9FF" Height="5"/><TextBlock Text="Iniciar homebrew transfere o controle ao e_entry real do conteúdo selecionado." FontSize="12" Foreground="#B9D9FF" TextWrapping="Wrap"/></StackPanel>
         </Grid>
         <TextBlock x:Name="LibraryStatus" Grid.Row="3" Text="Pronto para importar conteúdo." FontSize="14" TextWrapping="Wrap" Margin="0,14,0,0" Foreground="#D4E7FF"/>
       </Grid>
@@ -40,4 +40,12 @@
     <TextBlock x:Name="Status" Grid.Row="3" Text="A  Selecionar     ·     Direcional  Navegar" FontSize="16" TextWrapping="Wrap" Margin="0,12,0,0" Foreground="#D4E7FF"/>
   </Grid>
 </Grid></Viewbox>
+  <Grid x:Name="AngleTestView" Visibility="Collapsed" Background="#061A35">
+    <SwapChainPanel x:Name="AnglePanel"/>
+    <StackPanel VerticalAlignment="Bottom" Background="#D9001738" Padding="32" Spacing="8">
+      <TextBlock Text="TESTE DE VÍDEO · ANGLE / DIRECT3D 11" FontSize="18"/>
+      <TextBlock x:Name="AngleStatus" Text="Preparando superfície…" FontSize="15" TextWrapping="Wrap"/>
+      <Button x:Name="CloseAngleTest" Content="Voltar à biblioteca" HorizontalAlignment="Left"/>
+    </StackPanel>
+  </Grid>
 </Grid>
