@@ -15,6 +15,10 @@ O erro em `_ioctl` ocorreu durante a limpeza, depois da falha de fontes.
 - Todas as sete funções FreeType importadas por esta versão do Apollo e
   `FT_Done_Face`; arquivos em memória são copiados e mantidos até liberar a face.
 - Fontes de sistema substituídas explicitamente por Noto: ver `FONTS.md`.
+- Alias `/mnt/sandbox/<processo>/app0` resolvido para a instalação atual, com
+  limites de caminho e proteção de escrita iguais a `/app0`. O binário Apollo
+  usa esse prefixo em suas fontes, imagens, idiomas e música; rejeitá-lo impediria
+  o carregamento dos recursos mesmo depois de implementar FreeType.
 - `scePadReadState` lê botões, gatilhos e analógicos pelo Windows.Gaming.Input.
   A/B/X/Y correspondem a cross/circle/square/triangle, Menu a Options e View
   ao clique do touchpad. Vibração usa os motores do Xbox; não há sensor de

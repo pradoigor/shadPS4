@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "GuestFontLibrary.h"
+#include "GuestPaths.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <filesystem>
@@ -43,6 +44,11 @@ void Render(std::filesystem::path const& path,std::uint32_t character) {
 int main(int argc,char** argv) {
     try {
         Check(argc==2,"font directory required");
+        Check(SandboxAppPath("/mnt/sandbox/APOL00004_000/app0/assets/fonts/font.ttf")=="/app0/assets/fonts/font.ttf","sandbox app0 alias");
+        Check(SandboxAppPath("/mnt/sandbox/OTHER0001_000/app0")=="/app0","generic process mount");
+        Check(!SandboxAppPath("/mnt/sandbox/../app0/asset"),"sandbox traversal rejected");
+        Check(!SandboxAppPath("/mnt/sandbox/APP_000/app0-other/asset"),"mount boundary");
+        Check(!SandboxAppPath("/mnt/sandbox/APP_000/data/file"),"other mount rejected");
         Render(std::filesystem::path(argv[1])/"NotoSans-Regular.ttf",0xe7);
         Render(std::filesystem::path(argv[1])/"NotoSansCJK-Regular.ttc",0x4e2d);
         std::cout<<"LP64 guest structures, Latin/CJK rasterization and resource lifetime passed\n";

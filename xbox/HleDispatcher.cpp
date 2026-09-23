@@ -3,6 +3,7 @@
 #include "GuestGraphics.h"
 #include "GuestFreeType.h"
 #include "GuestDevices.h"
+#include "GuestPaths.h"
 
 #include "core/aerolib/aerolib.h"
 
@@ -153,6 +154,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sceUserServiceInitialize") use(&UserServiceInitialize);
     if (name == "sceUserServiceGetInitialUser") use(&UserServiceGetInitialUser);
     if (name == "sceUserServiceGetLoginUserIdList") use(&UserServiceGetLoginUsers);
+    if (name == "sceUserServiceGetRegisteredUserIdList") use(&UserServiceGetLoginUsers);
     if (name == "sceUserServiceGetUserName") use(&UserServiceGetUserName);
     if (name == "sceSystemServiceParamGetInt") use(&SystemServiceParamGetInt);
     if (name == "sceRegMgrGetBin") use(&RegMgrGetBin);
@@ -226,7 +228,6 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
         name == "sceSysmoduleLoadModuleInternal" ||
         name == "sceSysmoduleUnloadModuleInternal" ||
         name == "sceCommonDialogInitialize" ||
-        name == "sceUserServiceGetRegisteredUserIdList" ||
         name == "sceUserServiceGetNpAccountId" ||
         name == "sceSystemServiceParamGetString" ||
         name == "sceKernelSync" || name == "pthread_setcancelstate" ||
@@ -816,7 +817,7 @@ std::uint64_t HleDispatcher::UserServiceGetInitialUser(
     constexpr std::uint64_t InvalidArgument = 0x80960005ull;
     if (!dispatcher.memory_) return InvalidArgument;
     auto* output = static_cast<std::int32_t*>(
-        dispatcher.memory_->TranslateWritable(frame.gpr[0], sizeof(std::int32_t)));
+        WritablePointer(dispatcher, frame, frame.gpr[0], sizeof(std::int32_t)));
     if (!output) return InvalidArgument;
     *output = 1;
     return 0;
@@ -827,7 +828,7 @@ std::uint64_t HleDispatcher::UserServiceGetLoginUsers(
     constexpr std::uint64_t InvalidArgument = 0x80960005ull;
     constexpr std::int32_t users[4] = {1, -1, -1, -1};
     if (!dispatcher.memory_) return InvalidArgument;
-    auto* output = dispatcher.memory_->TranslateWritable(frame.gpr[0], sizeof(users));
+    auto* output = WritablePointer(dispatcher, frame, frame.gpr[0], sizeof(users));
     if (!output) return InvalidArgument;
     std::memcpy(output, users, sizeof(users));
     return 0;
@@ -841,7 +842,7 @@ std::uint64_t HleDispatcher::UserServiceGetUserName(
     if (frame.gpr[0] == UINT64_MAX || frame.gpr[2] < sizeof(name))
         return frame.gpr[2] < sizeof(name) ? BufferTooShort : InvalidArgument;
     if (!dispatcher.memory_) return InvalidArgument;
-    auto* output = dispatcher.memory_->TranslateWritable(
+    auto* output = WritablePointer(dispatcher, frame,
         frame.gpr[1], static_cast<std::size_t>(frame.gpr[2]));
     if (!output) return InvalidArgument;
     std::memcpy(output, name, sizeof(name));
@@ -853,7 +854,7 @@ std::uint64_t HleDispatcher::SystemServiceParamGetInt(
     constexpr std::uint64_t ParameterError = 0x80A10003ull;
     if (!dispatcher.memory_) return ParameterError;
     auto* output = static_cast<std::int32_t*>(
-        dispatcher.memory_->TranslateWritable(frame.gpr[1], sizeof(std::int32_t)));
+        WritablePointer(dispatcher, frame, frame.gpr[1], sizeof(std::int32_t)));
     if (!output) return ParameterError;
     switch (frame.gpr[0]) {
     case 1: *output = 1; break;
@@ -933,6 +934,7 @@ bool HleDispatcher::ReadGuestString(std::uint64_t address, std::string& value,
 bool HleDispatcher::ResolveGuestPath(std::string const& guestPath, bool write,
                                      std::filesystem::path& hostPath) const noexcept {
     try {
+        if (auto alias = SandboxAppPath(guestPath)) return ResolveGuestPath(*alias, write, hostPath);
         if (guestPath.empty() || guestPath.find('\\') != std::string::npos)
             return false;
         std::filesystem::path root;
@@ -954,7 +956,7 @@ bool HleDispatcher::ResolveGuestPath(std::string const& guestPath, bool write,
             return false;
         }
         auto relativePath = std::filesystem::path(relative).lexically_normal();
-        if (relativePath.is_absolute()) return false;
+        if (relativePath.is_absolute() || relativePath.has_root_name() || relative.find(':') != std::string::npos) return false;
         for (auto const& component : relativePath)
             if (component == L"..") return false;
         hostPath = (root / relativePath).lexically_normal();
