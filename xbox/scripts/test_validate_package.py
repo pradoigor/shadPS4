@@ -27,6 +27,14 @@ class PackageValidationTests(unittest.TestCase):
             'AppxSignature.p7x': b'fixture-only-not-a-real-signature',
             'MainPage.xaml': b'<Grid/>', 'ShadPS4Xbox.exe': bytes(exe),
         }
+        angle_binaries = {'libEGL.dll': b'egl-fixture', 'libGLESv2.dll': b'gles-fixture'}
+        self.files.update(angle_binaries)
+        self.files['Licenses/ANGLE.txt'] = b'license-fixture'
+        self.files['Licenses/ANGLE-build-info.json'] = json.dumps({
+            'target_os': 'winuwp', 'target_cpu': 'x64',
+            'binaries': {name: hashlib.sha256(payload).hexdigest()
+                         for name, payload in angle_binaries.items()},
+        }).encode()
 
     def write(self):
         package = self.path / 'test.appx'
@@ -69,6 +77,11 @@ class PackageValidationTests(unittest.TestCase):
     def test_rejects_added_capabilities(self):
         self.files['AppxManifest.xml'] = self.files['AppxManifest.xml'].replace(b'</Capabilities>', b'<Capability Name="internetClient"/></Capabilities>')
         with self.assertRaisesRegex(ValueError, 'capabilities'):
+            validate(*self.write())
+
+    def test_rejects_modified_angle_binary(self):
+        self.files['libEGL.dll'] = b'modified'
+        with self.assertRaisesRegex(ValueError, 'ANGLE binary mismatch'):
             validate(*self.write())
 
 

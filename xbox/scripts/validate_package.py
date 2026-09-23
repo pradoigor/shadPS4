@@ -38,6 +38,15 @@ def validate(package, info_path):
             raise ValueError('Executable is not PE x64')
         if any(name.lower().endswith('.pfx') for name in names):
             raise ValueError('Private signing key must never be packaged')
+        angle = json.loads(appx.read('Licenses/ANGLE-build-info.json').decode('utf-8-sig'))
+        if angle['target_os'] != 'winuwp' or angle['target_cpu'] != 'x64':
+            raise ValueError('ANGLE target mismatch')
+        if 'Licenses/ANGLE.txt' not in names:
+            raise ValueError('ANGLE license missing')
+        for dll in ('libEGL.dll', 'libGLESv2.dll'):
+            payload = appx.read(dll)
+            if hashlib.sha256(payload).hexdigest().lower() != angle['binaries'][dll].lower():
+                raise ValueError(f'ANGLE binary mismatch: {dll}')
     return {'package': package.name, 'sha256': digest, 'commit': info['commit'],
             'structure_valid': True, 'signature_present': True,
             'signature_cryptographically_verified': False, 'console_tested': False}

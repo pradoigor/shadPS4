@@ -4,7 +4,7 @@ Aplicativo **UWP x64 / C++/WinRT / XAML** para medir a viabilidade de portar
 shadPS4 ao Xbox Series X em Dev Mode. **Ainda não é um emulador PS4 no Xbox.**
 O alvo é independente do CMake e das dependências desktop do núcleo.
 
-A versão **0.62.0.0** inclui biblioteca horizontal inspirada no PS4, importação e
+A versão **0.63.0.0** inclui biblioteca horizontal inspirada no PS4, importação e
 extração de PKG/ELF, keysets FPKG embutidos e duas ações distintas. **Executar
 probe controlado** valida o arquivo selecionado e executa apenas um ELF mínimo
 gerado pelo projeto. **Iniciar homebrew** mapeia o `eboot.bin` extraído, aplica

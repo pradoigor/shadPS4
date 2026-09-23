@@ -1,0 +1,11 @@
+{
+  "angle_commit": "dba7ad242852bfb3775c490cb8c567f234e2a649",
+  "target_os": "winuwp",
+  "target_cpu": "x64",
+  "renderer": "d3d11",
+  "gn_args": "target_os = \"winuwp\"\r\ntarget_cpu = \"x64\"\r\nis_component_build = false\r\nis_clang = false\r\nuse_custom_libcxx = false\r\nis_debug = false\r\nangle_enable_d3d11 = true\r\nangle_enable_vulkan = false",
+  "binaries": {
+    "libEGL.dll": "BC0785D398889380883E9056C7AB9D058F886B0D7194AB1661A6A29C3B0BAE83",
+    "libGLESv2.dll": "3E5A26144908695A3C5C464DAD569419F24DB156F26615826834B32295726139"
+  }
+}

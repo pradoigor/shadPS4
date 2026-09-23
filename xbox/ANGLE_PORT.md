@@ -10,8 +10,14 @@ O workflow `xbox-angle-uwp.yml` compila o commit
 `dba7ad242852bfb3775c490cb8c567f234e2a649` (linha Chromium 7700,
 SDK Windows 10.0.26100), sem usar o pacote
 `ANGLE.WindowsStore` antigo, e guarda DLLs, bibliotecas, cabeçalhos, licença e
-hashes. A compilação da dependência não a instala no APPX nem declara o
-Piglet implementado.
+hashes. A compilação da dependência, isoladamente, não declara o Piglet
+implementado.
+
+A build `35799790663` compilou `libEGL.dll` e `libGLESv2.dll` UWP x64. A
+versão `0.63.0.0` inclui os binários em `xbox/third_party/angle` e os copia
+para o APPX após verificar os hashes; a licença e a proveniência também vão
+no pacote. As DLLs ainda não são chamadas pelo runtime, portanto essa versão
+não muda a execução do Apollo.
 
 Para a integração, o próximo trabalho é ligar `libEGL` e `libGLESv2` ao
 dispatcher SysV, traduzir os tipos e ponteiros da ABI convidada, criar uma

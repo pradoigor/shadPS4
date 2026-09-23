@@ -54,10 +54,26 @@ if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item $stage -ItemType Directory -Force | Out-Null
 Copy-Item "$binaryDir\ShadPS4Xbox.exe", "$binaryDir\resources.pri", "$project\MainPage.xaml" $stage
 Copy-Item "$project\Assets" $stage -Recurse
+$angleRoot = Join-Path $project 'third_party\angle'
+$angleInfo = Get-Content (Join-Path $angleRoot 'build-info.json') -Raw | ConvertFrom-Json
+if ($angleInfo.angle_commit -ne 'dba7ad242852bfb3775c490cb8c567f234e2a649' -or
+    $angleInfo.target_os -ne 'winuwp' -or $angleInfo.target_cpu -ne 'x64') {
+    throw 'ANGLE UWP provenance mismatch.'
+}
+foreach ($file in @('libEGL.dll', 'libGLESv2.dll')) {
+    $source = Join-Path $angleRoot $file
+    if (!(Test-Path $source)) { throw "ANGLE binary missing: $file" }
+    if ((Get-FileHash $source -Algorithm SHA256).Hash -ne $angleInfo.binaries.$file) {
+        throw "ANGLE checksum mismatch: $file"
+    }
+    Copy-Item $source $stage
+}
 New-Item "$stage\Licenses" -ItemType Directory -Force | Out-Null
 Copy-Item "$root\LICENSE" "$stage\Licenses\shadPS4-GPL.txt"
 Copy-Item "$root\externals\miniz\LICENSE" "$stage\Licenses\miniz.txt"
 Copy-Item "$project\EXTRACTION.md" "$stage\Licenses\extraction-notes.md"
+Copy-Item "$angleRoot\LICENSE" "$stage\Licenses\ANGLE.txt"
+Copy-Item "$angleRoot\build-info.json" "$stage\Licenses\ANGLE-build-info.json"
 $manifestText = (Get-Content "$project\Package.appxmanifest" -Raw).Replace('$targetnametoken$', 'ShadPS4Xbox')
 # Read the dependency identity from the exact Microsoft package distributed with this build.
 $vclibs = "${env:ProgramFiles(x86)}\Microsoft SDKs\Windows Kits\10\ExtensionSDKs\Microsoft.VCLibs\14.0\AppX\Retail\x64\Microsoft.VCLibs.x64.14.00.appx"
