@@ -128,16 +128,16 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sceKernelUsleep") use(&KernelUsleep);
     if (auto graphics = LookupGraphicsHandler(name)) use(graphics);
     if (auto font = LookupFreeTypeHandler(name)) use(font);
-    if (name == "sysKernelGetUpdVersion") handler = &KernelGetUpdVersion;
-    if (name == "sysKernelGetLowerLimitUpdVersion") handler = &KernelGetLowerLimitUpdVersion;
-    if (name == "getpid") handler = &KernelGetPid;
-    if (name == "geteuid") handler = &KernelGetEuid;
+    if (name == "sysKernelGetUpdVersion") use(&KernelGetUpdVersion);
+    if (name == "sysKernelGetLowerLimitUpdVersion") use(&KernelGetLowerLimitUpdVersion);
+    if (name == "getpid") use(&KernelGetPid);
+    if (name == "geteuid") use(&KernelGetEuid);
     if (name == "sched_yield") use(&KernelSchedYield);
     if (name == "_exit") use(&GenericSuccess);
     if (name == "pthread_self") use(&KernelThreadSelf);
-    if (name == "sceNetCtlInit") handler = &NetCtlInit;
-    if (name == "sceNetCtlTerm") handler = &NetCtlTerm;
-    if (name == "sceSystemServiceHideSplashScreen") handler = &HideSplashScreen;
+    if (name == "sceNetCtlInit") use(&NetCtlInit);
+    if (name == "sceNetCtlTerm") use(&NetCtlTerm);
+    if (name == "sceSystemServiceHideSplashScreen") use(&HideSplashScreen);
     if (name == "sceKernelDebugOutText") use(&KernelDebugOutText);
     if (name == "sceKernelMprotect") use(&KernelMprotect);
     if (name == "memcpy") use(&MemoryMemcpy);
@@ -155,7 +155,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sceUserServiceGetInitialUser") use(&UserServiceGetInitialUser);
     if (name == "sceUserServiceGetLoginUserIdList") use(&UserServiceGetLoginUsers);
     if (name == "sceUserServiceGetRegisteredUserIdList") use(&UserServiceGetRegisteredUsers);
-    if (name == "sceUserServiceGetNpAccountId") handler = &UserServiceGetNpAccountId;
+    if (name == "sceUserServiceGetNpAccountId") use(&UserServiceGetNpAccountId);
     if (name == "sceUserServiceGetUserName") use(&UserServiceGetUserName);
     if (name == "sceSystemServiceParamGetInt") use(&SystemServiceParamGetInt);
     if (name == "sceRegMgrGetBin") use(&RegMgrGetBin);
@@ -172,6 +172,8 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "_open") use(&KernelOpen);
     if (name == "close") use(&KernelClose);
     if (name == "read" || name == "_read") use(&KernelRead);
+    if (name == "_readv" || name == "readv" || name == "sceKernelReadv")
+        use(&KernelReadv);
     if (name == "write" || name == "_write") use(&KernelWrite);
     if (name == "_writev" || name == "writev" || name == "sceKernelWritev")
         use(&KernelWritev);
@@ -996,7 +998,10 @@ std::uint64_t HleDispatcher::KernelOpen(HleDispatcher& dispatcher,
         std::string guestPath;
         if (!dispatcher.ReadGuestString(frame.gpr[0], guestPath)) return OrbisEfault;
         const auto flags = static_cast<std::uint32_t>(frame.gpr[1]);
-        const bool writable = (flags & 0x3u) != 0;
+        const auto access = flags & 0x3u;
+        if (access == 0x3u) return OrbisEinval;
+        const bool readable = access != 0x1u;
+        const bool writable = access != 0x0u;
         std::filesystem::path hostPath;
         if (!dispatcher.ResolveGuestPath(guestPath, writable, hostPath)) return OrbisEacces;
         if (writable) std::filesystem::create_directories(hostPath.parent_path());
@@ -1012,6 +1017,7 @@ std::uint64_t HleDispatcher::KernelOpen(HleDispatcher& dispatcher,
         }
         GuestFile file;
         file.path = hostPath;
+        file.readable = readable;
         file.writable = writable;
         file.directory = std::filesystem::is_directory(hostPath);
         if ((flags & 0x20000u) != 0 && !file.directory) return OrbisEinval;
@@ -1052,14 +1058,76 @@ std::uint64_t HleDispatcher::KernelRead(HleDispatcher& dispatcher,
                                         GuestCallFrame const& frame) noexcept {
     constexpr std::uint64_t OrbisEbadf = 0x80020009ull;
     constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    constexpr std::uint64_t OrbisEinval = 0x80020016ull;
+    constexpr std::size_t MaxTransfer = 16u * 1024u * 1024u;
+    if (frame.gpr[2] > MaxTransfer) return OrbisEinval;
     const auto size = static_cast<std::size_t>(frame.gpr[2]);
     auto found = dispatcher.files_.find(static_cast<std::int32_t>(frame.gpr[0]));
-    if (found == dispatcher.files_.end() || found->second.directory) return OrbisEbadf;
-    auto* output = dispatcher.memory_ ? dispatcher.memory_->TranslateWritable(frame.gpr[1], size)
-                                      : nullptr;
+    if (found == dispatcher.files_.end() || found->second.directory ||
+        !found->second.readable)
+        return OrbisEbadf;
+    auto* output = WritablePointer(dispatcher, frame, frame.gpr[1], size);
     if (size != 0 && !output) return OrbisEfault;
     found->second.stream.read(static_cast<char*>(output), static_cast<std::streamsize>(size));
     return static_cast<std::uint64_t>(found->second.stream.gcount());
+}
+
+std::uint64_t HleDispatcher::KernelReadv(HleDispatcher& dispatcher,
+                                         GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEbadf = 0x80020009ull;
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    constexpr std::uint64_t OrbisEnomem = 0x8002000Cull;
+    constexpr std::uint64_t OrbisEinval = 0x80020016ull;
+    constexpr std::size_t MaxVectors = 1024;
+    constexpr std::size_t MaxTransfer = 16u * 1024u * 1024u;
+    struct GuestIovec {
+        std::uint64_t base;
+        std::uint64_t length;
+    };
+    static_assert(sizeof(GuestIovec) == 16);
+
+    const auto count = frame.gpr[2];
+    if (count > MaxVectors) return OrbisEinval;
+    if (count == 0) return 0;
+    const auto descriptor = static_cast<std::int32_t>(frame.gpr[0]);
+    auto file = dispatcher.files_.find(descriptor);
+    if (file == dispatcher.files_.end() || file->second.directory ||
+        !file->second.readable)
+        return OrbisEbadf;
+
+    auto const* vectors = static_cast<GuestIovec const*>(ReadablePointer(
+        dispatcher, frame, frame.gpr[1],
+        static_cast<std::size_t>(count) * sizeof(GuestIovec)));
+    if (!vectors) return OrbisEfault;
+
+    try {
+        std::vector<std::pair<void*, std::size_t>> parts;
+        parts.reserve(static_cast<std::size_t>(count));
+        std::size_t total{};
+        for (std::size_t index = 0; index < count; ++index) {
+            GuestIovec vector{};
+            std::memcpy(&vector, vectors + index, sizeof(vector));
+            if (vector.length > MaxTransfer - total) return OrbisEinval;
+            const auto length = static_cast<std::size_t>(vector.length);
+            auto* output = WritablePointer(dispatcher, frame, vector.base, length);
+            if (length != 0 && !output) return OrbisEfault;
+            parts.emplace_back(output, length);
+            total += length;
+        }
+
+        std::size_t transferred{};
+        for (auto const& [output, length] : parts) {
+            if (length == 0) continue;
+            file->second.stream.read(static_cast<char*>(output),
+                                     static_cast<std::streamsize>(length));
+            const auto read = static_cast<std::size_t>(file->second.stream.gcount());
+            transferred += read;
+            if (read != length) break;
+        }
+        return static_cast<std::uint64_t>(transferred);
+    } catch (...) {
+        return OrbisEnomem;
+    }
 }
 
 std::uint64_t HleDispatcher::KernelWrite(HleDispatcher& dispatcher,

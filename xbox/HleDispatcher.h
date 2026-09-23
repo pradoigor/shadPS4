@@ -146,6 +146,7 @@ private:
     static std::uint64_t KernelOpen(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelClose(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelRead(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelReadv(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelWrite(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelWritev(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelLseek(HleDispatcher&, GuestCallFrame const&) noexcept;
@@ -213,6 +214,7 @@ private:
         std::vector<DirectoryEntry> directoryEntries;
         std::size_t directoryIndex{};
         bool directory{};
+        bool readable{true};
         bool writable{};
     };
     std::filesystem::path appRoot_;
