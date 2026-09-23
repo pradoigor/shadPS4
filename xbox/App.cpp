@@ -171,8 +171,8 @@ struct App : ApplicationT<App> {
     void SavePreferences() {
         Windows::Data::Json::JsonObject preferences;
         Windows::Data::Json::JsonArray favorites, recent;
-        for (auto const& id : favoriteIds) favorites.Append(Windows::Data::Json::JsonValue::CreateStringValue(to_hstring(id)));
-        for (auto const& id : recentIds) recent.Append(Windows::Data::Json::JsonValue::CreateStringValue(to_hstring(id)));
+        for (auto const& id : favoriteIds) favorites.Append(Windows::Data::Json::JsonValue::CreateStringValue(hstring(id)));
+        for (auto const& id : recentIds) recent.Append(Windows::Data::Json::JsonValue::CreateStringValue(hstring(id)));
         preferences.Insert(L"favorites", favorites);
         preferences.Insert(L"recent", recent);
         auto path = std::filesystem::path(Windows::Storage::ApplicationData::Current().LocalFolder().Path().c_str()) / L"ui-preferences.json";
@@ -324,7 +324,7 @@ struct App : ApplicationT<App> {
             card.Background(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 14, 18, 27)));
             card.HorizontalContentAlignment(HorizontalAlignment::Center); card.VerticalContentAlignment(VerticalAlignment::Center);
             card.Content(tile); card.Tag(box_value(static_cast<int64_t>(index)));
-            Windows::UI::Xaml::Automation::AutomationProperties::SetName(card, to_hstring(item.name));
+            Windows::UI::Xaml::Automation::AutomationProperties::SetName(card, hstring(item.name));
             card.GotFocus([this, index](auto const&, auto const&) { homeFocusedIndex = static_cast<int>(index); });
             card.Click([this, index](auto const&, auto const&) { LaunchInstalled(index); });
             homeItems.Items().Append(card);
@@ -573,7 +573,7 @@ struct App : ApplicationT<App> {
              std::to_wstring(size / 1024) + L" KB");
         if (extension == L".pkg") {
             const auto probe = Lab::ProbePkg(std::filesystem::path(path));
-            return (probe.recognized ? L"Pacote PS4 reconhecido" : L"Não reconhecido como PKG PS4") +
+            return (probe.recognized ? std::wstring(L"Pacote PS4 reconhecido") : std::wstring(L"Não reconhecido como PKG PS4")) +
                 L" · " + sizeText + L"\nA instalação extrai os arquivos e não inicia o conteúdo.";
         }
         if (extension == L".elf") return L"Executável ELF · " + sizeText + L"\nA validação técnica não executa este arquivo.";
