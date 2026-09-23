@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "HleDispatcher.h"
+#include "GuestGraphics.h"
 
 #include "core/aerolib/aerolib.h"
 
@@ -122,6 +123,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     bool implemented = false;
     auto use = [&](HleHandler value) { handler = value; implemented = true; };
     if (name == "sceKernelUsleep") use(&KernelUsleep);
+    if (auto graphics = LookupGraphicsHandler(name)) use(graphics);
     if (name == "sysKernelGetUpdVersion") handler = &KernelGetUpdVersion;
     if (name == "sysKernelGetLowerLimitUpdVersion") handler = &KernelGetLowerLimitUpdVersion;
     if (name == "getpid") handler = &KernelGetPid;
@@ -129,9 +131,6 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sched_yield") use(&KernelSchedYield);
     if (name == "_exit") use(&GenericSuccess);
     if (name == "pthread_self") use(&KernelThreadSelf);
-    if (name == "eglGetError") handler = &EglGetError;
-    if (name == "eglQueryAPI") handler = &EglQueryApi;
-    if (name == "glGetError") handler = &GlGetError;
     if (name == "sceNetCtlInit") handler = &NetCtlInit;
     if (name == "sceNetCtlTerm") handler = &NetCtlTerm;
     if (name == "sceSystemServiceHideSplashScreen") handler = &HideSplashScreen;
@@ -260,6 +259,29 @@ void* HleDispatcher::AddressFor(std::string_view encodedSymbol) const noexcept {
     return nullptr;
 }
 
+void* HleDispatcher::GraphicsAddress(std::string_view name) {
+    if (name.empty() || name.size() > 128) return nullptr;
+    for (auto const& entry : entries_)
+        if (entry.name == name && entry.handler == LookupGraphicsHandler(name))
+            return entry.address;
+    auto handler = LookupGraphicsHandler(name);
+    if (!handler) return nullptr;
+    const auto slot = static_cast<std::uint64_t>(entries_.size());
+    entries_.push_back(Entry{std::string(name), std::string{}, std::string(name), true, handler, nullptr});
+    entries_.back().address = thunks_.Create(this, slot, &Dispatch);
+    return entries_.back().address;
+}
+
+void* HleDispatcher::GuestWritable(GuestCallFrame const& frame, std::uint64_t address, std::size_t bytes) noexcept {
+    return WritablePointer(*this, frame, address, bytes);
+}
+void const* HleDispatcher::GuestReadable(GuestCallFrame const& frame, std::uint64_t address, std::size_t bytes) noexcept {
+    return ReadablePointer(*this, frame, address, bytes);
+}
+bool HleDispatcher::GuestString(std::uint64_t address, std::string& value, std::size_t limit) const noexcept {
+    return ReadGuestString(address, value, limit);
+}
+
 void HleDispatcher::ConfigureFileSystem(std::filesystem::path appRoot,
                                         std::filesystem::path dataRoot) {
     // Both roots originate from the already opened eboot.bin under LocalState.
@@ -320,7 +342,7 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
     if (!self || !frame || slot >= self->entries_.size() ||
         frame->guest_stack != reinterpret_cast<std::uint64_t>(guestStack))
         return OrbisEnosys;
-    const auto& entry = self->entries_[static_cast<std::size_t>(slot)];
+    const auto entry = self->entries_[static_cast<std::size_t>(slot)];
     std::uint64_t sequence{};
     const auto thread = static_cast<std::uint64_t>(GetCurrentThreadId());
     auto writeTrace = [&](char const* phase, std::uint64_t result,

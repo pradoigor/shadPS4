@@ -58,6 +58,7 @@ bool AngleVideo::Start(winrt::Windows::UI::Xaml::Controls::SwapChainPanel const&
     void* config{}; int count{};
     if (!chooseConfig(display_, configAttrs, &config, 1, &count) || count != 1)
         return fail(L"eglChooseConfig");
+    config_ = config;
     properties_ = winrt::Windows::Foundation::Collections::PropertySet();
     properties_.Insert(L"EGLNativeWindowTypeProperty", panel);
     surface_ = createSurface(display_, config, winrt::get_abi(properties_), nullptr);
@@ -78,6 +79,12 @@ bool AngleVideo::Start(winrt::Windows::UI::Xaml::Controls::SwapChainPanel const&
     return true;
 }
 
+bool AngleVideo::ReleaseForGuest() noexcept {
+    if (!Ready()) return false;
+    auto makeCurrent = Proc<MakeCurrent>(egl_, "eglMakeCurrent");
+    return makeCurrent && makeCurrent(display_, nullptr, nullptr, nullptr) != 0;
+}
+
 void AngleVideo::Stop() noexcept {
     if (egl_ && display_) {
         if (auto makeCurrent = Proc<MakeCurrent>(egl_, "eglMakeCurrent")) makeCurrent(display_, nullptr, nullptr, nullptr);
@@ -85,7 +92,7 @@ void AngleVideo::Stop() noexcept {
         if (surface_) if (auto destroy = Proc<DestroySurface>(egl_, "eglDestroySurface")) destroy(display_, surface_);
         if (auto terminate = Proc<Terminate>(egl_, "eglTerminate")) terminate(display_);
     }
-    context_ = surface_ = display_ = nullptr;
+    context_ = surface_ = display_ = config_ = nullptr;
     properties_ = nullptr;
     if (gles_) FreeLibrary(gles_);
     if (egl_) FreeLibrary(egl_);

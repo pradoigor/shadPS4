@@ -64,6 +64,7 @@ struct App : ApplicationT<App> {
     std::unique_ptr<Lab::HomebrewRuntime> homebrew;
     Lab::AngleVideo angleVideo;
     bool anglePending{}, angleActive{};
+    bool homebrewLaunchPending{};
     bool homebrewCompletionShown{};
     bool importing{}, listing{};
     Windows::System::Display::DisplayRequest displayRequest{nullptr};
@@ -156,19 +157,31 @@ struct App : ApplicationT<App> {
             libraryStatus.Text(L"O homebrew já está em execução.");
             return;
         }
+        homebrewLaunchPending = true;
+        anglePending = true;
+        Find<Grid>(L"AngleTestView").Visibility(Visibility::Visible);
+        Find<TextBlock>(L"AngleStatus").Text(L"Preparando vídeo do homebrew…");
+        Find<Button>(L"CloseAngleTest").IsEnabled(false);
+        Find<Button>(L"LaunchContent").IsEnabled(false);
+        RecordAngle(L"running", L"Inicialização EGL do homebrew iniciada.");
+    }
+    void LaunchGuest() {
         try {
             homebrew = std::make_unique<Lab::HomebrewRuntime>();
             homebrewCompletionShown = false;
             homebrew->Start(std::filesystem::path(selectedLoaderPath),
-                            std::filesystem::path(report->directory));
-            libraryStatus.Text(L"Homebrew em execução. A saída gráfica PS4 ainda não está conectada ao Xbox; acompanhe o diagnóstico exportado.");
+                            std::filesystem::path(report->directory), &angleVideo);
+            libraryStatus.Text(L"Homebrew em execução; a superfície gráfica EGL está conectada ao Xbox.");
+            Find<TextBlock>(L"AngleStatus").Text(L"Homebrew em execução. A imagem aparecerá quando o programa apresentar o primeiro quadro.");
             Find<Button>(L"LaunchContent").IsEnabled(false);
         } catch (std::exception const& e) {
             homebrew.reset();
             libraryStatus.Text(L"Não foi possível iniciar o Apollo: " + std::wstring(to_hstring(e.what())));
+            Find<Button>(L"CloseAngleTest").IsEnabled(true);
         } catch (hresult_error const& e) {
             homebrew.reset();
             libraryStatus.Text(L"Não foi possível iniciar o Apollo: " + std::wstring(e.message()));
+            Find<Button>(L"CloseAngleTest").IsEnabled(true);
         }
     }
     void ExtractionRecord(std::wstring const& state, std::wstring const& message,
@@ -367,14 +380,17 @@ struct App : ApplicationT<App> {
         } catch (...) { Find<TextBlock>(L"AngleStatus").Text(detail + L" · falha ao gravar o resultado"); }
     }
     void StartAngleTest() {
+        if (homebrewLaunchPending || (homebrew && homebrew->running())) return;
         angleVideo.Stop(); angleActive = false;
         Find<Grid>(L"AngleTestView").Visibility(Visibility::Visible);
         Find<TextBlock>(L"AngleStatus").Text(L"Preparando superfície EGL…");
+        Find<Button>(L"CloseAngleTest").IsEnabled(true);
         anglePending = true;
         RecordAngle(L"running", L"Teste iniciado; ausência de resultado final indica interrupção do aplicativo.");
         Find<Button>(L"CloseAngleTest").Focus(FocusState::Programmatic);
     }
     void FinishAngleTest() {
+        if (homebrewLaunchPending || (homebrew && homebrew->running())) return;
         anglePending = false; angleActive = false;
         angleVideo.Stop();
         Find<Grid>(L"AngleTestView").Visibility(Visibility::Collapsed);
@@ -493,6 +509,15 @@ struct App : ApplicationT<App> {
                     Find<TextBlock>(L"AngleStatus").Text((angleActive ? L"Aprovado: " : L"Falhou: ") + detail +
                         L". Confira visualmente o fundo azul e exporte o JSON.");
                     RecordAngle(angleActive ? L"approved" : L"failed", detail);
+                    if (homebrewLaunchPending) {
+                        homebrewLaunchPending = false;
+                        if (angleActive && angleVideo.ReleaseForGuest()) LaunchGuest();
+                        else {
+                            Find<TextBlock>(L"AngleStatus").Text(L"Não foi possível entregar o contexto EGL ao homebrew: " + detail);
+                            Find<Button>(L"CloseAngleTest").IsEnabled(true);
+                            libraryStatus.Text(L"Vídeo indisponível. Homebrew não iniciado.");
+                        }
+                    }
                 }
                 if (extraction) {
                     Find<ProgressBar>(L"InstallProgress").Value(extraction->percent.load());
@@ -501,6 +526,7 @@ struct App : ApplicationT<App> {
                 }
                 if (homebrew && !homebrew->running() && !homebrewCompletionShown) {
                     homebrewCompletionShown = true;
+                    Find<Button>(L"CloseAngleTest").IsEnabled(true);
                     auto statePath = std::filesystem::path(report->directory) / L"homebrew-runtime.json";
                     try {
                         std::ifstream input(statePath, std::ios::binary);
@@ -508,8 +534,11 @@ struct App : ApplicationT<App> {
                         auto state = Windows::Data::Json::JsonObject::Parse(to_hstring(raw));
                         libraryStatus.Text(L"Homebrew encerrado: " + std::wstring(state.GetNamedString(L"detail")) +
                                            L" Exporte o relatório para análise.");
+                        Find<TextBlock>(L"AngleStatus").Text(L"Homebrew encerrado. " +
+                            std::wstring(state.GetNamedString(L"detail")) + L" Volte à biblioteca e exporte o relatório.");
                     } catch (...) {
                         libraryStatus.Text(L"Homebrew encerrado. Exporte o relatório para análise.");
+                        Find<TextBlock>(L"AngleStatus").Text(L"Homebrew encerrado. Volte à biblioteca e exporte o relatório.");
                     }
                     Find<Button>(L"LaunchContent").IsEnabled(!selectedLoaderPath.empty());
                 }

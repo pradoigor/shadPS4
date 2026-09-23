@@ -376,7 +376,7 @@ void HomebrewRuntime::Record(std::string const &stage,
 }
 
 void HomebrewRuntime::Start(std::filesystem::path executable,
-                            std::filesystem::path stateRoot) {
+                            std::filesystem::path stateRoot, AngleVideo* graphics) {
   if (running_.load())
     throw std::runtime_error("Um homebrew já está em execução.");
   if (worker_.joinable())
@@ -421,6 +421,7 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
     throw std::runtime_error("A imagem contém relocações que este runtime ainda não aceita.");
 
   dispatcher_ = std::make_unique<HleDispatcher>();
+  dispatcher_->AttachGraphics(graphics);
   dispatcher_->ConfigureFileSystem(executable_.parent_path(),
                                     executable_.parent_path() / L"RuntimeData");
   dispatcher_->ConfigureTrace(stateRoot / L"homebrew-last-hle.json", sessionId_);
@@ -537,7 +538,7 @@ void HomebrewRuntime::RunEntry() noexcept {
     if (exited)
       Record("entry_exited", "O homebrew encerrou com código " +
                                  std::to_string(static_cast<std::int64_t>(value)) +
-                                 ". O vídeo PS4 ainda não está conectado ao Xbox.");
+                                 ". Consulte o trace HLE para localizar a última chamada.");
     else if (!crashed)
       Record("entry_returned", "O e_entry retornou ao host com código " +
                                    std::to_string(value) + ".");

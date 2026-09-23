@@ -10,6 +10,14 @@ class AngleVideo {
 public:
     ~AngleVideo() { Stop(); }
     bool Start(winrt::Windows::UI::Xaml::Controls::SwapChainPanel const& panel, std::wstring& detail);
+    bool ReleaseForGuest() noexcept;
+    bool Ready() const noexcept { return egl_ && gles_ && display_ && surface_ && context_; }
+    HMODULE EglModule() const noexcept { return egl_; }
+    HMODULE GlesModule() const noexcept { return gles_; }
+    void* Display() const noexcept { return display_; }
+    void* Surface() const noexcept { return surface_; }
+    void* Context() const noexcept { return context_; }
+    void* Config() const noexcept { return config_; }
     void Stop() noexcept;
 private:
     HMODULE egl_{};
@@ -17,6 +25,7 @@ private:
     void* display_{};
     void* surface_{};
     void* context_{};
+    void* config_{};
     winrt::Windows::Foundation::Collections::PropertySet properties_{nullptr};
 };
 }

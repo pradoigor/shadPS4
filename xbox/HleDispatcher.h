@@ -21,6 +21,7 @@
 #include <vector>
 
 namespace Lab {
+class AngleVideo;
 
 struct HleResolution {
     std::string symbol;
@@ -53,6 +54,12 @@ public:
     HleBindingSummary Bind(std::vector<std::string> const& encodedSymbols);
     void* AddressFor(std::string_view encodedSymbol) const noexcept;
     void AttachGuestMemory(GuestMemory* memory) noexcept { memory_ = memory; }
+    void AttachGraphics(AngleVideo* graphics) noexcept { graphics_ = graphics; }
+    AngleVideo* Graphics() const noexcept { return graphics_; }
+    void* GuestWritable(GuestCallFrame const& frame, std::uint64_t address, std::size_t bytes) noexcept;
+    void const* GuestReadable(GuestCallFrame const& frame, std::uint64_t address, std::size_t bytes) noexcept;
+    bool GuestString(std::uint64_t address, std::string& value, std::size_t limit = 1024) const noexcept;
+    void* GraphicsAddress(std::string_view name);
     void ConfigureFileSystem(std::filesystem::path appRoot,
                              std::filesystem::path dataRoot);
     void ConfigureTrace(std::filesystem::path path, std::string const& sessionId = {});
@@ -69,6 +76,7 @@ private:
         HleHandler handler{};
         void* address{};
     };
+    AngleVideo* graphics_{};
 
     static std::uint64_t Dispatch(void* context, std::uint64_t slot,
                                   GuestCallFrame const* frame, void* guestStack) noexcept;

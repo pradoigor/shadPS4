@@ -35,3 +35,19 @@ deve carregar SPRX do firmware como DLL nativa do Xbox.
 O caminho GNM do shadPS4, usado por jogos, permanece separado: o renderer
 Vulkan desktop não é substituído pelo ANGLE. Ele precisará de um backend
 compatível com o Xbox e da integração dos serviços gráficos do núcleo.
+
+## Ponte experimental 0.65.0.0
+
+O PKG público do Apollo v2.3.2 foi extraído e o ELF interno analisado no Mac,
+sem console. Foram identificados 264 imports, incluindo 76 Piglet/EGL/GLES.
+A ponte `GuestGraphics.cpp` usa thunks SysV para as funções GLES2 e expõe
+handles EGL do ANGLE. O contexto gráfico é liberado da thread da interface
+antes de o convidado chamar `eglMakeCurrent` em sua própria thread.
+`eglGetProcAddress` devolve um thunk SysV registrado pelo dispatcher, nunca
+um ponteiro direto para a ABI Windows. O carregamento HLE dos nomes Piglet e
+Shacc é restrito; SPRX do firmware não é executado como código nativo.
+
+Esta implementação ainda precisa de validação no console. O mesmo backend
+ANGLE já apresentou um quadro do host, mas nenhum quadro produzido pelo
+Apollo foi confirmado. SDL2/Piglet, fontes, entrada, áudio e serviços do
+aplicativo podem revelar outras incompatibilidades quando a execução avançar.

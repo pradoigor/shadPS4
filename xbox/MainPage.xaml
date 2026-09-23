@@ -43,7 +43,7 @@
   <Grid x:Name="AngleTestView" Visibility="Collapsed" Background="#061A35">
     <SwapChainPanel x:Name="AnglePanel"/>
     <StackPanel VerticalAlignment="Bottom" Background="#D9001738" Padding="32" Spacing="8">
-      <TextBlock Text="TESTE DE VÍDEO · ANGLE / DIRECT3D 11" FontSize="18"/>
+      <TextBlock Text="VÍDEO · ANGLE / DIRECT3D 11" FontSize="18"/>
       <TextBlock x:Name="AngleStatus" Text="Preparando superfície…" FontSize="15" TextWrapping="Wrap"/>
       <Button x:Name="CloseAngleTest" Content="Voltar à biblioteca" HorizontalAlignment="Left"/>
     </StackPanel>

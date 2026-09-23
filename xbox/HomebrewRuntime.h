@@ -4,6 +4,7 @@
 #include "ControlledLoader.h"
 #include "GuestMemory.h"
 #include "HleDispatcher.h"
+#include "AngleVideo.h"
 
 #include <atomic>
 #include <array>
@@ -23,7 +24,7 @@ public:
 
   // Builds a persistent guest image and starts its real ELF entry point.
   // The runtime owns memory, HLE thunks and the worker for the whole session.
-  void Start(std::filesystem::path executable, std::filesystem::path stateRoot);
+  void Start(std::filesystem::path executable, std::filesystem::path stateRoot, AngleVideo* graphics);
   bool running() const noexcept { return running_.load(); }
 
 private:
