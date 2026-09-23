@@ -110,6 +110,43 @@ std::string BaseNid(std::string_view encoded) {
     return std::string(encoded.substr(0, separator));
 }
 
+bool IsCommittedGuestProcessRange(std::uint64_t address, std::size_t bytes,
+                                  bool writable) noexcept {
+    if (address == 0 || bytes == 0 || address > UINT64_MAX - bytes) return false;
+    using Query = SIZE_T(WINAPI*)(LPCVOID, PMEMORY_BASIC_INFORMATION, SIZE_T);
+    static const auto query = []() noexcept -> Query {
+        auto module = GetModuleHandleW(L"kernelbase.dll");
+        return module ? reinterpret_cast<Query>(GetProcAddress(module, "VirtualQuery"))
+                      : nullptr;
+    }();
+    if (!query) return false;
+
+    const auto end = address + bytes;
+    auto cursor = address;
+    while (cursor < end) {
+        MEMORY_BASIC_INFORMATION information{};
+        if (!query(reinterpret_cast<void const*>(cursor), &information,
+                   sizeof(information)))
+            return false;
+        const auto regionBegin = reinterpret_cast<std::uint64_t>(information.BaseAddress);
+        if (information.RegionSize > UINT64_MAX - regionBegin) return false;
+        const auto regionEnd = regionBegin + information.RegionSize;
+        const auto protection = information.Protect & 0xFFu;
+        const bool readable = information.State == MEM_COMMIT &&
+                              information.Type == MEM_PRIVATE &&
+                              (information.Protect & PAGE_GUARD) == 0 &&
+                              protection != 0 && protection != PAGE_NOACCESS &&
+                              protection != PAGE_EXECUTE;
+        const bool canWrite = protection == PAGE_READWRITE ||
+                              protection == PAGE_WRITECOPY;
+        if (cursor < regionBegin || regionEnd <= cursor || !readable ||
+            (writable && !canWrite))
+            return false;
+        cursor = (std::min)(end, regionEnd);
+    }
+    return true;
+}
+
 } // namespace
 
 HleDispatcher::~HleDispatcher() {
@@ -450,9 +487,12 @@ void* HleDispatcher::WritablePointer(HleDispatcher& dispatcher,
     const auto upper = frame.guest_stack <= UINT64_MAX - StackWindow
                            ? frame.guest_stack + StackWindow
                            : UINT64_MAX;
-    if (address < lower || address > upper || bytes > upper - address)
-        return nullptr;
-    return reinterpret_cast<void*>(address);
+    if (address >= lower && address <= upper && bytes <= upper - address &&
+        IsCommittedGuestProcessRange(address, bytes, true))
+        return reinterpret_cast<void*>(address);
+    if (IsCommittedGuestProcessRange(address, bytes, true))
+        return reinterpret_cast<void*>(address);
+    return nullptr;
 }
 
 void const* HleDispatcher::ReadablePointer(HleDispatcher& dispatcher,
@@ -463,7 +503,11 @@ void const* HleDispatcher::ReadablePointer(HleDispatcher& dispatcher,
         if (auto* translated = dispatcher.memory_->Translate(address, bytes))
             return translated;
     }
-    return WritablePointer(dispatcher, frame, address, bytes);
+    if (auto* translated = WritablePointer(dispatcher, frame, address, bytes))
+        return translated;
+    return IsCommittedGuestProcessRange(address, bytes, false)
+               ? reinterpret_cast<void const*>(address)
+               : nullptr;
 }
 
 std::uint64_t HleDispatcher::Unimplemented(HleDispatcher&, GuestCallFrame const&) noexcept {
@@ -1098,7 +1142,13 @@ std::uint64_t HleDispatcher::KernelReadv(HleDispatcher& dispatcher,
     auto const* vectors = static_cast<GuestIovec const*>(ReadablePointer(
         dispatcher, frame, frame.gpr[1],
         static_cast<std::size_t>(count) * sizeof(GuestIovec)));
-    if (!vectors) return OrbisEfault;
+    if (!vectors) {
+        dispatcher.GraphicsLog("HLE _readv EFAULT: vetor iovec inválido; fd=" +
+                               std::to_string(descriptor) + " address=" +
+                               std::to_string(frame.gpr[1]) + " count=" +
+                               std::to_string(count));
+        return OrbisEfault;
+    }
 
     try {
         std::vector<std::pair<void*, std::size_t>> parts;
@@ -1110,7 +1160,14 @@ std::uint64_t HleDispatcher::KernelReadv(HleDispatcher& dispatcher,
             if (vector.length > MaxTransfer - total) return OrbisEinval;
             const auto length = static_cast<std::size_t>(vector.length);
             auto* output = WritablePointer(dispatcher, frame, vector.base, length);
-            if (length != 0 && !output) return OrbisEfault;
+            if (length != 0 && !output) {
+                dispatcher.GraphicsLog("HLE _readv EFAULT: buffer de destino inválido; fd=" +
+                                       std::to_string(descriptor) + " iov=" +
+                                       std::to_string(index) + " address=" +
+                                       std::to_string(vector.base) + " bytes=" +
+                                       std::to_string(length));
+                return OrbisEfault;
+            }
             parts.emplace_back(output, length);
             total += length;
         }
