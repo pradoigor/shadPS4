@@ -136,8 +136,9 @@ struct App : ApplicationT<App> {
             Find<TextBlock>(L"ContentTitle").Text(L"Selecione um conteúdo");
             Find<TextBlock>(L"ContentState").Text(L"Nenhum item selecionado.");
             Find<TextBlock>(L"ContentDetails").Text(L"Escolha um item em uma das seções acima.");
-            for (auto const* name : {L"LaunchContent", L"ExtractContent", L"ValidateContent"})
-                Find<Button>(name).Visibility(Visibility::Collapsed);
+            Find<Button>(L"LaunchContent").IsEnabled(false);
+            Find<Button>(L"ExtractContent").IsEnabled(false);
+            Find<Button>(L"ValidateContent").IsEnabled(false);
             return;
         }
         auto const& item = libraryItems[static_cast<size_t>(index)];
@@ -158,9 +159,6 @@ struct App : ApplicationT<App> {
         auto launch = Find<Button>(L"LaunchContent");
         auto extract = Find<Button>(L"ExtractContent");
         auto validate = Find<Button>(L"ValidateContent");
-        launch.Visibility(item.installed ? Visibility::Visible : Visibility::Collapsed);
-        extract.Visibility(package ? Visibility::Visible : Visibility::Collapsed);
-        validate.Visibility(looseExecutable ? Visibility::Visible : Visibility::Collapsed);
         launch.IsEnabled(!extraction && !importing && !selectedLoaderPath.empty() && !(homebrew && homebrew->running()));
         extract.IsEnabled(!extraction && !importing && package);
         validate.IsEnabled(!extraction && !importing && looseExecutable);
@@ -336,8 +334,8 @@ struct App : ApplicationT<App> {
                 libraryItems.push_back({name, path, installed});
                 auto& indices = installed ? installedIndices : pendingIndices;
                 indices.push_back(index);
-                StackPanel card; card.Width(142); card.Spacing(5); card.Margin({7, 7, 7, 7});
-                Border art; art.Width(142); art.Height(100);
+                StackPanel card; card.Width(142); card.Spacing(2); card.Margin({5, 2, 5, 2});
+                Border art; art.Width(142); art.Height(50);
                 art.Background(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 12, 75, 167)));
                 TextBlock glyph; glyph.Text(installed ? L"\xE7FC" : L"\xE8B7"); glyph.FontFamily(Media::FontFamily(L"Segoe MDL2 Assets"));
                 glyph.FontSize(38); glyph.HorizontalAlignment(HorizontalAlignment::Center); glyph.VerticalAlignment(VerticalAlignment::Center); art.Child(glyph);
@@ -346,7 +344,7 @@ struct App : ApplicationT<App> {
                     Image image;
                     auto folderName = std::filesystem::path(path).filename().wstring();
                     Media::Imaging::BitmapImage cover;
-                    cover.DecodePixelWidth(284); cover.DecodePixelHeight(200);
+                    cover.DecodePixelWidth(284); cover.DecodePixelHeight(100);
                     cover.UriSource(Uri(L"ms-appdata:///local/Installed/" + folderName + L"/sce_sys/icon0.png"));
                     image.Source(cover);
                     image.Stretch(Media::Stretch::UniformToFill); art.Child(image);
