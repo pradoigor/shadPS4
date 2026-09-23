@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>XS4 · Prévia da interface</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, "Segoe UI", system-ui, sans-serif; background:#080b13; color:#f5f7fc; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; overflow:hidden; background:radial-gradient(ellipse at 53% -30%, #18365a 0%, #0b1220 43%, #080b13 78%); }
+    button { font:inherit; color:inherit; border:1px solid #30384b; background:#171c29; border-radius:9px; cursor:pointer; transition:background .16s,border-color .16s,transform .16s,box-shadow .16s; }
+    button:hover { background:#222d40; border-color:#4d6890; }
+    button:focus-visible { outline:3px solid #ddecff; outline-offset:3px; box-shadow:0 0 0 6px #2694f355; }
+    button:active { transform:scale(.985); }
+    button:disabled { opacity:.38;cursor:not-allowed; }
+    .shell { width:min(1600px,100vw); height:min(900px,100vh); min-height:640px; margin:auto; position:relative;overflow:hidden; }
+    header { display:grid;grid-template-columns:1fr auto;grid-template-rows:64px 54px;align-items:center; }
+    .brand { display:flex; align-items:center; gap:14px; }
+    .brand { grid-row:1;grid-column:1; }
+    .mark { width:44px;height:44px;border-radius:13px;display:grid;place-items:center;background:#101827; }
+    .mark img { display:block;width:44px;height:44px;object-fit:contain; }
+    .wordmark { font-size:27px;font-weight:650;letter-spacing:.1em; }
+    .nav { display:flex;gap:10px;grid-row:2;grid-column:1/-1;justify-self:start; }
+    .nav button { padding:12px 20px; letter-spacing:.11em;font-size:13px;font-weight:650; }
+    .nav button.active,.primary { background:linear-gradient(120deg,#1880d7,#145fa8);border-color:#3ca5ff;box-shadow:0 5px 20px #1675c733; }
+    .tools { grid-row:1;grid-column:2;justify-self:end;display:flex;gap:10px; }
+    .icon-btn { width:54px;height:54px;padding:0;font-size:27px;display:grid;place-items:center; }
+    .heading { display:flex;align-items:end;justify-content:space-between;padding:13px 0 12px; }
+    h1 { margin:0;font-size:31px;font-weight:350;letter-spacing:-.025em; }
+    .subtitle { margin-top:5px;color:#9aa7bc;font-size:14px; }
+    .filters { display:flex;align-items:end;gap:8px; }
+    .count { text-align:right;color:#8190a8;font-size:10px;letter-spacing:.15em;margin-bottom:8px; }
+    .filter-wrap { display:flex;gap:8px; }
+    .filter-wrap button { padding:8px 15px;font-size:14px; }
+    .filter-wrap button.active { background:#222a3a;border-color:#51617c; }
+    main { position:relative;overflow:hidden; }
+    .grid-scroll { width:100%;height:100%;overflow:auto;scrollbar-width:none;padding:2px 4px 18px; }
+    .grid-scroll::-webkit-scrollbar { display:none; }
+    .cards { display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:20px 16px;align-content:start; }
+    .card { min-width:0;aspect-ratio:1;padding:7px;text-align:left;background:#0e121b;border-color:#212938; }
+    .cover { position:relative;display:block;width:100%;height:100%;border-radius:9px;overflow:hidden;background:#17365a;isolation:isolate; }
+    .cover:before,.cover:after { content:"";position:absolute;inset:0;z-index:-1; }
+    .cover:before { background:linear-gradient(150deg,var(--c1),transparent 65%),radial-gradient(circle at 70% 80%,var(--c2),transparent 50%),linear-gradient(30deg,#090e18,#1b2940); }
+    .cover:after { background:linear-gradient(160deg,transparent 30%,#05070b99),repeating-linear-gradient(135deg,transparent 0 34px,#ffffff09 35px 37px); }
+    .badge { position:absolute;top:11px;padding:6px 9px;border:1px solid #ffffff24;border-radius:6px;background:#060b13dc;font-size:10px;letter-spacing:.13em; }
+    .badge.star { right:11px;font-size:15px;color:#ffd76a;padding:4px 8px; }
+    .title { margin:11px 3px 0;font-size:15px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
+    .meta { margin:4px 3px 0;color:#8998ae;font-size:11px; }
+    .empty { position:absolute;inset:0;display:none;place-content:center;text-align:center;gap:13px; }
+    .empty.show { display:grid; }
+    .empty .symbol { font-size:58px;color:#3e526d; }
+    .empty strong { font-size:23px;font-weight:500; }
+    .empty p { color:#9aa7bc;margin:0 auto;max-width:520px;line-height:1.6; }
+    .empty button { justify-self:center;padding:12px 18px;margin-top:4px; }
+    footer { display:flex;align-items:center;justify-content:flex-end;gap:24px;color:#bec8d8;font-size:13px; }
+    .key { display:inline-grid;place-items:center;width:22px;height:22px;border:1px solid #9aa8ba;border-radius:50%;font-size:11px;margin-right:5px;color:#edf3fc; }
+    .page { position:absolute;inset:24px 54px 20px;display:none;grid-template-rows:84px 84px minmax(0,1fr) 118px 52px;height:auto; }
+    #home { grid-template-rows:120px 94px minmax(0,1fr) 52px; }
+    #settings { grid-template-rows:84px minmax(0,1fr) 52px; }
+    .page.active { display:grid; }
+    .page-head { display:flex;align-items:center;justify-content:space-between; }
+    .backline { display:flex;align-items:center;gap:16px; }
+    .back { width:54px;height:54px;font-size:26px; }
+    .page-title { font-size:30px;font-weight:350; }
+    .page-desc { color:#9aa7bc;font-size:13px;margin-top:4px; }
+    .head-actions { display:flex;gap:10px; }
+    .head-actions button { padding:12px 18px; }
+    .library-info { display:flex;align-items:center;justify-content:space-between; }
+    .overline { color:#93a4be;font-size:12px;letter-spacing:.14em; }
+    .pending-count { color:#cfd8e6;font-size:14px;margin-top:3px; }
+    .lib-status { max-width:600px;text-align:right;color:#afc4de;font-size:13px; }
+    .pending-grid { display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:16px;align-content:start;overflow:auto;padding:4px 4px 14px; }
+    .pending-card { min-height:234px;padding:7px;text-align:left;background:#0e121b;border-color:#212938; }
+    .file-cover { height:158px;border-radius:9px;position:relative;display:grid;place-items:center;background:linear-gradient(145deg,#16446b,#102035); }
+    .file-cover.elf { background:linear-gradient(145deg,#252e45,#131926); }
+    .file-cover .cover-symbol { color:#d8eaff;opacity:.85;font-size:55px;line-height:1;text-shadow:0 6px 24px #05070bcc; }
+    .file-cover .badge { top:10px;left:10px;font-size:9px; }
+    .details-bar { background:#111722;border:1px solid #252e3d;border-radius:11px;padding:17px;display:flex;align-items:center;justify-content:space-between;gap:20px; }
+    .selected-title { font-size:21px; }
+    .selected-desc { margin-top:5px;color:#9aa7bc;font-size:13px;max-width:870px;line-height:1.5; }
+    .detail-actions { display:flex;gap:10px;flex-shrink:0; }
+    .detail-actions button { padding:12px 18px; }
+    .settings-content { overflow:auto;padding:16px 0;display:flex;flex-direction:column;gap:18px; }
+    .setting-card { background:#111722;border:1px solid #252e3d;border-radius:12px;padding:24px;display:flex;align-items:center;justify-content:space-between;gap:28px; }
+    .setting-card h2 { margin:0;font-size:22px;font-weight:500; }
+    .setting-card p { color:#9aa7bc;max-width:920px;line-height:1.55;margin:8px 0 0;font-size:14px; }
+    .version { color:#d7e4f5;margin-top:8px;font-size:17px; }
+    .app-icon { width:72px;height:72px;border-radius:18px;background:#101827;display:grid;place-items:center; }
+    .app-icon img { display:block;width:66px;height:66px;object-fit:contain; }
+    .setting-actions { display:flex;flex-direction:column;gap:10px;flex-shrink:0; }
+    .setting-actions button { padding:12px 18px; }
+    .status { margin-top:8px;color:#afc4de;font-size:13px; }
+    .diagnostics { position:absolute;inset:24px 54px 20px;display:none;grid-template-rows:74px 62px 1fr 52px;height:auto; }
+    .diagnostics.active { display:grid; }
+    .diag-actions { display:flex;align-items:center;gap:10px; }
+    .diag-body { display:grid;grid-template-columns:5fr 6fr;gap:22px;min-height:0; }
+    .diag-list,.diag-details { background:#101520;border:1px solid #252e3d;border-radius:10px;padding:20px;overflow:auto; }
+    .diag-list div { padding:12px;border-bottom:1px solid #252e3d;color:#bec8d8; }
+    .diag-details { color:#b8c5d8;line-height:1.7; }
+    .overlay { display:none;position:fixed;inset:0;background:#dd05070c;backdrop-filter:blur(9px);z-index:9;place-items:center; }
+    .overlay.show { display:grid; }
+    .dialog { width:min(650px,calc(100vw - 40px));padding:32px;border:1px solid #354158;border-radius:14px;background:#141b28;box-shadow:0 28px 100px #000a; }
+    .dialog h2 { font-size:25px;font-weight:500;margin:0 0 14px; }
+    .dialog p { color:#aab7cb;font-size:14px; }
+    .progress-line { height:9px;background:#283246;border-radius:20px;overflow:hidden;margin:24px 0 8px; }
+    .progress-line span { display:block;height:100%;width:38%;background:linear-gradient(90deg,#167bd0,#52b7ff);border-radius:inherit; }
+    .progress-meta { display:flex;justify-content:space-between;color:#d7e4f5;font-size:13px; }
+    .dialog-foot { display:flex;justify-content:flex-end;margin-top:28px; }
+    .dialog-foot button { padding:11px 22px; }
+    .toast { position:fixed;bottom:30px;left:50%;transform:translate(-50%,20px);opacity:0;pointer-events:none;z-index:12;padding:12px 18px;background:#182235;border:1px solid #34415a;border-radius:9px;color:#e1eafa;transition:.2s; }
+    .toast.show { opacity:1;transform:translate(-50%,0); }
+    @media (max-width:1100px) { .shell { padding:18px 28px; } .cards,.pending-grid { grid-template-columns:repeat(4,minmax(0,1fr)); } }
+    @media (max-width:760px) { body { overflow:auto; } .shell { min-height:100vh;height:auto;padding:0; } .page,.diagnostics { inset:18px; } #home { grid-template-rows:auto auto minmax(300px,1fr) auto; } #library { grid-template-rows:auto auto minmax(300px,1fr) auto auto; } #settings { grid-template-rows:auto minmax(0,1fr) auto; } .diagnostics { grid-template-rows:auto auto minmax(300px,1fr) auto; } header { row-gap:0; } .nav { grid-row:2;grid-column:1/-1;justify-self:start;margin-right:0; } .heading { align-items:start;flex-direction:column;gap:16px;padding:22px 0; } .filters { align-items:center;flex-wrap:wrap; } .count { margin:0; } .cards,.pending-grid { grid-template-columns:repeat(2,minmax(0,1fr));gap:12px; } footer { flex-wrap:wrap;justify-content:center;padding:18px 0; } .details-bar,.setting-card { align-items:flex-start;flex-direction:column; } .detail-actions,.setting-actions { flex-direction:row;flex-wrap:wrap; } .page-head { padding:15px 0;align-items:flex-start;gap:18px;flex-direction:column; } .library-info { padding:15px 0;gap:18px;align-items:flex-start;flex-direction:column; } .lib-status { text-align:left; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section id="home" class="page active">
+      <header>
+        <div class="brand"><div class="mark"><img src="XS4-Mark.png" alt=""></div><div><div class="wordmark">XS4</div></div></div>
+        <nav class="nav"><button class="active" id="gamesTab">GAMES</button><button id="appsTab">APLICATIVOS</button></nav>
+        <div class="tools"><button class="icon-btn" id="libraryOpen" title="Biblioteca" aria-label="Abrir biblioteca">＋</button><button class="icon-btn" id="settingsOpen" title="Configurações" aria-label="Configurações">⚙</button></div>
+      </header>
+      <div class="heading">
+        <div><h1 id="homeTitle">Seus games</h1><div class="subtitle" id="homeSubtitle">Escolha um título para iniciar</div></div>
+        <div><div class="count" id="count">2 TÍTULOS</div><div class="filter-wrap"><button class="active" data-filter="all">Tudo</button><button data-filter="favorites">★ Favoritos</button><button data-filter="recent">Recentes</button></div></div>
+      </div>
+      <main>
+        <div class="grid-scroll"><div id="cards" class="cards"></div></div>
+        <div id="empty" class="empty"><div class="symbol">◇</div><strong id="emptyTitle">Sua biblioteca está vazia</strong><p id="emptyDesc">Importe um PKG pela biblioteca e instale para adicionar um card aqui.</p><button class="primary" id="emptyImport">＋ Abrir biblioteca</button></div>
+      </main>
+      <footer><span><b class="key">A</b> Abrir</span><span><b class="key">B</b> Voltar</span><span><b class="key">Y</b> Favoritar</span><span>LB / RB &nbsp; Categorias</span></footer>
+    </section>
+
+    <section id="library" class="page">
+      <div class="page-head"><div class="backline"><button class="back" data-back>←</button><div><div class="page-title">Biblioteca</div><div class="page-desc">Pacotes e arquivos que ainda aguardam instalação</div></div></div><div class="head-actions"><button id="keyImport">Importar chaves</button><button class="primary" id="importFiles">＋ &nbsp; Importar arquivos</button></div></div>
+      <div class="library-info"><div><div class="overline">AGUARDANDO INSTALAÇÃO</div><div class="pending-count" id="pendingCount">2 arquivos</div></div><div class="lib-status" id="libraryStatus">Selecione um arquivo para ver as ações disponíveis.</div></div>
+      <div class="pending-grid" id="pendingGrid"></div>
+      <div class="details-bar"><div><div class="selected-title" id="selectedTitle">Selecione um arquivo</div><div class="selected-desc" id="selectedDesc">Os PKGs só são extraídos; importar ou instalar nunca inicia o conteúdo.</div></div><div class="detail-actions"><button id="validateFile" disabled>Validar ELF / SELF</button><button id="installPkg" class="primary" disabled>Instalar PKG</button></div></div>
+      <footer><span><b class="key">A</b> Selecionar arquivo</span><span><b class="key">B</b> Voltar</span><span><b class="key">X</b> Instalar</span></footer>
+    </section>
+
+    <section id="settings" class="page">
+      <div class="page-head"><div class="backline"><button class="back" data-back>←</button><div><div class="page-title">Configurações</div><div class="page-desc">Preferências e informações do aplicativo</div></div></div></div>
+      <div class="settings-content">
+        <div class="setting-card"><div><h2>XS4</h2><div class="page-desc">Versão desta revisão</div><div class="version">0.71.0.0</div><div class="page-desc">Commit da prévia · atualização será definida na compilação</div></div><div class="app-icon"><img src="XS4-Mark.png" alt=""></div></div>
+        <div class="setting-card"><div><h2>Diagnóstico e suporte</h2><p>Exporte o relatório técnico completo, incluindo a última sessão de execução, quando disponível.</p><div id="settingsStatus" class="status"></div></div><div class="setting-actions"><button class="primary" id="exportReport">Exportar relatório</button><button id="openDiagnostics">Diagnósticos avançados</button></div></div>
+        <div class="setting-card"><div><h2>Biblioteca e classificação</h2><p>Os títulos são separados pelas categorias declaradas em param.sfo. Alguns homebrews usam a categoria de jogo e podem aparecer em Games.</p></div><button id="settingsKeys">Importar chaves PKG</button></div>
+      </div>
+      <footer><span><b class="key">A</b> Abrir</span><span><b class="key">B</b> Voltar</span></footer>
+    </section>
+
+    <section id="diagnostics" class="diagnostics">
+      <div class="page-head"><div class="backline"><button class="back" data-back>←</button><div class="page-title">Diagnóstico avançado</div></div><div class="page-desc">Prévia visual · dados demonstrativos</div></div>
+      <div class="diag-actions"><button>Executar probe</button><button>Testar vídeo ANGLE</button><button class="primary">Exportar relatório</button></div>
+      <div class="diag-body"><div class="diag-list"><div>APROVADO · GPU D3D11</div><div>APROVADO · Armazenamento local</div><div>NÃO EXECUTADO · ELF controlado</div></div><div class="diag-details">Os probes validam recursos específicos; não executam o arquivo importado.<br><br>As entradas exibidas nesta prévia são apenas ilustrativas.</div></div>
+      <footer><span><b class="key">A</b> Abrir</span><span><b class="key">B</b> Voltar</span></footer>
+    </section>
+  </div>
+
+  <div id="installOverlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="installTitle">
+    <div class="dialog"><h2 id="installTitle">Instalando conteúdo</h2><p id="installMessage">Instalando · 38 arquivos · 412 MB processados</p><div class="progress-line"><span id="progressBar"></span></div><div class="progress-meta"><span>Extraindo arquivos</span><span id="progressLabel">38%</span></div><div class="dialog-foot"><button id="cancelInstall">Cancelar</button></div></div>
+  </div>
+  <div id="toast" class="toast" role="status"></div>
+
+  <script>
+    const items = [
+      { title: "Game demo 01", category: "gd", kind: "game", color: ["#195f9c", "#731c62"], favorite: false, recent: false },
+      { title: "Game demo 02", category: "gd", kind: "game", color: ["#a9323b", "#e79142"], favorite: true, recent: true },
+      { title: "Game demo 03", category: "gd", kind: "game", color: ["#17675f", "#844a19"], favorite: false, recent: true },
+      { title: "Game demo 04", category: "gd", kind: "game", color: ["#43388e", "#bd4564"], favorite: false, recent: false },
+      { title: "Game demo 05", category: "gd", kind: "game", color: ["#1a7188", "#73a342"], favorite: true, recent: false },
+      { title: "Game demo 06", category: "gd", kind: "game", color: ["#8b4b20", "#e5b336"], favorite: false, recent: false },
+      { title: "Game demo 07", category: "gd", kind: "game", color: ["#3b4a64", "#a93d72"], favorite: false, recent: false },
+      { title: "Game demo 08", category: "gd", kind: "game", color: ["#1b5588", "#36b3b5"], favorite: false, recent: false },
+      { title: "Aplicativo demo 01", category: "gde", kind: "app", color: ["#17675f", "#844a19"], favorite: true, recent: true },
+      { title: "Aplicativo demo 02", category: "gde", kind: "app", color: ["#463b8f", "#bd4564"], favorite: false, recent: false },
+    ];
+    const pending = [
+      { name: "homebrew-example.pkg", ext: ".pkg", kind: "PKG · A INSTALAR", icon: "▣" },
+      { name: "probe-example.elf", ext: ".elf", kind: "ARQUIVO · A VALIDAR", icon: "⌘" },
+    ];
+    let category = "game", filter = "all", selected = -1, page = "home", toastTimer;
+    const $ = id => document.getElementById(id);
+    function showToast(message) { $("toast").textContent = message; $("toast").classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => $("toast").classList.remove("show"), 2600); }
+    function navigate(next) { page = next; document.querySelectorAll(".page").forEach(el => el.classList.remove("active")); $("home").style.display = "none"; $("library").style.display = "none"; $("settings").style.display = "none"; $("diagnostics").style.display = "none"; const view = $(next); view.style.display = next === "diagnostics" ? "grid" : "grid"; view.classList.add("active"); if (next === "home") renderHome(); if (next === "library") renderPending(); const focusable = view.querySelector("button:not([disabled])"); if (focusable) focusable.focus(); }
+    function renderHome() {
+      const filtered = items.map((item,index) => ({item,index})).filter(({item}) => item.kind === category && (filter === "all" || (filter === "favorites" && item.favorite) || (filter === "recent" && item.recent)));
+      $("cards").innerHTML = "";
+      $("count").textContent = `${filtered.length} ${filtered.length === 1 ? "TÍTULO" : "TÍTULOS"}`;
+      $("homeTitle").textContent = category === "game" ? "Seus games" : "Seus aplicativos";
+      $("homeSubtitle").textContent = category === "game" ? "Escolha um título para iniciar" : "Aplicativos e ferramentas instalados";
+      $("empty").classList.toggle("show", filtered.length === 0);
+      $("emptyTitle").textContent = filter === "all" ? (category === "game" ? "Nenhum game instalado" : "Nenhum aplicativo instalado") : filter === "favorites" ? "Nenhum favorito nesta categoria" : "Ainda não há títulos recentes";
+      $("emptyDesc").textContent = filter === "all" ? "Importe um PKG pela biblioteca e instale para adicionar um card aqui." : "Pressione Y em um título para favoritar ou inicie um item para preencher esta lista.";
+      for (const {item,index} of filtered) {
+        const card = document.createElement("button"); card.className = "card"; card.dataset.index = index; card.setAttribute("aria-label", item.title);
+        card.innerHTML = `<div class="cover" style="--c1:${item.color[0]};--c2:${item.color[1]}"><span class="badge star" aria-hidden="true">${item.favorite ? "★" : "☆"}</span></div>`;
+        card.addEventListener("click", () => { item.recent = true; renderHome(); showToast(`Iniciando ${item.title}… (prévia)`); });
+        card.addEventListener("keydown", event => { if (event.key.toLowerCase() === "y") { event.preventDefault(); item.favorite = !item.favorite; renderHome(); showToast(item.favorite ? "Adicionado aos favoritos" : "Removido dos favoritos"); } });
+        $("cards").append(card);
+      }
+    }
+    function renderPending() {
+      $("pendingGrid").innerHTML = ""; $("pendingCount").textContent = `${pending.length} arquivos`;
+      pending.forEach((item,index) => { const card = document.createElement("button"); card.className = "pending-card"; card.innerHTML = `<div class="file-cover ${item.ext === ".pkg" ? "" : "elf"}"><span class="cover-symbol">${item.icon}</span><span class="badge">${item.kind}</span></div><div class="title">${item.name}</div><div class="meta">${item.ext === ".pkg" ? "Pacote PS4" : "Executável ELF"}</div>`; card.addEventListener("click", () => selectPending(index)); $("pendingGrid").append(card); });
+      selectPending(-1);
+    }
+    function selectPending(index) { selected = index; const item = pending[index]; $("selectedTitle").textContent = item?.name ?? "Selecione um arquivo"; $("selectedDesc").textContent = !item ? "Os PKGs só são extraídos; importar ou instalar nunca inicia o conteúdo." : item.ext === ".pkg" ? "Pacote PS4 reconhecido · A instalação extrai os arquivos e não inicia o conteúdo." : "Executável ELF · A validação técnica não executa este arquivo."; $("installPkg").disabled = item?.ext !== ".pkg"; $("validateFile").disabled = !item || item.ext === ".pkg"; }
+    function changeFilter(next) { filter = next; document.querySelectorAll("[data-filter]").forEach(button => button.classList.toggle("active",button.dataset.filter === next)); renderHome(); }
+    $("gamesTab").addEventListener("click", () => { category = "game"; $("gamesTab").classList.add("active"); $("appsTab").classList.remove("active"); renderHome(); });
+    $("appsTab").addEventListener("click", () => { category = "app"; $("appsTab").classList.add("active"); $("gamesTab").classList.remove("active"); renderHome(); });
+    document.querySelectorAll("[data-filter]").forEach(button => button.addEventListener("click", () => changeFilter(button.dataset.filter)));
+    $("libraryOpen").addEventListener("click", () => navigate("library")); $("emptyImport").addEventListener("click", () => navigate("library"));
+    $("settingsOpen").addEventListener("click", () => navigate("settings")); $("openDiagnostics").addEventListener("click", () => navigate("diagnostics"));
+    document.querySelectorAll("[data-back]").forEach(button => button.addEventListener("click", () => navigate(page === "diagnostics" ? "settings" : "home")));
+    $("importFiles").addEventListener("click", () => showToast("No app real, o seletor de arquivos abre no console.")); $("keyImport").addEventListener("click", () => showToast("Importação de chaves disponível na versão UWP.")); $("settingsKeys").addEventListener("click", () => showToast("Importação de chaves disponível na versão UWP."));
+    $("installPkg").addEventListener("click", () => $("installOverlay").classList.add("show")); $("cancelInstall").addEventListener("click", () => { $("installOverlay").classList.remove("show"); showToast("Instalação cancelada na prévia."); });
+    $("validateFile").addEventListener("click", () => { navigate("diagnostics"); showToast("A validação real abre Diagnóstico avançado."); });
+    $("exportReport").addEventListener("click", () => { $("settingsStatus").textContent = "Relatório exportado para LocalState (simulação)."; });
+    document.addEventListener("keydown", event => { if (event.key === "Escape") navigate(page === "diagnostics" ? "settings" : "home"); if (event.key === "ArrowRight" && page === "home" && event.shiftKey) $("appsTab").click(); if (event.key === "ArrowLeft" && page === "home" && event.shiftKey) $("gamesTab").click(); });
+    renderHome(); renderPending();
+  </script>
+</body>
+</html>

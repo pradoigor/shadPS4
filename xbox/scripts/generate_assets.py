@@ -1,32 +1,37 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Deterministic package marks without external dependencies."""
+"""Validate committed XS4 package artwork without replacing the brand assets."""
 from pathlib import Path
 import struct
-import zlib
 
 
-def png(width, height):
-    def chunk(kind, data):
-        return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
-    pixels = bytearray()
-    for y in range(height):
-        pixels.append(0)
-        for x in range(width):
-            # Abstract brackets, deliberately distinct from Sony/Microsoft branding.
-            nx, ny = x / width, y / height
-            left = .24 < nx < .30 and .25 < ny < .75
-            right = .70 < nx < .76 and .25 < ny < .75
-            bars = (.24 < nx < .40 or .60 < nx < .76) and (.25 < ny < .31 or .69 < ny < .75)
-            pixels.extend((101, 228, 195, 255) if left or right or bars else (16, 24, 39, 255))
-    return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 6, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(pixels, 9)) + chunk(b'IEND', b'')
+ASSETS = {
+    "Logo.png": (150, 150),
+    "SmallLogo.png": (44, 44),
+    "StoreLogo.png": (50, 50),
+    "Splash.png": (620, 300),
+    "XS4-Mark.png": (1254, 1254),
+}
+
+
+def png_size(path):
+    with path.open("rb") as image:
+        header = image.read(24)
+    if len(header) != 24 or header[:8] != b"\x89PNG\r\n\x1a\n" or header[12:16] != b"IHDR":
+        raise ValueError(f"Invalid PNG asset: {path}")
+    return struct.unpack(">II", header[16:24])
 
 
 def generate(directory):
-    directory.mkdir(parents=True, exist_ok=True)
-    for name, size in {'Logo': (150, 150), 'SmallLogo': (44, 44), 'StoreLogo': (50, 50), 'Splash': (620, 300)}.items():
-        (directory / (name + '.png')).write_bytes(png(*size))
+    """Check the checked-in images used by the UWP package; never overwrite them."""
+    for name, expected_size in ASSETS.items():
+        path = directory / name
+        if not path.is_file():
+            raise FileNotFoundError(f"Required XS4 artwork is missing: {path}")
+        actual_size = png_size(path)
+        if actual_size != expected_size:
+            raise ValueError(f"Unexpected dimensions for {path}: {actual_size}; expected {expected_size}")
 
 
-if __name__ == '__main__':
-    generate(Path(__file__).resolve().parents[1] / 'Assets')
+if __name__ == "__main__":
+    generate(Path(__file__).resolve().parents[1] / "Assets")

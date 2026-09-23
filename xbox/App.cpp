@@ -9,16 +9,24 @@
 #include "AngleVideo.h"
 #include <windows.h>
 #include <fileapifromapp.h>
+#include <winrt/Windows.UI.Core.h>
+#include <winrt/Windows.System.h>
 #include <winrt/Windows.UI.Xaml.Media.Imaging.h>
 #include <winrt/Windows.Data.Json.h>
 #include <winrt/Windows.System.Display.h>
 #include <filesystem>
 #include <array>
+#include <algorithm>
+#include <cstdint>
 #include <fstream>
 #include <iterator>
+#include <limits>
+#include <map>
 #include <set>
+#include <string_view>
 #include <chrono>
 #include <deque>
+#include <cwctype>
 #include <winrt/Windows.ApplicationModel.h>
 #include <winrt/Windows.ApplicationModel.Activation.h>
 #include <winrt/Windows.Foundation.h>
@@ -28,13 +36,17 @@
 #include <winrt/Windows.UI.Xaml.h>
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
+#include <winrt/Windows.UI.Xaml.Automation.h>
 #include <winrt/Windows.UI.Xaml.Markup.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
+#include <winrt/Windows.UI.Text.h>
 
 using namespace winrt;
 using namespace Windows::Foundation;
 using namespace Windows::UI::Xaml;
 using namespace Windows::UI::Xaml::Controls;
+namespace Core = Windows::UI::Core;
+namespace Sys = Windows::System;
 
 // Best-effort diagnostics must never replace the original startup failure.
 static void StartupLog(std::wstring const& message) noexcept {
@@ -54,14 +66,32 @@ static void StartupLog(std::wstring const& message) noexcept {
 
 struct App : ApplicationT<App> {
     std::unique_ptr<Lab::Report> report;
-    Grid root{nullptr}; Grid libraryView{nullptr}, diagnosticsView{nullptr};
-    ListView list{nullptr}, installedList{nullptr}, pendingList{nullptr};
+    enum class Page { Home, Library, Settings, Diagnostics };
+    enum class HomeCategory { Games, Applications };
+    enum class HomeFilter { All, Favorites, Recent };
+    Grid root{nullptr};
+    Grid homeView{nullptr}, libraryView{nullptr}, settingsView{nullptr}, diagnosticsView{nullptr};
+    ItemsControl homeItems{nullptr}, pendingItems{nullptr};
+    ListView list{nullptr};
     TextBlock status{nullptr}, details{nullptr}, libraryStatus{nullptr};
     DispatcherTimer timer{nullptr};
     bool busy{}, refreshing{}, persistenceFailed{};
-    struct LibraryItem { std::wstring name, path; bool installed{}; };
+    struct LibraryItem {
+        std::wstring name, path, sourceName, category;
+        bool installed{};
+    };
     std::vector<LibraryItem> libraryItems;
     std::vector<size_t> installedIndices, pendingIndices;
+    std::vector<size_t> homeVisibleIndices;
+    std::map<size_t, Button> homeButtons;
+    std::map<size_t, TextBlock> favoriteMarkers;
+    std::set<std::wstring> favoriteIds;
+    std::deque<std::wstring> recentIds;
+    Page currentPage{Page::Home}, angleReturnPage{Page::Home};
+    HomeCategory homeCategory{HomeCategory::Games};
+    HomeFilter homeFilter{HomeFilter::All};
+    int selectedPendingIndex{-1};
+    int homeFocusedIndex{-1};
     std::wstring selectedLoaderPath;
     std::shared_ptr<Lab::InstallProgress> extraction;
     std::unique_ptr<Lab::HomebrewRuntime> homebrew;
@@ -71,6 +101,286 @@ struct App : ApplicationT<App> {
     bool homebrewCompletionShown{};
     bool importing{}, listing{};
     Windows::System::Display::DisplayRequest displayRequest{nullptr};
+
+    static std::wstring Extension(std::filesystem::path const& path) {
+        auto extension = path.extension().wstring();
+        for (auto& c : extension) c = static_cast<wchar_t>(towlower(c));
+        return extension;
+    }
+    static std::wstring ItemKey(LibraryItem const& item) {
+        return std::wstring(item.installed ? L"installed:" : L"pending:") +
+            std::filesystem::path(item.path).filename().wstring();
+    }
+    struct SfoInfo { std::wstring title, category; };
+    static SfoInfo ReadSfo(std::filesystem::path const& path) {
+        SfoInfo info;
+        std::error_code error;
+        const auto size = std::filesystem::file_size(path, error);
+        if (error || size < 0x14 || size > 8 * 1024 * 1024) return info;
+        std::ifstream input(path, std::ios::binary);
+        if (!input) return info;
+        std::vector<unsigned char> bytes(static_cast<size_t>(size));
+        input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+        if (!input || bytes[0] != 0 || bytes[1] != 'P' || bytes[2] != 'S' || bytes[3] != 'F') return info;
+        auto u16 = [&bytes](size_t at) -> uint16_t {
+            return static_cast<uint16_t>(bytes[at] | (static_cast<uint16_t>(bytes[at + 1]) << 8));
+        };
+        auto u32 = [&bytes](size_t at) -> uint32_t {
+            return static_cast<uint32_t>(bytes[at]) |
+                (static_cast<uint32_t>(bytes[at + 1]) << 8) |
+                (static_cast<uint32_t>(bytes[at + 2]) << 16) |
+                (static_cast<uint32_t>(bytes[at + 3]) << 24);
+        };
+        const auto keyTable = u32(8), dataTable = u32(12), entries = u32(16);
+        const auto indexEnd = uint64_t(0x14) + uint64_t(entries) * 0x10;
+        if (entries > 4096 || indexEnd > bytes.size() || keyTable < indexEnd ||
+            dataTable < keyTable || dataTable > bytes.size()) return info;
+        for (uint32_t i = 0; i < entries; ++i) {
+            const auto at = size_t(0x14) + size_t(i) * 0x10;
+            const auto keyOffset = u16(at);
+            const auto format = u16(at + 2);
+            const auto length = u32(at + 4);
+            const auto dataOffset = u32(at + 12);
+            const auto keyAt = uint64_t(keyTable) + keyOffset;
+            const auto valueAt = uint64_t(dataTable) + dataOffset;
+            if (keyAt >= dataTable || valueAt > bytes.size() || length > bytes.size() - valueAt || format != 0x0204)
+                continue;
+            auto keyEnd = keyAt;
+            while (keyEnd < dataTable && bytes[static_cast<size_t>(keyEnd)] != 0) ++keyEnd;
+            if (keyEnd == dataTable) continue;
+            std::string key(reinterpret_cast<const char*>(bytes.data() + keyAt), static_cast<size_t>(keyEnd - keyAt));
+            if (key != "TITLE" && key != "CATEGORY") continue;
+            auto valueEnd = valueAt;
+            const auto limit = valueAt + length;
+            while (valueEnd < limit && bytes[static_cast<size_t>(valueEnd)] != 0) ++valueEnd;
+            if (valueEnd == valueAt) continue;
+            try {
+                std::string value(reinterpret_cast<const char*>(bytes.data() + valueAt), static_cast<size_t>(valueEnd - valueAt));
+                auto wide = std::wstring(to_hstring(value));
+                if (key == "TITLE") info.title = std::move(wide);
+                else info.category = std::move(wide);
+            } catch (...) {}
+        }
+        return info;
+    }
+    bool IsFavorite(LibraryItem const& item) const { return favoriteIds.contains(ItemKey(item)); }
+    bool IsRecent(LibraryItem const& item) const {
+        auto key = ItemKey(item);
+        return std::find(recentIds.begin(), recentIds.end(), key) != recentIds.end();
+    }
+    void SavePreferences() {
+        Windows::Data::Json::JsonObject preferences;
+        Windows::Data::Json::JsonArray favorites, recent;
+        for (auto const& id : favoriteIds) favorites.Append(Windows::Data::Json::JsonValue::CreateStringValue(to_hstring(id)));
+        for (auto const& id : recentIds) recent.Append(Windows::Data::Json::JsonValue::CreateStringValue(to_hstring(id)));
+        preferences.Insert(L"favorites", favorites);
+        preferences.Insert(L"recent", recent);
+        auto path = std::filesystem::path(Windows::Storage::ApplicationData::Current().LocalFolder().Path().c_str()) / L"ui-preferences.json";
+        Lab::WriteDurable(path.wstring(), to_string(preferences.Stringify()));
+    }
+    void LoadPreferences() {
+        try {
+            auto path = std::filesystem::path(Windows::Storage::ApplicationData::Current().LocalFolder().Path().c_str()) / L"ui-preferences.json";
+            if (!std::filesystem::is_regular_file(path)) return;
+            std::ifstream input(path, std::ios::binary);
+            std::string raw{std::istreambuf_iterator<char>(input), {}};
+            auto preferences = Windows::Data::Json::JsonObject::Parse(to_hstring(raw));
+            for (auto const& value : preferences.GetNamedArray(L"favorites", Windows::Data::Json::JsonArray{}))
+                favoriteIds.insert(std::wstring(value.GetString()));
+            for (auto const& value : preferences.GetNamedArray(L"recent", Windows::Data::Json::JsonArray{}))
+                recentIds.push_back(std::wstring(value.GetString()));
+        } catch (...) { favoriteIds.clear(); recentIds.clear(); }
+    }
+    void SetNotice(std::wstring const& message) {
+        if (currentPage == Page::Home) {
+            Find<TextBlock>(L"HomeNoticeText").Text(message);
+            Find<Border>(L"HomeNotice").Visibility(Visibility::Visible);
+        } else if (currentPage == Page::Library) {
+            libraryStatus.Text(message);
+        } else if (currentPage == Page::Settings) {
+            Find<TextBlock>(L"SettingsStatus").Text(message);
+        } else if (status) {
+            status.Text(message);
+        }
+    }
+    void SetActiveButton(wchar_t const* name, bool active) {
+        auto button = Find<Button>(name);
+        const auto background = active ? Windows::UI::ColorHelper::FromArgb(255, 23, 110, 192) :
+            Windows::UI::ColorHelper::FromArgb(255, 23, 28, 41);
+        const auto border = active ? Windows::UI::ColorHelper::FromArgb(255, 60, 165, 255) :
+            Windows::UI::ColorHelper::FromArgb(255, 48, 56, 75);
+        button.Background(Media::SolidColorBrush(background));
+        button.BorderBrush(Media::SolidColorBrush(border));
+    }
+    void SetHomeCategory(HomeCategory category) {
+        homeFocusedIndex = -1;
+        homeCategory = category;
+        SetActiveButton(L"GamesTab", category == HomeCategory::Games);
+        SetActiveButton(L"AppsTab", category == HomeCategory::Applications);
+        Find<TextBlock>(L"HomeTitle").Text(category == HomeCategory::Games ? L"Seus games" : L"Seus aplicativos");
+        Find<TextBlock>(L"HomeSubtitle").Text(category == HomeCategory::Games ?
+            L"Escolha um título para iniciar" : L"Aplicativos e ferramentas instalados");
+        PopulateHome();
+    }
+    void SetHomeFilter(HomeFilter filter) {
+        homeFocusedIndex = -1;
+        homeFilter = filter;
+        SetActiveButton(L"FilterAll", filter == HomeFilter::All);
+        SetActiveButton(L"FilterFavorites", filter == HomeFilter::Favorites);
+        SetActiveButton(L"FilterRecent", filter == HomeFilter::Recent);
+        PopulateHome();
+    }
+    void ShowPage(Page page, bool focus = true) {
+        if (page != Page::Home) homeFocusedIndex = -1;
+        currentPage = page;
+        homeView.Visibility(page == Page::Home ? Visibility::Visible : Visibility::Collapsed);
+        libraryView.Visibility(page == Page::Library ? Visibility::Visible : Visibility::Collapsed);
+        settingsView.Visibility(page == Page::Settings ? Visibility::Visible : Visibility::Collapsed);
+        diagnosticsView.Visibility(page == Page::Diagnostics ? Visibility::Visible : Visibility::Collapsed);
+        if (page == Page::Home) {
+            PopulateHome();
+            if (focus) Find<Button>(homeCategory == HomeCategory::Games ? L"GamesTab" : L"AppsTab").Focus(FocusState::Programmatic);
+        } else if (page == Page::Library) {
+            PopulateLibrary();
+            if (focus) Find<Button>(L"SelectContent").Focus(FocusState::Programmatic);
+        } else if (page == Page::Settings) {
+            if (focus) Find<Button>(L"SettingsBack").Focus(FocusState::Programmatic);
+        } else if (focus) {
+            Find<Button>(L"DiagnosticsBack").Focus(FocusState::Programmatic);
+        }
+    }
+    void RefreshPendingSelection() {
+        const bool valid = selectedPendingIndex >= 0 && static_cast<size_t>(selectedPendingIndex) < libraryItems.size();
+        auto install = Find<Button>(L"ExtractContent");
+        auto validate = Find<Button>(L"ValidateContent");
+        if (!valid) {
+            selectedLoaderPath.clear();
+            Find<TextBlock>(L"SelectedContentTitle").Text(L"Selecione um arquivo");
+            Find<TextBlock>(L"SelectedContentDetails").Text(L"Os PKGs só são extraídos; importar ou instalar nunca inicia o conteúdo.");
+            install.IsEnabled(false); validate.IsEnabled(false);
+            return;
+        }
+        auto const& item = libraryItems[static_cast<size_t>(selectedPendingIndex)];
+        const auto extension = Extension(item.path);
+        const bool package = extension == L".pkg";
+        const bool loose = extension == L".elf" || extension == L".self" || extension == L".bin";
+        selectedLoaderPath = loose ? item.path : L"";
+        install.IsEnabled(package && !extraction && !importing);
+        validate.IsEnabled(loose && !extraction && !importing);
+        Find<TextBlock>(L"SelectedContentTitle").Text(item.name);
+        if (package) {
+            Find<TextBlock>(L"SelectedContentDetails").Text(DescribeContent(item.path) + L"\nEste pacote ainda não foi extraído. Instalar apenas extrai os arquivos para a biblioteca do emulador.");
+        } else if (loose) {
+            Find<TextBlock>(L"SelectedContentDetails").Text(DescribeContent(item.path) + L"\nArquivo avulso: valide o formato antes de iniciar o trabalho de compatibilidade.");
+        } else {
+            Find<TextBlock>(L"SelectedContentDetails").Text(L"Formato não suportado para instalação. Importe um PKG ou um arquivo ELF/SELF.");
+        }
+    }
+    void SelectPending(size_t index) {
+        if (index >= libraryItems.size() || libraryItems[index].installed) return;
+        selectedPendingIndex = static_cast<int>(index);
+        RefreshPendingSelection();
+    }
+    void PopulateHome(bool restoreFocus = false) {
+        if (!homeItems || !report) return;
+        homeItems.Items().Clear();
+        homeVisibleIndices.clear();
+        homeButtons.clear();
+        favoriteMarkers.clear();
+        for (auto index : installedIndices) {
+            if (index >= libraryItems.size()) continue;
+            auto const& item = libraryItems[index];
+            const bool game = item.category == L"gd";
+            if ((homeCategory == HomeCategory::Games) != game) continue;
+            if (homeFilter == HomeFilter::Favorites && !IsFavorite(item)) continue;
+            if (homeFilter == HomeFilter::Recent && !IsRecent(item)) continue;
+
+            StackPanel tile; tile.Width(220); tile.Height(220); tile.Spacing(0);
+            Grid artwork; artwork.Width(220); artwork.Height(220);
+            Border artworkBackground; artworkBackground.CornerRadius({9, 9, 9, 9});
+            artworkBackground.Background(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 20, 49, 86)));
+            artwork.Children().Append(artworkBackground);
+            auto iconPath = std::filesystem::path(item.path) / L"sce_sys" / L"icon0.png";
+            std::error_code iconError;
+            if (std::filesystem::is_regular_file(iconPath, iconError) && std::filesystem::file_size(iconPath, iconError) <= 8 * 1024 * 1024) {
+                auto folderName = std::filesystem::path(item.path).filename().wstring();
+                Media::Imaging::BitmapImage cover;
+                cover.DecodePixelWidth(460);
+                cover.UriSource(Uri(L"ms-appdata:///local/Installed/" + folderName + L"/sce_sys/icon0.png"));
+                Image image; image.Source(cover); image.Stretch(Media::Stretch::UniformToFill);
+                artwork.Children().Append(image);
+            }
+
+            Border favoriteBadge; favoriteBadge.Background(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(220, 6, 11, 19)));
+            favoriteBadge.CornerRadius({5, 5, 5, 5}); favoriteBadge.Padding({7, 4, 7, 4});
+            TextBlock favorite; favorite.Text(IsFavorite(item) ? L"★" : L"☆"); favorite.FontSize(17);
+            favorite.Foreground(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 255, 215, 106)));
+            favoriteBadge.Child(favorite); favoriteBadge.HorizontalAlignment(HorizontalAlignment::Right); favoriteBadge.VerticalAlignment(VerticalAlignment::Top); favoriteBadge.Margin({0, 10, 10, 0});
+            artwork.Children().Append(favoriteBadge);
+            tile.Children().Append(artwork);
+
+            Button card; card.Width(234); card.Height(234); card.Padding({6, 6, 6, 6});
+            card.BorderThickness({1, 1, 1, 1}); card.BorderBrush(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 33, 41, 56)));
+            card.Background(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 14, 18, 27)));
+            card.HorizontalContentAlignment(HorizontalAlignment::Center); card.VerticalContentAlignment(VerticalAlignment::Center);
+            card.Content(tile); card.Tag(box_value(static_cast<int64_t>(index)));
+            Windows::UI::Xaml::Automation::AutomationProperties::SetName(card, to_hstring(item.name));
+            card.GotFocus([this, index](auto const&, auto const&) { homeFocusedIndex = static_cast<int>(index); });
+            card.Click([this, index](auto const&, auto const&) { LaunchInstalled(index); });
+            homeItems.Items().Append(card);
+            homeVisibleIndices.push_back(index);
+            homeButtons[index] = card;
+            favoriteMarkers[index] = favorite;
+        }
+        const bool empty = homeVisibleIndices.empty();
+        Find<StackPanel>(L"HomeEmpty").Visibility(empty ? Visibility::Visible : Visibility::Collapsed);
+        Find<TextBlock>(L"HomeEmptyTitle").Text(homeFilter == HomeFilter::All ?
+            (homeCategory == HomeCategory::Games ? L"Nenhum game instalado" : L"Nenhum aplicativo instalado") :
+            (homeFilter == HomeFilter::Favorites ? L"Nenhum favorito nesta categoria" : L"Ainda não há títulos recentes"));
+        Find<TextBlock>(L"HomeEmptyDescription").Text(homeFilter == HomeFilter::All ?
+            L"Importe um PKG pela biblioteca e instale para adicionar um card aqui." :
+            L"Pressione Y em um título para favoritar ou iniciar um item para preencher esta lista.");
+        Find<TextBlock>(L"HomeCount").Text(std::to_wstring(homeVisibleIndices.size()) + (homeVisibleIndices.size() == 1 ? L" TÍTULO" : L" TÍTULOS"));
+        if (restoreFocus && homeFocusedIndex >= 0) {
+            auto it = homeButtons.find(static_cast<size_t>(homeFocusedIndex));
+            if (it != homeButtons.end()) it->second.Focus(FocusState::Programmatic);
+            else homeFocusedIndex = -1;
+        }
+    }
+    void ToggleFocusedFavorite() {
+        if (homeFocusedIndex < 0 || static_cast<size_t>(homeFocusedIndex) >= libraryItems.size()) return;
+        auto const& item = libraryItems[static_cast<size_t>(homeFocusedIndex)];
+        auto key = ItemKey(item);
+        if (favoriteIds.contains(key)) favoriteIds.erase(key);
+        else favoriteIds.insert(key);
+        try { SavePreferences(); } catch (...) { SetNotice(L"Não foi possível salvar os favoritos neste console."); }
+        if (homeFilter == HomeFilter::Favorites && !favoriteIds.contains(key)) PopulateHome(true);
+        else if (auto marker = favoriteMarkers.find(static_cast<size_t>(homeFocusedIndex)); marker != favoriteMarkers.end())
+            marker->second.Text(favoriteIds.contains(key) ? L"★" : L"☆");
+    }
+    void RememberLaunch(LibraryItem const& item) {
+        auto key = ItemKey(item);
+        recentIds.erase(std::remove(recentIds.begin(), recentIds.end(), key), recentIds.end());
+        recentIds.push_front(key);
+        while (recentIds.size() > 20) recentIds.pop_back();
+        try { SavePreferences(); } catch (...) { SetNotice(L"O título iniciou, mas não foi possível salvar o histórico recente."); }
+    }
+    void LaunchInstalled(size_t index) {
+        if (index >= libraryItems.size() || !libraryItems[index].installed) return;
+        auto const& item = libraryItems[index];
+        const auto eboot = std::filesystem::path(item.path) / L"eboot.bin";
+        if (!std::filesystem::is_regular_file(eboot)) {
+            SetNotice(L"Este conteúdo está incompleto: não encontramos eboot.bin.");
+            return;
+        }
+        if (homebrew && homebrew->running()) {
+            SetNotice(L"Um título já está em execução.");
+            return;
+        }
+        selectedLoaderPath = eboot.wstring();
+        RememberLaunch(item);
+        StartHomebrew();
+    }
 
     Lab::PackageKeys LoadKeys() {
         auto path = std::filesystem::path(Windows::Storage::ApplicationData::Current().LocalFolder().Path().c_str()) / L"keys.json";
@@ -112,89 +422,38 @@ struct App : ApplicationT<App> {
                 try {
                     ParseKeys(std::filesystem::path(pendingKey.Path().c_str()));
                     co_await pendingKey.RenameAsync(L"keys.json", Windows::Storage::NameCollisionOption::ReplaceExisting);
-                    libraryStatus.Text(L"Chaves personalizadas importadas. O keyset FPKG embutido será substituído nesta extração.");
+                    SetNotice(L"Chaves personalizadas importadas. Elas serão usadas nos PKGs que precisarem delas.");
                 } catch (...) {
                     std::error_code ignored; std::filesystem::remove(std::filesystem::path(pendingKey.Path().c_str()), ignored); throw;
                 }
             }
-        } catch (...) { libraryStatus.Text(L"Não foi possível importar: JSON inválido ou conjuntos RSA-2048 incompletos. As chaves anteriores foram preservadas."); }
+        } catch (...) { SetNotice(L"Não foi possível importar: JSON inválido ou conjuntos RSA-2048 incompletos. As chaves anteriores foram preservadas."); }
         importing = false;
-    }
-    int SelectedLibraryIndex() const {
-        auto index = installedList.SelectedIndex();
-        if (index >= 0 && static_cast<size_t>(index) < installedIndices.size())
-            return static_cast<int>(installedIndices[index]);
-        index = pendingList.SelectedIndex();
-        if (index >= 0 && static_cast<size_t>(index) < pendingIndices.size())
-            return static_cast<int>(pendingIndices[index]);
-        return -1;
-    }
-    void LibrarySelection() {
-        auto index = SelectedLibraryIndex();
-        if (index < 0 || static_cast<size_t>(index) >= libraryItems.size()) {
-            selectedLoaderPath.clear();
-            Find<TextBlock>(L"ContentTitle").Text(L"Selecione um conteúdo");
-            Find<TextBlock>(L"ContentState").Text(L"Nenhum item selecionado.");
-            Find<TextBlock>(L"ContentDetails").Text(L"Escolha um item em uma das seções acima.");
-            Find<Button>(L"LaunchContent").IsEnabled(false);
-            Find<Button>(L"ExtractContent").IsEnabled(false);
-            Find<Button>(L"ValidateContent").IsEnabled(false);
-            return;
-        }
-        auto const& item = libraryItems[static_cast<size_t>(index)];
-        selectedLoaderPath.clear();
-        if (item.installed) {
-            auto eboot = std::filesystem::path(item.path) / L"eboot.bin";
-            if (std::filesystem::is_regular_file(eboot)) selectedLoaderPath = eboot.wstring();
-        } else {
-            auto extension = std::filesystem::path(item.path).extension().wstring();
-            for (auto& c : extension) c = towlower(c);
-            if (extension == L".elf" || extension == L".self" || extension == L".bin")
-                selectedLoaderPath = item.path;
-        }
-        auto extension = std::filesystem::path(item.path).extension().wstring();
-        for (auto& c : extension) c = towlower(c);
-        const bool package = !item.installed && extension == L".pkg";
-        const bool looseExecutable = !item.installed && !selectedLoaderPath.empty();
-        auto launch = Find<Button>(L"LaunchContent");
-        auto extract = Find<Button>(L"ExtractContent");
-        auto validate = Find<Button>(L"ValidateContent");
-        launch.IsEnabled(!extraction && !importing && !selectedLoaderPath.empty() && !(homebrew && homebrew->running()));
-        extract.IsEnabled(!extraction && !importing && package);
-        validate.IsEnabled(!extraction && !importing && looseExecutable);
-        Find<TextBlock>(L"ContentTitle").Text(item.name);
-        Find<TextBlock>(L"ContentState").Text(item.installed ? L"INSTALADO · pronto para iniciar" :
-            package ? L"PKG IMPORTADO · extração necessária" : L"ARQUIVO AVULSO · validação técnica");
-        Find<TextBlock>(L"ContentDetails").Text(item.installed ?
-            (selectedLoaderPath.empty() ? L"Instalação incompleta: eboot.bin ausente." :
-             L"Conteúdo extraído e persistido. A execução PS4 ainda está em desenvolvimento.") :
-            package ? L"Este pacote está na biblioteca, mas ainda não foi extraído. Selecione Extrair e instalar PKG." :
-            DescribeContent(item.path));
     }
     void ValidateSelectedContent() {
         if (selectedLoaderPath.empty()) {
-            libraryStatus.Text(L"Selecione um ELF/SELF importado ou um conteúdo extraído com eboot.bin.");
+            SetNotice(L"Selecione um arquivo ELF/SELF importado para validar.");
             return;
         }
-        ShowLibrary(false);
+        ShowPage(Page::Diagnostics);
         list.SelectedIndex(0);
         RunSelected();
     }
     void StartHomebrew() {
         if (selectedLoaderPath.empty()) {
-            libraryStatus.Text(L"Selecione um conteúdo extraído com eboot.bin.");
+            SetNotice(L"Selecione um conteúdo instalado com eboot.bin.");
             return;
         }
         if (homebrew && homebrew->running()) {
-            libraryStatus.Text(L"O homebrew já está em execução.");
+            SetNotice(L"Um título já está em execução.");
             return;
         }
+        angleReturnPage = currentPage;
         homebrewLaunchPending = true;
         anglePending = true;
         Find<Grid>(L"AngleTestView").Visibility(Visibility::Visible);
-        Find<TextBlock>(L"AngleStatus").Text(L"Preparando vídeo do homebrew…");
+        Find<TextBlock>(L"AngleStatus").Text(L"Preparando vídeo e iniciando conteúdo…");
         Find<Button>(L"CloseAngleTest").IsEnabled(false);
-        Find<Button>(L"LaunchContent").IsEnabled(false);
         RecordAngle(L"running", L"Inicialização EGL do homebrew iniciada.");
     }
     void LaunchGuest() {
@@ -203,16 +462,16 @@ struct App : ApplicationT<App> {
             homebrewCompletionShown = false;
             homebrew->Start(std::filesystem::path(selectedLoaderPath),
                             std::filesystem::path(report->directory), &angleVideo);
-            libraryStatus.Text(L"Homebrew em execução; a superfície gráfica EGL está conectada ao Xbox.");
-            Find<TextBlock>(L"AngleStatus").Text(L"Homebrew em execução. A imagem aparecerá quando o programa apresentar o primeiro quadro.");
-            Find<Button>(L"LaunchContent").IsEnabled(false);
+            Find<TextBlock>(L"AngleStatus").Text(L"Conteúdo em execução. A imagem será exibida quando o programa apresentar o primeiro quadro.");
         } catch (std::exception const& e) {
             homebrew.reset();
-            libraryStatus.Text(L"Não foi possível iniciar o Apollo: " + std::wstring(to_hstring(e.what())));
+            SetNotice(L"Não foi possível iniciar o conteúdo: " + std::wstring(to_hstring(e.what())));
+            Find<TextBlock>(L"AngleStatus").Text(L"Falha ao iniciar: " + std::wstring(to_hstring(e.what())));
             Find<Button>(L"CloseAngleTest").IsEnabled(true);
         } catch (hresult_error const& e) {
             homebrew.reset();
-            libraryStatus.Text(L"Não foi possível iniciar o Apollo: " + std::wstring(e.message()));
+            SetNotice(L"Não foi possível iniciar o conteúdo: " + std::wstring(e.message()));
+            Find<TextBlock>(L"AngleStatus").Text(L"Falha ao iniciar: " + std::wstring(e.message()));
             Find<Button>(L"CloseAngleTest").IsEnabled(true);
         }
     }
@@ -234,16 +493,21 @@ struct App : ApplicationT<App> {
     }
     fire_and_forget ExtractContent() {
         auto lifetime = get_strong();
-        auto index = SelectedLibraryIndex();
-        if (extraction || importing || index < 0 || static_cast<size_t>(index) >= libraryItems.size() || libraryItems[index].installed) co_return;
-        auto item = libraryItems[index];
+        const auto index = selectedPendingIndex;
+        if (extraction || importing || index < 0 || static_cast<size_t>(index) >= libraryItems.size() ||
+            libraryItems[index].installed || Extension(libraryItems[index].path) != L".pkg") co_return;
+        auto item = libraryItems[static_cast<size_t>(index)];
         auto state = std::make_shared<Lab::InstallProgress>();
         extraction = state;
         Find<Button>(L"ExtractContent").IsEnabled(false);
-        Find<Button>(L"SelectContent").IsEnabled(false); Find<Button>(L"ImportKeys").IsEnabled(false);
-        Find<Button>(L"CancelExtraction").Visibility(Visibility::Visible);
+        Find<Button>(L"SelectContent").IsEnabled(false);
+        Find<Button>(L"ImportKeys").IsEnabled(false);
         Find<Button>(L"CancelExtraction").IsEnabled(true);
-        Find<ProgressBar>(L"InstallProgress").Visibility(Visibility::Visible);
+        Find<Button>(L"CancelExtraction").Content(box_value(L"Cancelar"));
+        Find<TextBlock>(L"InstallProgressText").Text(L"Preparando pacote…");
+        Find<TextBlock>(L"InstallProgressPercent").Text(L"0%");
+        Find<ProgressBar>(L"InstallProgress").Value(0);
+        Find<Grid>(L"InstallOverlay").Visibility(Visibility::Visible);
         auto started = Lab::Now();
         std::wstring error, destination;
         bool completed = false;
@@ -282,13 +546,14 @@ struct App : ApplicationT<App> {
         } catch (...) { error += L" Não foi possível salvar extraction-report.json."; }
         try { if (displayRequest) displayRequest.RequestRelease(); } catch (...) {}
         displayRequest = nullptr;
-        libraryStatus.Text(completed ? L"Extração concluída. Relatório: LocalState/extraction-report.json." + error : L"Extração não concluída: " + error);
+        Find<Grid>(L"InstallOverlay").Visibility(Visibility::Collapsed);
         extraction.reset();
-        Find<Button>(L"SelectContent").IsEnabled(true); Find<Button>(L"ImportKeys").IsEnabled(true);
+        Find<Button>(L"SelectContent").IsEnabled(true);
+        Find<Button>(L"ImportKeys").IsEnabled(true);
         Find<Button>(L"CancelExtraction").IsEnabled(false);
-        Find<Button>(L"CancelExtraction").Visibility(Visibility::Collapsed);
-        Find<ProgressBar>(L"InstallProgress").Visibility(Visibility::Collapsed);
         Find<ProgressBar>(L"InstallProgress").Value(completed ? 100 : 0);
+        SetNotice(completed ? L"Instalação concluída. O título já aparece na tela Games ou Aplicativos." :
+            (state->cancel.load() ? L"Instalação cancelada. Os arquivos temporários foram descartados." : L"Instalação não concluída: " + error));
         PopulateLibrary();
     }
 
@@ -302,21 +567,19 @@ struct App : ApplicationT<App> {
     static std::wstring DescribeContent(std::wstring const& path) {
         std::error_code error;
         const auto size = std::filesystem::file_size(std::filesystem::path(path), error);
-        std::array<unsigned char, 4> header{};
-        std::ifstream input(std::filesystem::path(path), std::ios::binary);
-        input.read(reinterpret_cast<char*>(header.data()), static_cast<std::streamsize>(header.size()));
-        const auto magic = (static_cast<std::uint32_t>(header[0]) << 24u) |
-            (static_cast<std::uint32_t>(header[1]) << 16u) |
-            (static_cast<std::uint32_t>(header[2]) << 8u) | static_cast<std::uint32_t>(header[3]);
-        if (input.gcount() == static_cast<std::streamsize>(header.size()) && magic == 0x7F434E54u)
-            return Lab::ProbePkg(std::filesystem::path(path)).detail;
-        return error ? L"Arquivo selecionado; tamanho indisponível." :
-            L"Arquivo selecionado · " + std::to_wstring(size) + L" bytes\nFormato ainda não analisado.";
-    }
-    void ShowLibrary(bool visible) {
-        libraryView.Visibility(visible ? Visibility::Visible : Visibility::Collapsed);
-        diagnosticsView.Visibility(visible ? Visibility::Collapsed : Visibility::Visible);
-        if (visible) PopulateLibrary();
+        const auto extension = Extension(path);
+        const auto sizeText = error ? std::wstring(L"tamanho indisponível") :
+            (size >= 1024 * 1024 ? std::to_wstring(size / (1024 * 1024)) + L" MB" :
+             std::to_wstring(size / 1024) + L" KB");
+        if (extension == L".pkg") {
+            const auto probe = Lab::ProbePkg(std::filesystem::path(path));
+            return (probe.recognized ? L"Pacote PS4 reconhecido" : L"Não reconhecido como PKG PS4") +
+                L" · " + sizeText + L"\nA instalação extrai os arquivos e não inicia o conteúdo.";
+        }
+        if (extension == L".elf") return L"Executável ELF · " + sizeText + L"\nA validação técnica não executa este arquivo.";
+        if (extension == L".self") return L"Executável SELF · " + sizeText + L"\nA validação técnica não executa este arquivo.";
+        if (extension == L".bin") return L"Arquivo BIN · " + sizeText + L"\nO formato será validado antes de qualquer execução.";
+        return L"Arquivo selecionado · " + sizeText;
     }
     fire_and_forget PopulateLibrary() {
         auto lifetime = get_strong();
@@ -327,55 +590,68 @@ struct App : ApplicationT<App> {
             auto folder = co_await local.CreateFolderAsync(L"Library", Windows::Storage::CreationCollisionOption::OpenIfExists);
             auto files = co_await folder.GetFilesAsync();
             installedIndices.clear(); pendingIndices.clear();
-            installedList.Items().Clear(); pendingList.Items().Clear();
+            homeItems.Items().Clear(); pendingItems.Items().Clear();
             libraryItems.clear();
-            auto add = [&](std::wstring name, std::wstring path, bool installed) {
-                auto index = libraryItems.size();
-                libraryItems.push_back({name, path, installed});
-                auto& indices = installed ? installedIndices : pendingIndices;
-                indices.push_back(index);
-                StackPanel card; card.Width(142); card.Spacing(2); card.Margin({5, 2, 5, 2});
-                Border art; art.Width(142); art.Height(50);
-                art.Background(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 12, 75, 167)));
-                TextBlock glyph; glyph.Text(installed ? L"\xE7FC" : L"\xE8B7"); glyph.FontFamily(Media::FontFamily(L"Segoe MDL2 Assets"));
-                glyph.FontSize(38); glyph.HorizontalAlignment(HorizontalAlignment::Center); glyph.VerticalAlignment(VerticalAlignment::Center); art.Child(glyph);
-                auto iconPath = std::filesystem::path(path) / L"sce_sys" / L"icon0.png";
-                if (installed && std::filesystem::is_regular_file(iconPath) && std::filesystem::file_size(iconPath) <= 8 * 1024 * 1024) {
-                    Image image;
-                    auto folderName = std::filesystem::path(path).filename().wstring();
-                    Media::Imaging::BitmapImage cover;
-                    cover.DecodePixelWidth(284); cover.DecodePixelHeight(100);
-                    cover.UriSource(Uri(L"ms-appdata:///local/Installed/" + folderName + L"/sce_sys/icon0.png"));
-                    image.Source(cover);
-                    image.Stretch(Media::Stretch::UniformToFill); art.Child(image);
-                }
-                card.Children().Append(art);
-                TextBlock title; title.Text(name); title.FontSize(13); title.MaxLines(1); title.TextTrimming(TextTrimming::CharacterEllipsis); card.Children().Append(title);
-                TextBlock badge; badge.Text(installed ? L"INSTALADO" :
-                    (std::filesystem::path(path).extension() == L".pkg" ? L"PKG · A EXTRAIR" : L"ARQUIVO AVULSO"));
-                badge.FontSize(10); badge.Foreground(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 154, 233, 255))); card.Children().Append(badge);
-                (installed ? installedList : pendingList).Items().Append(card);
-            };
             auto installed = co_await local.CreateFolderAsync(L"Installed", Windows::Storage::CreationCollisionOption::OpenIfExists);
             auto folders = co_await installed.GetFoldersAsync();
-            std::set<std::wstring> installedPackages;
+            std::set<std::wstring> installedSources;
             for (auto const& game : folders) {
-                auto titlePath = std::filesystem::path(game.Path().c_str()) / L"library-name.txt";
+                const auto gamePath = std::filesystem::path(game.Path().c_str());
+                auto titlePath = gamePath / L"library-name.txt";
                 std::ifstream titleFile(titlePath, std::ios::binary);
-                std::string name{std::istreambuf_iterator<char>(titleFile), {}};
-                auto title = name.empty() ? std::wstring(game.Name()) : std::wstring(to_hstring(name));
-                installedPackages.insert(title);
-                add(title, std::wstring(game.Path()), true);
+                std::string source{std::istreambuf_iterator<char>(titleFile), {}};
+                auto sourceName = source.empty() ? std::wstring(game.Name()) : std::wstring(to_hstring(source));
+                if (Extension(std::filesystem::path(sourceName)) == L".pkg") installedSources.insert(sourceName);
+                const auto metadata = ReadSfo(gamePath / L"sce_sys" / L"param.sfo");
+                const auto displayName = metadata.title.empty() ? sourceName : metadata.title;
+                const auto index = libraryItems.size();
+                libraryItems.push_back({displayName, gamePath.wstring(), sourceName, metadata.category, true});
+                installedIndices.push_back(index);
             }
             for (auto const& file : files) {
-                if (file.FileType() == L".pkg" && installedPackages.contains(std::wstring(file.Name()))) continue;
-                add(std::wstring(file.Name()), std::wstring(file.Path()), false);
+                const auto path = std::filesystem::path(file.Path().c_str());
+                const auto extension = Extension(path);
+                if (extension == L".pkg" && installedSources.contains(std::wstring(file.Name()))) continue;
+                const auto index = libraryItems.size();
+                libraryItems.push_back({std::wstring(file.Name()), path.wstring(), std::wstring(file.Name()), L"", false});
+                pendingIndices.push_back(index);
+
+                StackPanel tile; tile.Width(220); tile.Height(220); tile.Spacing(8);
+                Grid artwork; artwork.Width(220); artwork.Height(158);
+                Border artworkBackground; artworkBackground.CornerRadius({9, 9, 9, 9});
+                const auto package = extension == L".pkg";
+                artworkBackground.Background(Media::SolidColorBrush(package ?
+                    Windows::UI::ColorHelper::FromArgb(255, 18, 64, 102) :
+                    Windows::UI::ColorHelper::FromArgb(255, 39, 48, 69)));
+                artwork.Children().Append(artworkBackground);
+                TextBlock glyph; glyph.Text(package ? L"\xE8B7" : L"\xE8A5");
+                glyph.FontFamily(Media::FontFamily(L"Segoe MDL2 Assets")); glyph.FontSize(56);
+                glyph.Foreground(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 129, 190, 242)));
+                glyph.HorizontalAlignment(HorizontalAlignment::Center); glyph.VerticalAlignment(VerticalAlignment::Center);
+                artwork.Children().Append(glyph);
+                Border badge; badge.Background(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(225, 6, 11, 19)));
+                badge.CornerRadius({5, 5, 5, 5}); badge.Padding({8, 5, 8, 5});
+                TextBlock badgeText; badgeText.Text(package ? L"PKG · A INSTALAR" : L"ARQUIVO · A VALIDAR"); badgeText.FontSize(10); badgeText.CharacterSpacing(70);
+                badge.Child(badgeText); badge.HorizontalAlignment(HorizontalAlignment::Left); badge.VerticalAlignment(VerticalAlignment::Top); badge.Margin({10, 10, 0, 0});
+                artwork.Children().Append(badge);
+                tile.Children().Append(artwork);
+                TextBlock title; title.Text(std::wstring(file.Name())); title.FontSize(15); title.FontWeight(Windows::UI::Text::FontWeights::SemiBold());
+                title.MaxLines(1); title.TextTrimming(TextTrimming::CharacterEllipsis); tile.Children().Append(title);
+                TextBlock kind; kind.Text(package ? L"Pacote PS4" : (extension == L".elf" ? L"Executável ELF" : (extension == L".self" ? L"Executável SELF" : L"Arquivo avulso")));
+                kind.FontSize(12); kind.Foreground(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 137, 152, 174))); tile.Children().Append(kind);
+                Button card; card.Width(234); card.Height(234); card.Padding({6, 6, 6, 6}); card.BorderThickness({1, 1, 1, 1});
+                card.BorderBrush(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 33, 41, 56)));
+                card.Background(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 14, 18, 27)));
+                card.Content(tile); card.Tag(box_value(static_cast<int64_t>(index)));
+                card.Click([this, index](auto const&, auto const&) { SelectPending(index); });
+                pendingItems.Items().Append(card);
             }
-            Find<TextBlock>(L"InstalledHeading").Text(L"INSTALADOS · " + std::to_wstring(installedIndices.size()));
-            Find<TextBlock>(L"PendingHeading").Text(L"A EXTRAIR / ARQUIVOS AVULSOS · " + std::to_wstring(pendingIndices.size()));
-            if (!installedIndices.empty()) installedList.SelectedIndex(0);
-            else if (!pendingIndices.empty()) pendingList.SelectedIndex(0);
-            else LibrarySelection();
+            selectedPendingIndex = -1;
+            RefreshPendingSelection();
+            Find<TextBlock>(L"PendingCount").Text(std::to_wstring(pendingIndices.size()) +
+                (pendingIndices.size() == 1 ? L" arquivo" : L" arquivos"));
+            Find<StackPanel>(L"PendingEmpty").Visibility(pendingIndices.empty() ? Visibility::Visible : Visibility::Collapsed);
+            PopulateHome();
         } catch (hresult_error const& e) {
             libraryStatus.Text(L"Falha ao listar a biblioteca: " + e.message());
         } catch (...) { libraryStatus.Text(L"Não foi possível ler a biblioteca local."); }
@@ -396,26 +672,132 @@ struct App : ApplicationT<App> {
             if (!file) { importing = false; co_return; }
             auto local = Windows::Storage::ApplicationData::Current().LocalFolder();
             auto folder = co_await local.CreateFolderAsync(L"Library", Windows::Storage::CreationCollisionOption::OpenIfExists);
-            co_await file.CopyAsync(folder, file.Name(), Windows::Storage::NameCollisionOption::GenerateUniqueName);
-            libraryStatus.Text(std::wstring(L"Arquivo copiado: ") + std::wstring(file.Name()) +
-                L"\n" + DescribeContent(std::wstring(file.Path())));
+            auto copied = co_await file.CopyAsync(folder, file.Name(), Windows::Storage::NameCollisionOption::GenerateUniqueName);
             PopulateLibrary();
+            SetNotice(L"Arquivo importado para a biblioteca: " + std::wstring(copied.Name()));
         } catch (hresult_error const& e) {
-            libraryStatus.Text(L"Falha ao selecionar conteúdo: " + e.message());
-        } catch (...) { libraryStatus.Text(L"Falha ao importar conteúdo."); }
+            SetNotice(L"Falha ao importar conteúdo: " + std::wstring(e.message()));
+        } catch (...) { SetNotice(L"Falha ao importar conteúdo."); }
         importing = false;
-        LibrarySelection();
+        RefreshPendingSelection();
     }
     bool Save() {
         try { report->Save(); return true; }
         catch (hresult_error const& e) {
             persistenceFailed = true;
-            if (status) status.Text(L"Falha ao persistir; testes bloqueados: " + e.message());
+            SetNotice(L"Falha ao persistir; testes bloqueados: " + std::wstring(e.message()));
         } catch (std::exception const&) {
             persistenceFailed = true;
-            if (status) status.Text(L"Falha de armazenamento; testes bloqueados.");
+            SetNotice(L"Falha de armazenamento; testes bloqueados.");
         }
         return false;
+    }
+    void ExportReport() {
+        if (!Save()) return;
+        try {
+            auto name = L"report-export-" + std::to_wstring(static_cast<uint64_t>(Lab::Now())) + L".json";
+            auto exported = report->Json();
+            Windows::Data::Json::JsonObject debug;
+            auto directory = std::filesystem::path(report->directory);
+            auto runtimePath = directory / L"homebrew-runtime.json";
+            std::wstring sessionName;
+            std::wstring sessionId;
+            if (std::filesystem::is_regular_file(runtimePath)) {
+                std::ifstream input(runtimePath, std::ios::binary);
+                std::string raw{std::istreambuf_iterator<char>(input), {}};
+                auto runtime = Windows::Data::Json::JsonObject::Parse(to_hstring(raw));
+                sessionName = std::wstring(runtime.GetNamedString(L"session_file", L""));
+                sessionId = std::wstring(runtime.GetNamedString(L"session_id", L""));
+                if (sessionName.empty() && !sessionId.empty())
+                    sessionName = L"homebrew-session-" + sessionId + L".jsonl";
+                debug.SetNamedValue(L"runtime", runtime);
+            }
+            auto includeLines = [&](wchar_t const* field, std::filesystem::path const& path) {
+                Windows::Data::Json::JsonArray events;
+                if (std::filesystem::is_regular_file(path)) {
+                    std::ifstream input(path, std::ios::binary);
+                    std::string line;
+                    std::deque<Windows::Data::Json::JsonObject> recent;
+                    while (std::getline(input, line)) {
+                        try {
+                            recent.push_back(Windows::Data::Json::JsonObject::Parse(to_hstring(line)));
+                            if (recent.size() > 8192) recent.pop_front();
+                        } catch (...) {}
+                    }
+                    for (auto const& event : recent) events.Append(event);
+                }
+                debug.SetNamedValue(field, events);
+            };
+            includeLines(L"hle_trace", directory / L"homebrew-hle-trace.jsonl");
+            if (!sessionName.empty())
+                includeLines(L"session_events", directory / std::filesystem::path(sessionName).filename());
+            auto lastHle = directory / L"homebrew-last-hle.json";
+            auto anglePath = directory / L"angle-video.json";
+            if (std::filesystem::is_regular_file(anglePath)) {
+                std::ifstream input(anglePath, std::ios::binary);
+                std::string raw{std::istreambuf_iterator<char>(input), {}};
+                exported.SetNamedValue(L"angle_video", Windows::Data::Json::JsonObject::Parse(to_hstring(raw)));
+            }
+            if (std::filesystem::is_regular_file(lastHle)) {
+                try {
+                    std::ifstream input(lastHle, std::ios::binary);
+                    std::string raw{std::istreambuf_iterator<char>(input), {}};
+                    debug.SetNamedValue(L"last_hle", Windows::Data::Json::JsonObject::Parse(to_hstring(raw)));
+                } catch (...) {}
+            }
+            if (!sessionId.empty()) {
+                auto console = directory / (L"homebrew-console-" + sessionId + L".log");
+                if (std::filesystem::is_regular_file(console)) {
+                    std::ifstream input(console, std::ios::binary);
+                    std::string raw{std::istreambuf_iterator<char>(input), {}};
+                    try {
+                        debug.SetNamedValue(L"console_log",
+                            Windows::Data::Json::JsonValue::CreateStringValue(to_hstring(raw)));
+                    } catch (...) {}
+                }
+            }
+            exported.SetNamedValue(L"homebrew_debug", debug);
+            Lab::WriteDurable(report->directory + L"\\" + name, to_string(exported.Stringify()));
+            SetNotice(L"Relatório exportado: LocalState\\" + name + L". Baixe pelo Device Portal.");
+        } catch (hresult_error const& e) {
+            SetNotice(L"Falha na exportação: " + std::wstring(e.message()));
+        } catch (std::exception const& e) {
+            SetNotice(L"Falha na exportação: " + std::wstring(to_hstring(e.what())));
+        }
+    }
+    void GoBack() {
+        switch (currentPage) {
+        case Page::Home: break;
+        case Page::Library: ShowPage(Page::Home); break;
+        case Page::Settings: ShowPage(Page::Home); break;
+        case Page::Diagnostics: ShowPage(Page::Settings); break;
+        }
+    }
+    void OnGamepadKey(Core::CoreWindow const&, Core::KeyEventArgs const& args) {
+        const auto key = args.VirtualKey();
+        bool handled = true;
+        if (key == Sys::VirtualKey::GamepadB) {
+            const bool angleVisible = Find<Grid>(L"AngleTestView").Visibility() == Visibility::Visible;
+            if (angleVisible && !(homebrew && homebrew->running()) && !homebrewLaunchPending)
+                FinishAngleTest();
+            else
+                GoBack();
+        } else if (key == Sys::VirtualKey::GamepadMenu && currentPage != Page::Settings && currentPage != Page::Diagnostics) {
+            ShowPage(Page::Settings);
+        } else if (currentPage == Page::Home && key == Sys::VirtualKey::GamepadY) {
+            ToggleFocusedFavorite();
+        } else if (currentPage == Page::Home && key == Sys::VirtualKey::GamepadLeftShoulder) {
+            SetHomeCategory(HomeCategory::Games);
+            Find<Button>(L"GamesTab").Focus(FocusState::Programmatic);
+        } else if (currentPage == Page::Home && key == Sys::VirtualKey::GamepadRightShoulder) {
+            SetHomeCategory(HomeCategory::Applications);
+            Find<Button>(L"AppsTab").Focus(FocusState::Programmatic);
+        } else if (currentPage == Page::Library && key == Sys::VirtualKey::GamepadX) {
+            ExtractContent();
+        } else {
+            handled = false;
+        }
+        if (handled) args.Handled(true);
     }
     void RecordAngle(std::wstring const& state, std::wstring const& detail) {
         try {
@@ -431,6 +813,7 @@ struct App : ApplicationT<App> {
     }
     void StartAngleTest() {
         if (homebrewLaunchPending || (homebrew && homebrew->running())) return;
+        angleReturnPage = currentPage;
         angleVideo.Stop(); angleActive = false;
         Find<Grid>(L"AngleTestView").Visibility(Visibility::Visible);
         Find<TextBlock>(L"AngleStatus").Text(L"Preparando superfície EGL…");
@@ -444,7 +827,7 @@ struct App : ApplicationT<App> {
         anglePending = false; angleActive = false;
         angleVideo.Stop();
         Find<Grid>(L"AngleTestView").Visibility(Visibility::Collapsed);
-        Find<Button>(L"LibraryTab").Focus(FocusState::Programmatic);
+        ShowPage(angleReturnPage);
     }
     void OnLaunched(Windows::ApplicationModel::Activation::LaunchActivatedEventArgs const&) {
         StartupLog(L"OnLaunched entered");
@@ -456,108 +839,57 @@ struct App : ApplicationT<App> {
             std::string xaml{std::istreambuf_iterator<char>(file), {}};
             StartupLog(L"Loading MainPage.xaml");
             root = Markup::XamlReader::Load(to_hstring(xaml)).as<Grid>();
-            libraryView = Find<Grid>(L"LibraryView"); diagnosticsView = Find<Grid>(L"DiagnosticsView");
+            homeView = Find<Grid>(L"HomeView");
+            libraryView = Find<Grid>(L"LibraryView");
+            settingsView = Find<Grid>(L"SettingsView");
+            diagnosticsView = Find<Grid>(L"DiagnosticsView");
+            homeItems = Find<ItemsControl>(L"HomeItems");
+            pendingItems = Find<ItemsControl>(L"PendingItems");
             list = Find<ListView>(L"Tests");
-            installedList = Find<ListView>(L"InstalledList");
-            pendingList = Find<ListView>(L"PendingList");
             status = Find<TextBlock>(L"Status"); details = Find<TextBlock>(L"Details");
             libraryStatus = Find<TextBlock>(L"LibraryStatus");
             StartupLog(L"XAML loaded; opening report");
             report = std::make_unique<Lab::Report>();
             Find<TextBlock>(L"DeviceInfo").Text(report->Summary());
+            auto version = Windows::ApplicationModel::Package::Current().Id().Version();
+            Find<TextBlock>(L"CurrentVersion").Text(std::to_wstring(version.Major) + L"." +
+                std::to_wstring(version.Minor) + L"." + std::to_wstring(version.Build) + L"." +
+                std::to_wstring(version.Revision));
+            Find<TextBlock>(L"CurrentCommit").Text(L"Commit " + std::wstring(XBOX_BUILD_COMMIT).substr(0, 12));
+            LoadPreferences();
             list.SelectionChanged([this](auto const&, auto const&) { if (!refreshing) ShowDetails(); });
-            Find<Button>(L"RunAll").Click([this](auto const&, auto const&) { RunAll(); });
             Find<Button>(L"RunSelected").Click([this](auto const&, auto const&) { RunSelected(); });
-            Find<Button>(L"LibraryTab").Click([this](auto const&, auto const&) { ShowLibrary(true); });
-            Find<Button>(L"DiagnosticsTab").Click([this](auto const&, auto const&) { ShowLibrary(false); });
+            Find<Button>(L"GamesTab").Click([this](auto const&, auto const&) { SetHomeCategory(HomeCategory::Games); });
+            Find<Button>(L"AppsTab").Click([this](auto const&, auto const&) { SetHomeCategory(HomeCategory::Applications); });
+            Find<Button>(L"FilterAll").Click([this](auto const&, auto const&) { SetHomeFilter(HomeFilter::All); });
+            Find<Button>(L"FilterFavorites").Click([this](auto const&, auto const&) { SetHomeFilter(HomeFilter::Favorites); });
+            Find<Button>(L"FilterRecent").Click([this](auto const&, auto const&) { SetHomeFilter(HomeFilter::Recent); });
+            Find<Button>(L"OpenLibrary").Click([this](auto const&, auto const&) { ShowPage(Page::Library); });
+            Find<Button>(L"EmptyImport").Click([this](auto const&, auto const&) { ShowPage(Page::Library); SelectContent(); });
+            Find<Button>(L"PendingEmptyImport").Click([this](auto const&, auto const&) { SelectContent(); });
+            Find<Button>(L"LibraryBack").Click([this](auto const&, auto const&) { ShowPage(Page::Home); });
+            Find<Button>(L"OpenSettings").Click([this](auto const&, auto const&) { ShowPage(Page::Settings); });
+            Find<Button>(L"SettingsBack").Click([this](auto const&, auto const&) { ShowPage(Page::Home); });
+            Find<Button>(L"OpenDiagnostics").Click([this](auto const&, auto const&) { ShowPage(Page::Diagnostics); });
+            Find<Button>(L"DiagnosticsBack").Click([this](auto const&, auto const&) { ShowPage(Page::Settings); });
             Find<Button>(L"SelectContent").Click([this](auto const&, auto const&) { SelectContent(); });
             Find<Button>(L"ImportKeys").Click([this](auto const&, auto const&) { ImportKeys(); });
+            Find<Button>(L"SettingsImportKeys").Click([this](auto const&, auto const&) { ImportKeys(); });
             Find<Button>(L"ExtractContent").Click([this](auto const&, auto const&) { ExtractContent(); });
             Find<Button>(L"ValidateContent").Click([this](auto const&, auto const&) { ValidateSelectedContent(); });
-            Find<Button>(L"LaunchContent").Click([this](auto const&, auto const&) { StartHomebrew(); });
             Find<Button>(L"TestAngle").Click([this](auto const&, auto const&) { StartAngleTest(); });
             Find<Button>(L"CloseAngleTest").Click([this](auto const&, auto const&) { FinishAngleTest(); });
-            Find<Button>(L"CancelExtraction").Click([this](auto const&, auto const&) { if (extraction) extraction->cancel.store(true); });
-            installedList.SelectionChanged([this](auto const&, auto const&) {
-                if (installedList.SelectedIndex() >= 0) pendingList.SelectedIndex(-1);
-                LibrarySelection();
+            Find<Button>(L"CancelExtraction").Click([this](auto const&, auto const&) {
+                if (extraction) {
+                    extraction->cancel.store(true);
+                    Find<Button>(L"CancelExtraction").IsEnabled(false);
+                    Find<TextBlock>(L"InstallProgressText").Text(L"Cancelando e limpando os arquivos temporários…");
+                }
             });
-            pendingList.SelectionChanged([this](auto const&, auto const&) {
-                if (pendingList.SelectedIndex() >= 0) installedList.SelectedIndex(-1);
-                LibrarySelection();
-            });
-            Find<Button>(L"Export").Click([this](auto const&, auto const&) {
-                if (!Save()) return;
-                try {
-                    auto name = L"report-export-" + std::to_wstring(static_cast<uint64_t>(Lab::Now())) + L".json";
-                    auto exported = report->Json();
-                    Windows::Data::Json::JsonObject debug;
-                    auto directory = std::filesystem::path(report->directory);
-                    auto runtimePath = directory / L"homebrew-runtime.json";
-                    std::wstring sessionName;
-                    std::wstring sessionId;
-                    if (std::filesystem::is_regular_file(runtimePath)) {
-                        std::ifstream input(runtimePath, std::ios::binary);
-                        std::string raw{std::istreambuf_iterator<char>(input), {}};
-                        auto runtime = Windows::Data::Json::JsonObject::Parse(to_hstring(raw));
-                        sessionName = std::wstring(runtime.GetNamedString(L"session_file", L""));
-                        sessionId = std::wstring(runtime.GetNamedString(L"session_id", L""));
-                        if (sessionName.empty()) {
-                            if (!sessionId.empty())
-                                sessionName = L"homebrew-session-" + sessionId + L".jsonl";
-                        }
-                        debug.SetNamedValue(L"runtime", runtime);
-                    }
-                    auto includeLines = [&](wchar_t const* field, std::filesystem::path const& path) {
-                        Windows::Data::Json::JsonArray events;
-                        if (std::filesystem::is_regular_file(path)) {
-                            std::ifstream input(path, std::ios::binary);
-                            std::string line;
-                            std::deque<Windows::Data::Json::JsonObject> recent;
-                            while (std::getline(input, line)) {
-                                try {
-                                    recent.push_back(Windows::Data::Json::JsonObject::Parse(to_hstring(line)));
-                                    if (recent.size() > 8192) recent.pop_front();
-                                } catch (...) {}
-                            }
-                            for (auto const& event : recent) events.Append(event);
-                        }
-                        debug.SetNamedValue(field, events);
-                    };
-                    includeLines(L"hle_trace", directory / L"homebrew-hle-trace.jsonl");
-                    if (!sessionName.empty())
-                        includeLines(L"session_events", directory / std::filesystem::path(sessionName).filename());
-                    auto lastHle = directory / L"homebrew-last-hle.json";
-                    auto anglePath = directory / L"angle-video.json";
-                    if (std::filesystem::is_regular_file(anglePath)) {
-                        std::ifstream input(anglePath, std::ios::binary);
-                        std::string raw{std::istreambuf_iterator<char>(input), {}};
-                        exported.SetNamedValue(L"angle_video", Windows::Data::Json::JsonObject::Parse(to_hstring(raw)));
-                    }
-                    if (std::filesystem::is_regular_file(lastHle)) {
-                        try {
-                            std::ifstream input(lastHle, std::ios::binary);
-                            std::string raw{std::istreambuf_iterator<char>(input), {}};
-                            debug.SetNamedValue(L"last_hle", Windows::Data::Json::JsonObject::Parse(to_hstring(raw)));
-                        } catch (...) {}
-                    }
-                    if (!sessionId.empty()) {
-                        auto console = directory / (L"homebrew-console-" + sessionId + L".log");
-                        if (std::filesystem::is_regular_file(console)) {
-                            std::ifstream input(console, std::ios::binary);
-                            std::string raw{std::istreambuf_iterator<char>(input), {}};
-                            try {
-                                debug.SetNamedValue(L"console_log",
-                                    Windows::Data::Json::JsonValue::CreateStringValue(to_hstring(raw)));
-                            } catch (...) {}
-                        }
-                    }
-                    exported.SetNamedValue(L"homebrew_debug", debug);
-                    std::string payload = to_string(exported.Stringify());
-                    Lab::WriteDurable(report->directory + L"\\" + name, payload);
-                    status.Text(L"Diagnóstico completo exportado para LocalState\\" + name + L". Baixe pelo Device Portal.");
-                } catch (hresult_error const& e) { status.Text(L"Falha na exportação: " + e.message()); }
-                  catch (std::exception const& e) { status.Text(L"Falha na exportação: " + std::wstring(to_hstring(e.what()))); }
+            Find<Button>(L"Export").Click([this](auto const&, auto const&) { ExportReport(); });
+            Find<Button>(L"DiagnosticsExport").Click([this](auto const&, auto const&) { ExportReport(); });
+            Window::Current().CoreWindow().KeyDown([this](Core::CoreWindow const& sender, Core::KeyEventArgs const& args) {
+                OnGamepadKey(sender, args);
             });
             timer = DispatcherTimer(); timer.Interval(std::chrono::milliseconds(100));
             timer.Tick([this](auto const&, auto const&) {
@@ -577,14 +909,19 @@ struct App : ApplicationT<App> {
                         else {
                             Find<TextBlock>(L"AngleStatus").Text(L"Não foi possível entregar o contexto EGL ao homebrew: " + detail);
                             Find<Button>(L"CloseAngleTest").IsEnabled(true);
-                            libraryStatus.Text(L"Vídeo indisponível. Homebrew não iniciado.");
+                            SetNotice(L"O vídeo não está disponível. O conteúdo não foi iniciado.");
                         }
                     }
                 }
                 if (extraction) {
-                    Find<ProgressBar>(L"InstallProgress").Value(extraction->percent.load());
-                    libraryStatus.Text(L"Extraindo · " + std::to_wstring(extraction->files.load()) + L" arquivos · " +
-                        std::to_wstring(extraction->bytes.load() / (1024 * 1024)) + L" MiB · mantenha o aplicativo aberto");
+                    const auto percent = extraction->percent.load();
+                    Find<ProgressBar>(L"InstallProgress").Value(percent);
+                    Find<TextBlock>(L"InstallProgressPercent").Text(std::to_wstring(percent) + L"%");
+                    if (!extraction->cancel.load()) {
+                        Find<TextBlock>(L"InstallProgressText").Text(L"Instalando · " +
+                            std::to_wstring(extraction->files.load()) + L" arquivos · " +
+                            std::to_wstring(extraction->bytes.load() / (1024 * 1024)) + L" MB processados");
+                    }
                 }
                 if (homebrew && !homebrew->running() && !homebrewCompletionShown) {
                     homebrewCompletionShown = true;
@@ -594,20 +931,19 @@ struct App : ApplicationT<App> {
                         std::ifstream input(statePath, std::ios::binary);
                         std::string raw{std::istreambuf_iterator<char>(input), {}};
                         auto state = Windows::Data::Json::JsonObject::Parse(to_hstring(raw));
-                        libraryStatus.Text(L"Homebrew encerrado: " + std::wstring(state.GetNamedString(L"detail")) +
-                                           L" Exporte o relatório para análise.");
-                        Find<TextBlock>(L"AngleStatus").Text(L"Homebrew encerrado. " +
-                            std::wstring(state.GetNamedString(L"detail")) + L" Volte à biblioteca e exporte o relatório.");
+                        auto detail = std::wstring(state.GetNamedString(L"detail", L"O processo terminou."));
+                        SetNotice(L"O conteúdo foi encerrado. Consulte Configurações para exportar o relatório, se necessário.");
+                        Find<TextBlock>(L"AngleStatus").Text(L"Conteúdo encerrado. " + detail +
+                            L" Pressione B para voltar à tela anterior.");
                     } catch (...) {
-                        libraryStatus.Text(L"Homebrew encerrado. Exporte o relatório para análise.");
-                        Find<TextBlock>(L"AngleStatus").Text(L"Homebrew encerrado. Volte à biblioteca e exporte o relatório.");
+                        SetNotice(L"O conteúdo foi encerrado. Abra Configurações para exportar o relatório, se necessário.");
+                        Find<TextBlock>(L"AngleStatus").Text(L"Conteúdo encerrado. Pressione B para voltar à tela anterior.");
                     }
-                    LibrarySelection();
                 }
             });
             timer.Start();
             Refresh();
-            if (!report->recoveryNotice.empty()) status.Text(report->recoveryNotice);
+            if (!report->recoveryNotice.empty()) Find<TextBlock>(L"SettingsStatus").Text(report->recoveryNotice);
             Save();
             Window::Current().Content(root); Window::Current().Activate();
             auto extractionReport = std::filesystem::path(report->directory) / L"extraction-report.json";
@@ -618,27 +954,15 @@ struct App : ApplicationT<App> {
                     if (previous.GetNamedString(L"status", L"") == L"running") {
                         previous.SetNamedValue(L"status", Windows::Data::Json::JsonValue::CreateStringValue(L"inconclusive"));
                         Lab::WriteDurable(extractionReport.wstring(), to_string(previous.Stringify()));
-                        libraryStatus.Text(L"A extração anterior foi interrompida. Relatório marcado como inconclusivo; importe ou selecione o PKG para tentar novamente.");
+                        Find<TextBlock>(L"SettingsStatus").Text(L"A instalação anterior foi interrompida e o relatório foi marcado como inconclusivo. Selecione o PKG na Biblioteca para tentar novamente.");
                     }
-                } catch (...) { libraryStatus.Text(L"Relatório anterior de extração ilegível; arquivo preservado."); }
+                } catch (...) { Find<TextBlock>(L"SettingsStatus").Text(L"O relatório da instalação anterior está ilegível; o arquivo foi preservado."); }
             }
-            auto runtimeReport = std::filesystem::path(report->directory) / L"homebrew-runtime.json";
-            if (std::filesystem::exists(runtimeReport)) {
-                try {
-                    std::ifstream input(runtimeReport, std::ios::binary);
-                    std::string raw{std::istreambuf_iterator<char>(input), {}};
-                    auto previous = Windows::Data::Json::JsonObject::Parse(to_hstring(raw));
-                    auto stage = previous.GetNamedString(L"stage", L"unknown");
-                    auto detail = previous.GetNamedString(L"detail", L"");
-                    auto session = previous.GetNamedString(L"session_file", L"");
-                    auto message = L"Última execução · " + std::wstring(stage) + L"\n" + std::wstring(detail);
-                    if (!session.empty()) message += L"\nSessão: " + std::wstring(session);
-                    libraryStatus.Text(message);
-                } catch (...) { libraryStatus.Text(L"O registro da última execução está ilegível."); }
-            }
-            ShowLibrary(true);
-            Find<Button>(L"LibraryTab").Focus(FocusState::Programmatic);
-            StartupLog(L"Window activated; ready for explicit tests");
+            SetHomeCategory(HomeCategory::Games);
+            SetHomeFilter(HomeFilter::All);
+            ShowPage(Page::Home);
+            PopulateLibrary();
+            StartupLog(L"Window activated; home screen ready");
         } catch (hresult_error const& e) {
             StartupLog(L"OnLaunched HRESULT: " + std::to_wstring(static_cast<uint32_t>(e.code().value)) + L" " + std::wstring(e.message()));
             ShowStartupError(e.message());
@@ -648,7 +972,7 @@ struct App : ApplicationT<App> {
         }
     }
     void ShowStartupError(hstring const& message) {
-        TextBlock error; error.Text(L"Falha ao iniciar Xbox Lab: " + message);
+        TextBlock error; error.Text(L"Falha ao iniciar XS4: " + message);
         error.TextWrapping(TextWrapping::Wrap); error.Margin({48,48,48,48});
         Window::Current().Content(error); Window::Current().Activate();
     }
