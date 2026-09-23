@@ -54,7 +54,12 @@ bool AngleVideo::Start(winrt::Windows::UI::Xaml::Controls::SwapChainPanel const&
     int major{}, minor{};
     if (!initialize(display_, &major, &minor)) return fail(L"eglInitialize");
     if (!bindApi(0x30A0)) return fail(L"eglBindAPI ES");
-    const int configAttrs[] = {0x3033, 0x0004, 0x3040, 0x0004, 0x3024, 8, 0x3023, 8, 0x3022, 8, 0x3038};
+    // Prefer a window config that satisfies SDL2's common RGBA8 + D24S8
+    // minimums. EGL size requests are minima, so a D24S8 config also serves
+    // homebrews that request no depth or stencil buffer.
+    const int configAttrs[] = {0x3033, 0x0004, 0x3040, 0x0004, 0x3024, 8,
+                               0x3023, 8, 0x3022, 8, 0x3021, 8, 0x3025, 24,
+                               0x3026, 8, 0x3038};
     void* config{}; int count{};
     if (!chooseConfig(display_, configAttrs, &config, 1, &count) || count != 1)
         return fail(L"eglChooseConfig");

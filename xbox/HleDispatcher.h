@@ -59,6 +59,7 @@ public:
     void* GuestWritable(GuestCallFrame const& frame, std::uint64_t address, std::size_t bytes) noexcept;
     void const* GuestReadable(GuestCallFrame const& frame, std::uint64_t address, std::size_t bytes) noexcept;
     bool GuestString(std::uint64_t address, std::string& value, std::size_t limit = 1024) const noexcept;
+    void GraphicsLog(std::string_view line) noexcept;
     void* GraphicsAddress(std::string_view name);
     void ConfigureFileSystem(std::filesystem::path appRoot,
                              std::filesystem::path dataRoot);

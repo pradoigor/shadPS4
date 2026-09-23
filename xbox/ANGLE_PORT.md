@@ -51,3 +51,11 @@ Esta implementação ainda precisa de validação no console. O mesmo backend
 ANGLE já apresentou um quadro do host, mas nenhum quadro produzido pelo
 Apollo foi confirmado. SDL2/Piglet, fontes, entrada, áudio e serviços do
 aplicativo podem revelar outras incompatibilidades quando a execução avançar.
+
+Na execução 0.65.0.0 (`1790125280-12898234-3040`), o Apollo alcançou
+`eglGetDisplay`, `eglInitialize` e `eglChooseConfig`. As duas chamadas de
+seleção não encontraram a configuração fixa da superfície UWP; SDL2 encerrou
+com `-1` antes de criar superfície ou contexto do convidado. A versão
+0.66.0.0 solicita RGBA8 e profundidade/stencil D24S8 para a superfície do
+host e registra os atributos EGL solicitados pelo convidado no log do console.
+Isso ainda não comprova a apresentação de quadros do Apollo.

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
+#include <sstream>
 #include <tuple>
 #include <type_traits>
 
@@ -149,6 +150,8 @@ std::uint64_t Call_eglChooseConfig(HleDispatcher& d, GuestCallFrame const& f) no
     if (!graphics || !graphics->Ready() || f.gpr[0] != reinterpret_cast<std::uint64_t>(graphics->Display()) ||
         !f.gpr[4]) return 0;
     EGLint const* attrs = nullptr;
+    std::ostringstream request;
+    request << "EGL: eglChooseConfig attributes";
     if (f.gpr[1]) {
         attrs = static_cast<EGLint const*>(d.GuestReadable(f, f.gpr[1], sizeof(EGLint)));
         if (!attrs) return 0;
@@ -157,7 +160,9 @@ std::uint64_t Call_eglChooseConfig(HleDispatcher& d, GuestCallFrame const& f) no
             auto* key = static_cast<EGLint const*>(d.GuestReadable(f, f.gpr[1] + i * sizeof(EGLint), sizeof(EGLint)));
             if (!key) return 0;
             if (*key == EGL_NONE) { terminated = true; break; }
-            if (!d.GuestReadable(f, f.gpr[1] + (i + 1) * sizeof(EGLint), sizeof(EGLint))) return 0;
+            auto* value = static_cast<EGLint const*>(d.GuestReadable(f, f.gpr[1] + (i + 1) * sizeof(EGLint), sizeof(EGLint)));
+            if (!value) return 0;
+            request << " 0x" << std::hex << *key << '=' << std::dec << *value;
         }
         if (!terminated) return 0;
     }
@@ -170,6 +175,8 @@ std::uint64_t Call_eglChooseConfig(HleDispatcher& d, GuestCallFrame const& f) no
     if (!choose(graphics->Display(), attrs, matching, 512, &available)) return 0;
     bool found = std::find(matching, matching + (std::min)(available, 512), graphics->Config()) !=
                  matching + (std::min)(available, 512);
+    request << " candidates=" << available << " surface_match=" << (found ? 1 : 0);
+    d.GraphicsLog(request.str());
     *count = found ? 1 : 0;
     if (found && f.gpr[2] && static_cast<std::int32_t>(f.gpr[3]) > 0) {
         auto* config = static_cast<EGLConfig*>(d.GuestWritable(f, f.gpr[2], sizeof(EGLConfig)));

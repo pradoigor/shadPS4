@@ -281,6 +281,11 @@ void const* HleDispatcher::GuestReadable(GuestCallFrame const& frame, std::uint6
 bool HleDispatcher::GuestString(std::uint64_t address, std::string& value, std::size_t limit) const noexcept {
     return ReadGuestString(address, value, limit);
 }
+void HleDispatcher::GraphicsLog(std::string_view line) noexcept {
+    AppendConsole(line.data(), line.size());
+    static constexpr char newline = '\n';
+    AppendConsole(&newline, 1);
+}
 
 void HleDispatcher::ConfigureFileSystem(std::filesystem::path appRoot,
                                         std::filesystem::path dataRoot) {
