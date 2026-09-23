@@ -16,16 +16,21 @@ implementado.
 A build `35799790663` compilou `libEGL.dll` e `libGLESv2.dll` UWP x64. A
 versão `0.63.0.0` inclui os binários em `xbox/third_party/angle` e os copia
 para o APPX após verificar os hashes; a licença e a proveniência também vão
-no pacote. As DLLs ainda não são chamadas pelo runtime, portanto essa versão
-não muda a execução do Apollo.
+no pacote. A versão `0.64.0.0` usa as DLLs num `SwapChainPanel` UWP. No Xbox,
+o relatório `report-export-1790123324.json` registrou EGL 1.5, GLES2 e
+`eglSwapBuffers` aprovado em 960×540; o usuário confirmou que o quadro
+apareceu. O mesmo relatório registrou o Apollo encerrando com `-1`: o teste
+prova a apresentação gráfica do host, não a tradução da API gráfica PS4.
 
-Para a integração, o próximo trabalho é ligar `libEGL` e `libGLESv2` ao
-dispatcher SysV, traduzir os tipos e ponteiros da ABI convidada, criar uma
-`SwapChainPanel` na UI UWP e conectar `eglCreateWindowSurface` a ela. A chamada
-de configuração Piglet só pode passar a retornar sucesso quando o backend
-gráfico estiver pronto. O carregamento de módulos do sistema PS4 também
-precisa de uma política HLE própria; não se deve carregar SPRX do firmware
-como DLL nativa do Xbox.
+O código-fonte público do Apollo vincula SDL2 e `libScePigletv2VSH` ao ELF.
+O trace da versão `0.64.0.0` chega a `sceKernelLoadStartModule` e
+`scePigletSetConfigurationVSH`; ambas estão sem handler. Para a integração,
+o próximo trabalho é ligar EGL/GLES do convidado ao dispatcher SysV, traduzir
+os tipos e ponteiros da ABI convidada e compartilhar a superfície UWP já
+validada. A chamada de configuração Piglet só pode passar a retornar sucesso
+quando esse backend estiver disponível para o convidado. O carregamento de
+módulos do sistema PS4 também precisa de uma política HLE própria; não se
+deve carregar SPRX do firmware como DLL nativa do Xbox.
 
 O caminho GNM do shadPS4, usado por jogos, permanece separado: o renderer
 Vulkan desktop não é substituído pelo ANGLE. Ele precisará de um backend
