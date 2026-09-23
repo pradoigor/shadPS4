@@ -29,6 +29,9 @@ class PackageValidationTests(unittest.TestCase):
         }
         angle_binaries = {'libEGL.dll': b'egl-fixture', 'libGLESv2.dll': b'gles-fixture'}
         self.files.update(angle_binaries)
+        for name in ['Fonts/NotoSans-Regular.ttf', 'Fonts/NotoSansCJK-Regular.ttc',
+                     'Licenses/Noto-OFL.txt', 'Licenses/FreeType-GPLv2.txt', 'Licenses/font-notices.md']:
+            self.files[name] = b'fixture'
         self.files['Licenses/ANGLE.txt'] = b'license-fixture'
         self.files['Licenses/ANGLE-build-info.json'] = json.dumps({
             'target_os': 'winuwp', 'target_cpu': 'x64',
@@ -82,6 +85,11 @@ class PackageValidationTests(unittest.TestCase):
     def test_rejects_modified_angle_binary(self):
         self.files['libEGL.dll'] = b'modified'
         with self.assertRaisesRegex(ValueError, 'ANGLE binary mismatch'):
+            validate(*self.write())
+
+    def test_rejects_missing_runtime_font(self):
+        del self.files['Fonts/NotoSans-Regular.ttf']
+        with self.assertRaisesRegex(ValueError, 'runtime font'):
             validate(*self.write())
 
 

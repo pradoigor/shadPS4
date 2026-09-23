@@ -22,6 +22,8 @@
 
 namespace Lab {
 class AngleVideo;
+struct GuestFontState;
+struct GuestDeviceState;
 
 struct HleResolution {
     std::string symbol;
@@ -56,6 +58,11 @@ public:
     void AttachGuestMemory(GuestMemory* memory) noexcept { memory_ = memory; }
     void AttachGraphics(AngleVideo* graphics) noexcept { graphics_ = graphics; }
     AngleVideo* Graphics() const noexcept { return graphics_; }
+    std::shared_ptr<GuestFontState>& FontState() noexcept { return fonts_; }
+    std::shared_ptr<GuestDeviceState>& DeviceState() noexcept { return devices_; }
+    bool GuestFilePath(std::string const& path, bool write, std::filesystem::path& host) const noexcept {
+        return ResolveGuestPath(path, write, host);
+    }
     void* GuestWritable(GuestCallFrame const& frame, std::uint64_t address, std::size_t bytes) noexcept;
     void const* GuestReadable(GuestCallFrame const& frame, std::uint64_t address, std::size_t bytes) noexcept;
     bool GuestString(std::uint64_t address, std::string& value, std::size_t limit = 1024) const noexcept;
@@ -78,6 +85,8 @@ private:
         void* address{};
     };
     AngleVideo* graphics_{};
+    std::shared_ptr<GuestFontState> fonts_;
+    std::shared_ptr<GuestDeviceState> devices_;
 
     static std::uint64_t Dispatch(void* context, std::uint64_t slot,
                                   GuestCallFrame const* frame, void* guestStack) noexcept;

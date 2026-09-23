@@ -46,10 +46,13 @@
     <Link>
       <SubSystem>Windows</SubSystem><GenerateDebugInformation>true</GenerateDebugInformation>
       <GenerateWindowsMetadata>false</GenerateWindowsMetadata>
-      <AdditionalDependencies>WindowsApp.lib;bcrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>WindowsApp.lib;bcrypt.lib;xaudio2.lib;$(ProjectDir)obj\fonts-uwp\Release\guest-fonts.lib;$(ProjectDir)obj\fonts-uwp\freetype\Release\freetype.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="GuestFreeType.cpp" />
+    <ClCompile Include="GuestDevices.cpp" /><ClInclude Include="GuestDevices.h" />
+    <ClInclude Include="GuestFreeType.h" /><ClInclude Include="GuestFontLibrary.h" /><ClInclude Include="GuestFontAbi.h" />
     <ClCompile Include="GuestGraphics.cpp" /><ClCompile Include="AngleVideo.cpp" /><ClCompile Include="PkgCrypto.cpp" /><ClCompile Include="PkgExtractor.cpp" /><ClCompile Include="PkgBuiltinKeys.cpp" /><ClCompile Include="..\externals\miniz\miniz_tinfl.c" /><ClCompile Include="..\externals\miniz\miniz.c" /><ClCompile Include="App.cpp" /><ClCompile Include="ControlledLoader.cpp" /><ClCompile Include="GuestMemory.cpp" /><ClCompile Include="HomebrewRuntime.cpp" /><ClCompile Include="RuntimeGate.cpp" /><ClCompile Include="SysvThunk.cpp" /><ClCompile Include="HleDispatcher.cpp" /><ClCompile Include="..\src\core\aerolib\aerolib.cpp" /><ClCompile Include="PkgProbe.cpp" /><ClCompile Include="Probes.cpp" /><ClCompile Include="Report.cpp" />
     <ClInclude Include="GuestGraphics.h" /><ClInclude Include="AngleVideo.h" /><ClInclude Include="ControlledLoader.h" /><ClInclude Include="GuestMemory.h" /><ClInclude Include="HomebrewRuntime.h" /><ClInclude Include="RuntimeGate.h" /><ClInclude Include="SysvThunk.h" /><ClInclude Include="HleDispatcher.h" /><ClInclude Include="PkgProbe.h" /><ClInclude Include="Probes.h" /><ClInclude Include="Report.h" /><ClInclude Include="BuildInfo.h" />
     <AppxManifest Include="Package.appxmanifest" />

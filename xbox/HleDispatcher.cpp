@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "HleDispatcher.h"
 #include "GuestGraphics.h"
+#include "GuestFreeType.h"
+#include "GuestDevices.h"
 
 #include "core/aerolib/aerolib.h"
 
@@ -124,6 +126,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     auto use = [&](HleHandler value) { handler = value; implemented = true; };
     if (name == "sceKernelUsleep") use(&KernelUsleep);
     if (auto graphics = LookupGraphicsHandler(name)) use(graphics);
+    if (auto font = LookupFreeTypeHandler(name)) use(font);
     if (name == "sysKernelGetUpdVersion") handler = &KernelGetUpdVersion;
     if (name == "sysKernelGetLowerLimitUpdVersion") handler = &KernelGetLowerLimitUpdVersion;
     if (name == "getpid") handler = &KernelGetPid;
@@ -218,15 +221,12 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sysconf") use(&KernelSysconf);
     if (name == "sceKernelGetFsSandboxRandomWord") use(&KernelSandboxWord);
     if (name == "_nanosleep") use(&KernelNanosleep);
-    if (name == "sceAudioOutOpen" || name == "scePadOpen") use(&GenericHandle);
     if (name == "setuid" || name == "madvise" || name == "fchmod" ||
         name == "sceSysmoduleLoadModule" ||
         name == "sceSysmoduleLoadModuleInternal" ||
         name == "sceSysmoduleUnloadModuleInternal" ||
         name == "sceCommonDialogInitialize" ||
-        name == "sceAudioOutInit" || name == "sceAudioOutClose" ||
-        name == "sceAudioOutOutput" || name == "scePadInit" ||
-        name == "scePadClose" || name == "sceUserServiceGetRegisteredUserIdList" ||
+        name == "sceUserServiceGetRegisteredUserIdList" ||
         name == "sceUserServiceGetNpAccountId" ||
         name == "sceSystemServiceParamGetString" ||
         name == "sceKernelSync" || name == "pthread_setcancelstate" ||
@@ -234,6 +234,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
         name == "__pthread_cleanup_push_imp" ||
         name == "__pthread_cleanup_pop_imp" ||
         name == "pthread_set_name_np") use(&GenericSuccess);
+    if (auto device = LookupDeviceHandler(name)) use(device);
 
     const auto slot = static_cast<std::uint64_t>(entries_.size());
     entries_.push_back(Entry{encoded, nid, name, implemented, handler, nullptr});
@@ -353,6 +354,15 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
     auto writeTrace = [&](char const* phase, std::uint64_t result,
                           bool includeResult) noexcept {
         if (self->tracePath_.empty()) return;
+        // Preserve startup in full; avoid synchronous disk writes for every
+        // glyph/GL call once the render loop starts. Always retain guest errors,
+        // missing services, presentation and exit, even after the startup cap.
+        const bool failure = includeResult &&
+            ((result <= UINT32_MAX && (result & 0x80000000u)) || result == UINT64_MAX ||
+             (entry.name.starts_with("FT_") && entry.name != "FT_Get_Char_Index" && result != 0));
+        if (sequence > 32768 && entry.implemented && !failure &&
+            entry.name != "eglSwapBuffers" && entry.name != "_exit" && sequence % 512 != 0)
+            return;
         try {
             std::scoped_lock traceLock(self->traceMutex_);
             std::ofstream latest(self->tracePath_, std::ios::binary | std::ios::trunc);
@@ -375,7 +385,13 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
             };
             write(latest);
             latest.flush();
-            if (sequence <= 32768) {
+            {
+                if (sequence % 4096 == 0 && !includeResult) {
+                    std::error_code ignored;
+                    std::filesystem::copy_file(self->traceHistoryPath_, self->traceHistoryPath_.wstring() + L".previous",
+                        std::filesystem::copy_options::overwrite_existing, ignored);
+                    std::ofstream reset(self->traceHistoryPath_, std::ios::binary | std::ios::trunc);
+                }
                 std::ofstream history(self->traceHistoryPath_,
                                       std::ios::binary | std::ios::app);
                 write(history);

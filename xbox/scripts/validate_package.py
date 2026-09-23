@@ -23,6 +23,10 @@ def validate(package, info_path):
         for name in ['AppxManifest.xml', 'AppxSignature.p7x', 'MainPage.xaml', 'ShadPS4Xbox.exe']:
             if name not in names:
                 raise ValueError(f'Missing packaged resource: {name}')
+        for name in ['Fonts/NotoSans-Regular.ttf', 'Fonts/NotoSansCJK-Regular.ttc',
+                     'Licenses/Noto-OFL.txt', 'Licenses/FreeType-GPLv2.txt', 'Licenses/font-notices.md']:
+            if name not in names or not appx.read(name):
+                raise ValueError(f'Missing runtime font or license: {name}')
         manifest = ET.fromstring(appx.read('AppxManifest.xml'))
         identity = manifest.find('p:Identity', NS)
         if identity.attrib['Name'] != IDENTITY or identity.attrib['ProcessorArchitecture'] != 'x64':

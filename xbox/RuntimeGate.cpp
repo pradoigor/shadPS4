@@ -73,15 +73,9 @@ RuntimeGateResult EvaluateRuntimeGate(ControlledLoadResult const &load) {
 
   for (auto const &encoded : load.import_library_names) {
     const auto name = LibraryName(encoded);
-    if (name == L"libScePigletv2VSH")
-      Add(unique, result.blockers,
-          L"O renderer Piglet EGL/OpenGL ainda precisa de backend Direct3D "
-          L"UWP.");
-    else if (name == L"libSceFreeType")
-      Add(unique, result.blockers,
-          L"O backend FreeType importado pelo homebrew ainda não está ligado "
-          L"ao UWP.");
-    else if (name == L"libSceRegMgr" && !load.hle_regmgr_probe_passed)
+    // Graphics and FreeType availability is determined per imported function
+    // by hle_handlers_unimplemented above, rather than rejecting the library.
+    if (name == L"libSceRegMgr" && !load.hle_regmgr_probe_passed)
       Add(unique, result.blockers,
           L"O serviço RegMgr ainda não possui uma implementação HLE UWP.");
   }
