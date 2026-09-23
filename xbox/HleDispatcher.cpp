@@ -237,7 +237,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
         name == "pthread_set_name_np") use(&GenericSuccess);
 
     const auto slot = static_cast<std::uint64_t>(entries_.size());
-    entries_.push_back(Entry{encoded, nid, implemented, handler, nullptr});
+    entries_.push_back(Entry{encoded, nid, name, implemented, handler, nullptr});
     entries_.back().address = thunks_.Create(this, slot, &Dispatch);
     return HleResolution{encoded, nid, entries_.back().implemented, entries_.back().address};
 }
@@ -335,6 +335,7 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
                        << ",\"phase\":\"" << phase
                        << "\",\"symbol\":\"" << entry.encoded
                        << "\",\"nid\":\"" << entry.nid
+                       << "\",\"name\":\"" << entry.name
                        << "\",\"implemented\":"
                        << (entry.implemented ? "true" : "false")
                        << ",\"arguments\":[" << frame->gpr[0] << ','

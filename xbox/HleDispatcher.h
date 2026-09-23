@@ -64,6 +64,7 @@ private:
     struct Entry {
         std::string encoded;
         std::string nid;
+        std::string name;
         bool implemented{};
         HleHandler handler{};
         void* address{};
