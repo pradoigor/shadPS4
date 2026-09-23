@@ -105,12 +105,22 @@ EGL_FORWARD(eglGetConfigAttrib)
 EGL_FORWARD(eglGetError)
 EGL_FORWARD(eglQueryAPI)
 EGL_FORWARD(eglQueryString)
-EGL_FORWARD(eglSwapBuffers)
 EGL_FORWARD(eglSwapInterval)
 EGL_FORWARD(eglWaitGL)
 EGL_FORWARD(eglWaitNative)
 EGL_FORWARD(eglCreatePbufferSurface)
 #undef EGL_FORWARD
+
+std::uint64_t Call_eglSwapBuffers(HleDispatcher& d, GuestCallFrame const& f) noexcept {
+    auto result = ForwardEgl<&::eglSwapBuffers>(d, f, "eglSwapBuffers");
+    static thread_local std::uint64_t frames{};
+    if (result && ++frames <= 3) {
+        d.GraphicsLog("EGL: quadro apresentado pelo homebrew #" + std::to_string(frames));
+    } else if (!result) {
+        d.GraphicsLog("EGL: eglSwapBuffers falhou");
+    }
+    return result;
+}
 
 std::uint64_t Call_sceKernelLoadStartModule(HleDispatcher& d, GuestCallFrame const& f) noexcept {
     auto* graphics = d.Graphics();

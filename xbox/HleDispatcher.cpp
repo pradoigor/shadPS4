@@ -375,7 +375,7 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
             };
             write(latest);
             latest.flush();
-            if (sequence <= 4096) {
+            if (sequence <= 32768) {
                 std::ofstream history(self->traceHistoryPath_,
                                       std::ios::binary | std::ios::app);
                 write(history);

@@ -16,7 +16,9 @@
 #include <array>
 #include <fstream>
 #include <iterator>
+#include <set>
 #include <chrono>
+#include <deque>
 #include <winrt/Windows.ApplicationModel.h>
 #include <winrt/Windows.ApplicationModel.Activation.h>
 #include <winrt/Windows.Foundation.h>
@@ -53,12 +55,13 @@ static void StartupLog(std::wstring const& message) noexcept {
 struct App : ApplicationT<App> {
     std::unique_ptr<Lab::Report> report;
     Grid root{nullptr}; Grid libraryView{nullptr}, diagnosticsView{nullptr};
-    ListView list{nullptr}, libraryList{nullptr};
+    ListView list{nullptr}, installedList{nullptr}, pendingList{nullptr};
     TextBlock status{nullptr}, details{nullptr}, libraryStatus{nullptr};
     DispatcherTimer timer{nullptr};
     bool busy{}, refreshing{}, persistenceFailed{};
     struct LibraryItem { std::wstring name, path; bool installed{}; };
     std::vector<LibraryItem> libraryItems;
+    std::vector<size_t> installedIndices, pendingIndices;
     std::wstring selectedLoaderPath;
     std::shared_ptr<Lab::InstallProgress> extraction;
     std::unique_ptr<Lab::HomebrewRuntime> homebrew;
@@ -117,10 +120,27 @@ struct App : ApplicationT<App> {
         } catch (...) { libraryStatus.Text(L"Não foi possível importar: JSON inválido ou conjuntos RSA-2048 incompletos. As chaves anteriores foram preservadas."); }
         importing = false;
     }
+    int SelectedLibraryIndex() const {
+        auto index = installedList.SelectedIndex();
+        if (index >= 0 && static_cast<size_t>(index) < installedIndices.size())
+            return static_cast<int>(installedIndices[index]);
+        index = pendingList.SelectedIndex();
+        if (index >= 0 && static_cast<size_t>(index) < pendingIndices.size())
+            return static_cast<int>(pendingIndices[index]);
+        return -1;
+    }
     void LibrarySelection() {
-        auto index = libraryList.SelectedIndex();
-        if (index < 0 || static_cast<size_t>(index) >= libraryItems.size()) return;
-        auto const& item = libraryItems[index];
+        auto index = SelectedLibraryIndex();
+        if (index < 0 || static_cast<size_t>(index) >= libraryItems.size()) {
+            selectedLoaderPath.clear();
+            Find<TextBlock>(L"ContentTitle").Text(L"Selecione um conteúdo");
+            Find<TextBlock>(L"ContentState").Text(L"Nenhum item selecionado.");
+            Find<TextBlock>(L"ContentDetails").Text(L"Escolha um item em uma das seções acima.");
+            for (auto const* name : {L"LaunchContent", L"ExtractContent", L"ValidateContent"})
+                Find<Button>(name).Visibility(Visibility::Collapsed);
+            return;
+        }
+        auto const& item = libraryItems[static_cast<size_t>(index)];
         selectedLoaderPath.clear();
         if (item.installed) {
             auto eboot = std::filesystem::path(item.path) / L"eboot.bin";
@@ -131,13 +151,27 @@ struct App : ApplicationT<App> {
             if (extension == L".elf" || extension == L".self" || extension == L".bin")
                 selectedLoaderPath = item.path;
         }
-        Find<TextBlock>(L"ContentTitle").Text(item.name);
-        Find<TextBlock>(L"ContentDetails").Text(item.installed ? L"Conteúdo extraído e persistido neste Xbox. Use Iniciar homebrew para carregar e transferir o controle ao eboot.bin real." : DescribeContent(item.path));
         auto extension = std::filesystem::path(item.path).extension().wstring();
         for (auto& c : extension) c = towlower(c);
-        Find<Button>(L"ExtractContent").IsEnabled(!extraction && !importing && !item.installed && extension == L".pkg");
-        Find<Button>(L"ValidateContent").IsEnabled(!extraction && !importing && !selectedLoaderPath.empty());
-        Find<Button>(L"LaunchContent").IsEnabled(!extraction && !importing && item.installed && !selectedLoaderPath.empty() && !(homebrew && homebrew->running()));
+        const bool package = !item.installed && extension == L".pkg";
+        const bool looseExecutable = !item.installed && !selectedLoaderPath.empty();
+        auto launch = Find<Button>(L"LaunchContent");
+        auto extract = Find<Button>(L"ExtractContent");
+        auto validate = Find<Button>(L"ValidateContent");
+        launch.Visibility(item.installed ? Visibility::Visible : Visibility::Collapsed);
+        extract.Visibility(package ? Visibility::Visible : Visibility::Collapsed);
+        validate.Visibility(looseExecutable ? Visibility::Visible : Visibility::Collapsed);
+        launch.IsEnabled(!extraction && !importing && !selectedLoaderPath.empty() && !(homebrew && homebrew->running()));
+        extract.IsEnabled(!extraction && !importing && package);
+        validate.IsEnabled(!extraction && !importing && looseExecutable);
+        Find<TextBlock>(L"ContentTitle").Text(item.name);
+        Find<TextBlock>(L"ContentState").Text(item.installed ? L"INSTALADO · pronto para iniciar" :
+            package ? L"PKG IMPORTADO · extração necessária" : L"ARQUIVO AVULSO · validação técnica");
+        Find<TextBlock>(L"ContentDetails").Text(item.installed ?
+            (selectedLoaderPath.empty() ? L"Instalação incompleta: eboot.bin ausente." :
+             L"Conteúdo extraído e persistido. A execução PS4 ainda está em desenvolvimento.") :
+            package ? L"Este pacote está na biblioteca, mas ainda não foi extraído. Selecione Extrair e instalar PKG." :
+            DescribeContent(item.path));
     }
     void ValidateSelectedContent() {
         if (selectedLoaderPath.empty()) {
@@ -202,14 +236,16 @@ struct App : ApplicationT<App> {
     }
     fire_and_forget ExtractContent() {
         auto lifetime = get_strong();
-        auto index = libraryList.SelectedIndex();
+        auto index = SelectedLibraryIndex();
         if (extraction || importing || index < 0 || static_cast<size_t>(index) >= libraryItems.size() || libraryItems[index].installed) co_return;
         auto item = libraryItems[index];
         auto state = std::make_shared<Lab::InstallProgress>();
         extraction = state;
         Find<Button>(L"ExtractContent").IsEnabled(false);
         Find<Button>(L"SelectContent").IsEnabled(false); Find<Button>(L"ImportKeys").IsEnabled(false);
+        Find<Button>(L"CancelExtraction").Visibility(Visibility::Visible);
         Find<Button>(L"CancelExtraction").IsEnabled(true);
+        Find<ProgressBar>(L"InstallProgress").Visibility(Visibility::Visible);
         auto started = Lab::Now();
         std::wstring error, destination;
         bool completed = false;
@@ -252,6 +288,8 @@ struct App : ApplicationT<App> {
         extraction.reset();
         Find<Button>(L"SelectContent").IsEnabled(true); Find<Button>(L"ImportKeys").IsEnabled(true);
         Find<Button>(L"CancelExtraction").IsEnabled(false);
+        Find<Button>(L"CancelExtraction").Visibility(Visibility::Collapsed);
+        Find<ProgressBar>(L"InstallProgress").Visibility(Visibility::Collapsed);
         Find<ProgressBar>(L"InstallProgress").Value(completed ? 100 : 0);
         PopulateLibrary();
     }
@@ -290,42 +328,56 @@ struct App : ApplicationT<App> {
             auto local = Windows::Storage::ApplicationData::Current().LocalFolder();
             auto folder = co_await local.CreateFolderAsync(L"Library", Windows::Storage::CreationCollisionOption::OpenIfExists);
             auto files = co_await folder.GetFilesAsync();
-            libraryList.Items().Clear();
+            installedIndices.clear(); pendingIndices.clear();
+            installedList.Items().Clear(); pendingList.Items().Clear();
             libraryItems.clear();
             auto add = [&](std::wstring name, std::wstring path, bool installed) {
+                auto index = libraryItems.size();
                 libraryItems.push_back({name, path, installed});
-                StackPanel card; card.Width(208); card.Spacing(12); card.Margin({10, 14, 10, 14});
-                Border art; art.Width(208); art.Height(174);
+                auto& indices = installed ? installedIndices : pendingIndices;
+                indices.push_back(index);
+                StackPanel card; card.Width(142); card.Spacing(5); card.Margin({7, 7, 7, 7});
+                Border art; art.Width(142); art.Height(100);
                 art.Background(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 12, 75, 167)));
                 TextBlock glyph; glyph.Text(installed ? L"\xE7FC" : L"\xE8B7"); glyph.FontFamily(Media::FontFamily(L"Segoe MDL2 Assets"));
-                glyph.FontSize(64); glyph.HorizontalAlignment(HorizontalAlignment::Center); glyph.VerticalAlignment(VerticalAlignment::Center); art.Child(glyph);
+                glyph.FontSize(38); glyph.HorizontalAlignment(HorizontalAlignment::Center); glyph.VerticalAlignment(VerticalAlignment::Center); art.Child(glyph);
                 auto iconPath = std::filesystem::path(path) / L"sce_sys" / L"icon0.png";
                 if (installed && std::filesystem::is_regular_file(iconPath) && std::filesystem::file_size(iconPath) <= 8 * 1024 * 1024) {
                     Image image;
                     auto folderName = std::filesystem::path(path).filename().wstring();
                     Media::Imaging::BitmapImage cover;
-                    cover.DecodePixelWidth(416); cover.DecodePixelHeight(348);
+                    cover.DecodePixelWidth(284); cover.DecodePixelHeight(200);
                     cover.UriSource(Uri(L"ms-appdata:///local/Installed/" + folderName + L"/sce_sys/icon0.png"));
                     image.Source(cover);
                     image.Stretch(Media::Stretch::UniformToFill); art.Child(image);
                 }
                 card.Children().Append(art);
-                TextBlock title; title.Text(name); title.FontSize(19); title.MaxLines(2); title.TextWrapping(TextWrapping::Wrap); card.Children().Append(title);
-                TextBlock badge; badge.Text(installed ? L"EXTRAÍDO" : L"IMPORTADO"); badge.FontSize(12); card.Children().Append(badge);
-                libraryList.Items().Append(card);
+                TextBlock title; title.Text(name); title.FontSize(13); title.MaxLines(1); title.TextTrimming(TextTrimming::CharacterEllipsis); card.Children().Append(title);
+                TextBlock badge; badge.Text(installed ? L"INSTALADO" :
+                    (std::filesystem::path(path).extension() == L".pkg" ? L"PKG · A EXTRAIR" : L"ARQUIVO AVULSO"));
+                badge.FontSize(10); badge.Foreground(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 154, 233, 255))); card.Children().Append(badge);
+                (installed ? installedList : pendingList).Items().Append(card);
             };
             auto installed = co_await local.CreateFolderAsync(L"Installed", Windows::Storage::CreationCollisionOption::OpenIfExists);
             auto folders = co_await installed.GetFoldersAsync();
+            std::set<std::wstring> installedPackages;
             for (auto const& game : folders) {
                 auto titlePath = std::filesystem::path(game.Path().c_str()) / L"library-name.txt";
                 std::ifstream titleFile(titlePath, std::ios::binary);
                 std::string name{std::istreambuf_iterator<char>(titleFile), {}};
-                add(name.empty() ? std::wstring(game.Name()) : std::wstring(to_hstring(name)), std::wstring(game.Path()), true);
+                auto title = name.empty() ? std::wstring(game.Name()) : std::wstring(to_hstring(name));
+                installedPackages.insert(title);
+                add(title, std::wstring(game.Path()), true);
             }
             for (auto const& file : files) {
+                if (file.FileType() == L".pkg" && installedPackages.contains(std::wstring(file.Name()))) continue;
                 add(std::wstring(file.Name()), std::wstring(file.Path()), false);
             }
-            if (!libraryItems.empty()) libraryList.SelectedIndex(0);
+            Find<TextBlock>(L"InstalledHeading").Text(L"INSTALADOS · " + std::to_wstring(installedIndices.size()));
+            Find<TextBlock>(L"PendingHeading").Text(L"A EXTRAIR / ARQUIVOS AVULSOS · " + std::to_wstring(pendingIndices.size()));
+            if (!installedIndices.empty()) installedList.SelectedIndex(0);
+            else if (!pendingIndices.empty()) pendingList.SelectedIndex(0);
+            else LibrarySelection();
         } catch (hresult_error const& e) {
             libraryStatus.Text(L"Falha ao listar a biblioteca: " + e.message());
         } catch (...) { libraryStatus.Text(L"Não foi possível ler a biblioteca local."); }
@@ -394,7 +446,7 @@ struct App : ApplicationT<App> {
         anglePending = false; angleActive = false;
         angleVideo.Stop();
         Find<Grid>(L"AngleTestView").Visibility(Visibility::Collapsed);
-        Find<Button>(L"TestAngle").Focus(FocusState::Programmatic);
+        Find<Button>(L"LibraryTab").Focus(FocusState::Programmatic);
     }
     void OnLaunched(Windows::ApplicationModel::Activation::LaunchActivatedEventArgs const&) {
         StartupLog(L"OnLaunched entered");
@@ -407,7 +459,9 @@ struct App : ApplicationT<App> {
             StartupLog(L"Loading MainPage.xaml");
             root = Markup::XamlReader::Load(to_hstring(xaml)).as<Grid>();
             libraryView = Find<Grid>(L"LibraryView"); diagnosticsView = Find<Grid>(L"DiagnosticsView");
-            list = Find<ListView>(L"Tests"); libraryList = Find<ListView>(L"LibraryList");
+            list = Find<ListView>(L"Tests");
+            installedList = Find<ListView>(L"InstalledList");
+            pendingList = Find<ListView>(L"PendingList");
             status = Find<TextBlock>(L"Status"); details = Find<TextBlock>(L"Details");
             libraryStatus = Find<TextBlock>(L"LibraryStatus");
             StartupLog(L"XAML loaded; opening report");
@@ -426,7 +480,14 @@ struct App : ApplicationT<App> {
             Find<Button>(L"TestAngle").Click([this](auto const&, auto const&) { StartAngleTest(); });
             Find<Button>(L"CloseAngleTest").Click([this](auto const&, auto const&) { FinishAngleTest(); });
             Find<Button>(L"CancelExtraction").Click([this](auto const&, auto const&) { if (extraction) extraction->cancel.store(true); });
-            libraryList.SelectionChanged([this](auto const&, auto const&) { LibrarySelection(); });
+            installedList.SelectionChanged([this](auto const&, auto const&) {
+                if (installedList.SelectedIndex() >= 0) pendingList.SelectedIndex(-1);
+                LibrarySelection();
+            });
+            pendingList.SelectionChanged([this](auto const&, auto const&) {
+                if (pendingList.SelectedIndex() >= 0) installedList.SelectedIndex(-1);
+                LibrarySelection();
+            });
             Find<Button>(L"Export").Click([this](auto const&, auto const&) {
                 if (!Save()) return;
                 try {
@@ -454,11 +515,14 @@ struct App : ApplicationT<App> {
                         if (std::filesystem::is_regular_file(path)) {
                             std::ifstream input(path, std::ios::binary);
                             std::string line;
-                            while (events.Size() < 8192 && std::getline(input, line)) {
+                            std::deque<Windows::Data::Json::JsonObject> recent;
+                            while (std::getline(input, line)) {
                                 try {
-                                    events.Append(Windows::Data::Json::JsonObject::Parse(to_hstring(line)));
+                                    recent.push_back(Windows::Data::Json::JsonObject::Parse(to_hstring(line)));
+                                    if (recent.size() > 8192) recent.pop_front();
                                 } catch (...) {}
                             }
+                            for (auto const& event : recent) events.Append(event);
                         }
                         debug.SetNamedValue(field, events);
                     };
@@ -540,7 +604,7 @@ struct App : ApplicationT<App> {
                         libraryStatus.Text(L"Homebrew encerrado. Exporte o relatório para análise.");
                         Find<TextBlock>(L"AngleStatus").Text(L"Homebrew encerrado. Volte à biblioteca e exporte o relatório.");
                     }
-                    Find<Button>(L"LaunchContent").IsEnabled(!selectedLoaderPath.empty());
+                    LibrarySelection();
                 }
             });
             timer.Start();
