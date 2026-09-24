@@ -95,6 +95,8 @@ struct App : ApplicationT<App> {
     int homeFocusedIndex{-1};
     HomeFocusArea homeFocusArea{HomeFocusArea::Tabs};
     int homeFocusIndex{};
+    Sys::VirtualKey lastHomeDirection{Sys::VirtualKey::None};
+    std::chrono::steady_clock::time_point lastHomeMove{};
     std::wstring selectedLoaderPath;
     std::shared_ptr<Lab::InstallProgress> extraction;
     std::unique_ptr<Lab::HomebrewRuntime> homebrew;
@@ -860,7 +862,13 @@ struct App : ApplicationT<App> {
     void OnGamepadKey(Core::CoreWindow const&, Core::KeyEventArgs const& args) {
         // The guest polls the physical pad directly. Do not also navigate XS4
         // when B/Menu are pressed inside a running title.
-        if (homebrew && homebrew->running()) return;
+        if (homebrew && homebrew->running()) {
+            // The guest reads the physical pad through scePadReadState. Consume
+            // the parallel UWP key event so Xbox does not treat B as Back and
+            // close the host while the guest is still displaying a menu.
+            args.Handled(true);
+            return;
+        }
         const auto key = args.VirtualKey();
         bool handled = true;
         int dx{}, dy{};
@@ -878,7 +886,12 @@ struct App : ApplicationT<App> {
                  key == Sys::VirtualKey::Down) dy = 1;
         if (currentPage == Page::Home && (dx || dy) &&
             Find<Grid>(L"AngleTestView").Visibility() != Visibility::Visible) {
-            NavigateHome(dx, dy);
+            const auto now = std::chrono::steady_clock::now();
+            if (key != lastHomeDirection || now - lastHomeMove >= std::chrono::milliseconds(150)) {
+                lastHomeDirection = key;
+                lastHomeMove = now;
+                NavigateHome(dx, dy);
+            }
         } else if (key == Sys::VirtualKey::GamepadB) {
             const bool angleVisible = Find<Grid>(L"AngleTestView").Visibility() == Visibility::Visible;
             if (angleVisible && !(homebrew && homebrew->running()) && !homebrewLaunchPending)
@@ -938,6 +951,9 @@ struct App : ApplicationT<App> {
     }
     void OnLaunched(Windows::ApplicationModel::Activation::LaunchActivatedEventArgs const&) {
         StartupLog(L"OnLaunched entered");
+        // Xbox defaults UWP apps to gamepad-driven mouse mode. Hiding its
+        // cursor does not switch to D-pad/left-stick focus navigation.
+        RequiresPointerMode(ApplicationRequiresPointerMode::WhenRequested);
         if (root) { Window::Current().Activate(); return; }
         try {
             auto path = std::filesystem::path(Windows::ApplicationModel::Package::Current().InstalledLocation().Path().c_str()) / L"MainPage.xaml";

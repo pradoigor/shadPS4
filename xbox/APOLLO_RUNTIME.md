@@ -1,4 +1,4 @@
-# Apollo no runtime UWP — versão 0.80
+# Apollo no runtime UWP — versão 0.81
 
 ## Resultado do teste 0.71
 
@@ -175,6 +175,28 @@ D-pad, analógico esquerdo e setas: abas, botões superiores, filtros e cards de
 títulos. Quando a categoria não tem títulos, o foco chega ao botão de importar.
 O botão A continua acionando o controle em foco; o convidado mantém o controle
 físico durante a execução.
+
+## Correção de entrada da versão 0.81
+
+As fotos da 0.80 mostram o menu do Apollo funcionando, mas com regiões opacas
+atrás de fontes e ícones. O log da sessão `1790219005-13512734-7028` confirma
+que o Apollo envia texturas RGBA e que o desenho de texto ativa blend com
+`SRC_ALPHA`/`ONE_MINUS_SRC_ALPHA`. Portanto, blend simplesmente desligado não
+explica os blocos. A 0.81 registra amostras dos quatro canais dos uploads e o
+GLSL dos três shaders iniciais para localizar o alfa ou a conversão de cor.
+
+No menu do XS4, a 0.80 ainda apresentava movimento impreciso tanto ao descer
+das abas quanto entre cards. O Xbox usa mouse mode por padrão em aplicativos
+UWP; ocultar o cursor não muda esse modo. A 0.81 define
+`RequiresPointerMode=WhenRequested` para ativar a navegação de foco com D-pad e
+analógico esquerdo. O mapeamento explícito da tela inicial permanece e repetições
+da mesma direção em menos de 150 ms são ignoradas para evitar saltos.
+
+Durante a execução convidada, a tecla B agora é marcada como tratada no evento
+UWP; o `scePadReadState` continua recebendo o botão físico. Antes, o evento
+não tratado também podia acionar o Back do host e fechar o XS4. No menu
+principal do próprio Apollo, Círculo/B solicita saída por diálogo; isso é
+comportamento do homebrew e não deve fechar o host sem confirmação.
 
 ## O que falta confirmar
 

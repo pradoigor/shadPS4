@@ -121,9 +121,9 @@ std::uint64_t Call_glTexImage2D(HleDispatcher& d,
                       "GL: texImage2D internal=0x%x size=%dx%d format=0x%x type=0x%x pixels=%s",
                       static_cast<unsigned>(f.gpr[2]),
                       static_cast<int>(f.gpr[3]), static_cast<int>(f.gpr[4]),
+                      static_cast<unsigned>(GuestStackWord(d, f, 0)),
                       static_cast<unsigned>(GuestStackWord(d, f, 1)),
-                      static_cast<unsigned>(GuestStackWord(d, f, 2)),
-                      GuestStackWord(d, f, 3) ? "present" : "null");
+                      GuestStackWord(d, f, 2) ? "present" : "null");
         d.GraphicsLog(line);
     }
     return ForwardGl<&::glTexImage2D>(d, f, "glTexImage2D");
@@ -131,16 +131,46 @@ std::uint64_t Call_glTexImage2D(HleDispatcher& d,
 
 std::uint64_t Call_glTexSubImage2D(HleDispatcher& d,
                                     GuestCallFrame const& f) noexcept {
-    static std::atomic_uint32_t logged{};
-    if (logged.fetch_add(1, std::memory_order_relaxed) < 12) {
-        char line[256]{};
+    static std::atomic_uint32_t smallLogged{}, largeLogged{};
+    const auto width = static_cast<std::int32_t>(f.gpr[4]);
+    const auto height = static_cast<std::int32_t>(f.gpr[5]);
+    const auto large = width >= 64 && height >= 64;
+    const auto ordinal = (large ? largeLogged : smallLogged).fetch_add(1, std::memory_order_relaxed);
+    if (ordinal < 8) {
+        char line[512]{};
         std::snprintf(line, sizeof(line),
                       "GL: texSubImage2D size=%dx%d format=0x%x type=0x%x pixels=%s",
-                      static_cast<int>(f.gpr[4]), static_cast<int>(f.gpr[5]),
+                      width, height,
                       static_cast<unsigned>(GuestStackWord(d, f, 0)),
                       static_cast<unsigned>(GuestStackWord(d, f, 1)),
                       GuestStackWord(d, f, 2) ? "present" : "null");
         d.GraphicsLog(line);
+        if (width > 0 && height > 0 &&
+            GuestStackWord(d, f, 0) == GL_RGBA &&
+            GuestStackWord(d, f, 1) == GL_UNSIGNED_BYTE &&
+            GuestStackWord(d, f, 2) != 0) {
+            const auto pixels = (std::min)(std::uint64_t(width) * height, std::uint64_t{256});
+            auto* bytes = static_cast<std::uint8_t const*>(d.GuestReadable(
+                f, GuestStackWord(d, f, 2), static_cast<std::size_t>(pixels * 4)));
+            if (bytes) {
+                unsigned zero[4]{}, full[4]{}, middle[4]{};
+                for (std::uint64_t pixel = 0; pixel < pixels; ++pixel) {
+                    for (unsigned channel = 0; channel < 4; ++channel) {
+                        const auto value = bytes[pixel * 4 + channel];
+                        if (value == 0) ++zero[channel];
+                        else if (value == 255) ++full[channel];
+                        else ++middle[channel];
+                    }
+                }
+                std::snprintf(line, sizeof(line),
+                              "GL: amostra RGBA %llu pixels; zero=%u,%u,%u,%u full=%u,%u,%u,%u mid=%u,%u,%u,%u",
+                              static_cast<unsigned long long>(pixels),
+                              zero[0], zero[1], zero[2], zero[3],
+                              full[0], full[1], full[2], full[3],
+                              middle[0], middle[1], middle[2], middle[3]);
+                d.GraphicsLog(line);
+            }
+        }
     }
     return ForwardGl<&::glTexSubImage2D>(d, f, "glTexSubImage2D");
 }
@@ -266,6 +296,12 @@ std::uint64_t Call_glShaderBinary(HleDispatcher& d,
     const GLint sourceLength = static_cast<GLint>(source.size());
     static std::atomic_uint32_t translated{};
     const auto ordinal = translated.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (ordinal <= 3) {
+        std::string printable(source);
+        std::replace(printable.begin(), printable.end(), '\n', ' ');
+        std::replace(printable.begin(), printable.end(), '\r', ' ');
+        d.GraphicsLog("Piglet: GLSL " + std::to_string(ordinal) + ": " + printable);
+    }
     for (std::int32_t i = 0; i < count; ++i) {
         const auto shader = shaderIds[i];
         if (!shader) continue;
