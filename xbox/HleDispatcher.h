@@ -136,6 +136,9 @@ private:
     static std::uint64_t MemoryStrlen(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MemoryMmap(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MspaceMalloc(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t MspaceCreate(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t MspaceDestroy(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t MspaceMallocStatsFast(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MspaceCalloc(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MspaceRealloc(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MspaceFree(HleDispatcher&, GuestCallFrame const&) noexcept;
@@ -232,6 +235,14 @@ private:
     std::mutex allocationsMutex_;
     std::unordered_map<void*, std::size_t> guestAllocations_;
     std::size_t guestAllocationBytes_{};
+    struct GuestMspace {
+        struct FreeBlock { std::uint64_t address{}, size{}; };
+        std::uint64_t base{}, capacity{}, next{0x10000}, inUse{}, peakInUse{};
+        std::unordered_map<std::uint64_t, std::uint64_t> allocations;
+        std::vector<FreeBlock> freeBlocks;
+    };
+    std::unordered_map<std::uint64_t, GuestMspace> guestMspaces_;
+    static std::uint64_t AllocateFromMspace(GuestMspace&, std::uint64_t) noexcept;
     std::unordered_map<std::uint32_t, std::vector<std::uint8_t>> registry_;
     struct GuestFile {
         struct DirectoryEntry {

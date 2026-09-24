@@ -215,6 +215,9 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "strlen") use(&MemoryStrlen);
     if (name == "mmap" || name == "mmap_np" || name == "__wrap_mmap") use(&MemoryMmap);
     if (name == "sceLibcMspaceMalloc") use(&MspaceMalloc);
+    if (name == "sceLibcMspaceCreate") use(&MspaceCreate);
+    if (name == "sceLibcMspaceDestroy") use(&MspaceDestroy);
+    if (name == "sceLibcMspaceMallocStatsFast") use(&MspaceMallocStatsFast);
     if (name == "sceLibcMspaceCalloc") use(&MspaceCalloc);
     if (name == "sceLibcMspaceRealloc") use(&MspaceRealloc);
     if (name == "sceLibcMspaceFree") use(&MspaceFree);
@@ -853,11 +856,85 @@ std::uint64_t HleDispatcher::MemoryStrlen(HleDispatcher& dispatcher,
     return OrbisEfault;
 }
 
+std::uint64_t HleDispatcher::AllocateFromMspace(GuestMspace& space,
+                                                 std::uint64_t requested) noexcept {
+    if (requested > MaxGuestHeapAllocation || requested > UINT64_MAX - 15) return 0;
+    const auto bytes = ((std::max<std::uint64_t>)(requested, 1) + 15) & ~15ull;
+    if (bytes > MaxGuestHeapBytes - space.inUse) return 0;
+    for (auto it = space.freeBlocks.begin(); it != space.freeBlocks.end(); ++it) {
+        if (it->size < bytes) continue;
+        const auto address = it->address;
+        try { space.allocations.emplace(address, bytes); } catch (...) { return 0; }
+        it->address += bytes;
+        it->size -= bytes;
+        if (!it->size) space.freeBlocks.erase(it);
+        space.inUse += bytes;
+        space.peakInUse = (std::max)(space.peakInUse, space.inUse);
+        return address;
+    }
+    if (space.next > space.capacity || bytes > space.capacity - space.next) return 0;
+    const auto address = space.base + space.next;
+    try { space.allocations.emplace(address, bytes); } catch (...) { return 0; }
+    space.next += bytes;
+    space.inUse += bytes;
+    space.peakInUse = (std::max)(space.peakInUse, space.inUse);
+    return address;
+}
+
+std::uint64_t HleDispatcher::MspaceCreate(HleDispatcher& dispatcher,
+                                           GuestCallFrame const& frame) noexcept {
+    if (!dispatcher.memory_ || !ReadablePointer(dispatcher, frame, frame.gpr[0], 1) ||
+        frame.gpr[2] <= 0x10000 || frame.gpr[2] > 4ull * 1024 * 1024 * 1024 ||
+        !dispatcher.memory_->IsLazySystemRange(frame.gpr[1], frame.gpr[2])) return 0;
+    std::scoped_lock lock(dispatcher.allocationsMutex_);
+    try {
+        auto [it, inserted] = dispatcher.guestMspaces_.try_emplace(frame.gpr[1]);
+        if (!inserted) return 0;
+        it->second.base = frame.gpr[1];
+        it->second.capacity = frame.gpr[2];
+        return frame.gpr[1];
+    } catch (...) { return 0; }
+}
+
+std::uint64_t HleDispatcher::MspaceDestroy(HleDispatcher& dispatcher,
+                                            GuestCallFrame const& frame) noexcept {
+    std::scoped_lock lock(dispatcher.allocationsMutex_);
+    return dispatcher.guestMspaces_.erase(frame.gpr[0]) ? 0 : 0x80020016ull;
+}
+
+std::uint64_t HleDispatcher::MspaceMallocStatsFast(HleDispatcher& dispatcher,
+                                                    GuestCallFrame const& frame) noexcept {
+    struct ManagedSize {
+        std::uint16_t size{40}, version{1};
+        std::uint32_t reserved{};
+        std::uint64_t maxSystem{}, currentSystem{}, maxInUse{}, currentInUse{};
+    };
+    static_assert(sizeof(ManagedSize) == 40);
+    std::scoped_lock lock(dispatcher.allocationsMutex_);
+    auto found = dispatcher.guestMspaces_.find(frame.gpr[0]);
+    if (found == dispatcher.guestMspaces_.end()) return 0x80020016ull;
+    auto* output = WritablePointer(dispatcher, frame, frame.gpr[1], sizeof(ManagedSize));
+    if (!output) return 0x8002000Eull;
+    ManagedSize result;
+    result.maxSystem = found->second.capacity;
+    result.currentSystem = found->second.capacity;
+    result.maxInUse = found->second.peakInUse;
+    result.currentInUse = found->second.inUse;
+    std::memcpy(output, &result, sizeof(result));
+    return 0;
+}
+
 std::uint64_t HleDispatcher::MspaceMalloc(HleDispatcher& dispatcher,
                                           GuestCallFrame const& frame) noexcept {
     // The zero handle is the default libc mspace used by the observed store.
     // Do not pretend that a nonzero, guest-owned mspace is a host heap.
-    if (frame.gpr[0] != 0 || frame.gpr[1] > MaxGuestHeapAllocation) return 0;
+    if (frame.gpr[0] != 0) {
+        std::scoped_lock lock(dispatcher.allocationsMutex_);
+        auto found = dispatcher.guestMspaces_.find(frame.gpr[0]);
+        return found == dispatcher.guestMspaces_.end() ? 0 :
+            AllocateFromMspace(found->second, frame.gpr[1]);
+    }
+    if (frame.gpr[1] > MaxGuestHeapAllocation) return 0;
     const auto bytes = static_cast<std::size_t>(frame.gpr[1] ? frame.gpr[1] : std::uint64_t{1});
     std::scoped_lock lock(dispatcher.allocationsMutex_);
     if (bytes > MaxGuestHeapBytes - dispatcher.guestAllocationBytes_) return 0;
@@ -870,7 +947,18 @@ std::uint64_t HleDispatcher::MspaceMalloc(HleDispatcher& dispatcher,
 }
 
 std::uint64_t HleDispatcher::MspaceCalloc(HleDispatcher& dispatcher,
-                                          GuestCallFrame const& frame) noexcept {
+                                        GuestCallFrame const& frame) noexcept {
+    if (frame.gpr[0] != 0) {
+        if (frame.gpr[2] != 0 && frame.gpr[1] > MaxGuestHeapAllocation / frame.gpr[2]) return 0;
+        const auto product = frame.gpr[1] * frame.gpr[2];
+        std::scoped_lock lock(dispatcher.allocationsMutex_);
+        auto found = dispatcher.guestMspaces_.find(frame.gpr[0]);
+        if (found == dispatcher.guestMspaces_.end()) return 0;
+        const auto address = AllocateFromMspace(found->second, product);
+        if (address) std::memset(reinterpret_cast<void*>(address), 0,
+                                 static_cast<std::size_t>((std::max<std::uint64_t>)(product, 1)));
+        return address;
+    }
     if (frame.gpr[0] != 0 ||
         (frame.gpr[2] != 0 && frame.gpr[1] > MaxGuestHeapAllocation / frame.gpr[2]))
         return 0;
@@ -889,6 +977,34 @@ std::uint64_t HleDispatcher::MspaceCalloc(HleDispatcher& dispatcher,
 
 std::uint64_t HleDispatcher::MspaceRealloc(HleDispatcher& dispatcher,
                                            GuestCallFrame const& frame) noexcept {
+    if (frame.gpr[0] != 0) {
+        if (frame.gpr[2] > MaxGuestHeapAllocation) return 0;
+        std::scoped_lock lock(dispatcher.allocationsMutex_);
+        auto found = dispatcher.guestMspaces_.find(frame.gpr[0]);
+        if (found == dispatcher.guestMspaces_.end()) return 0;
+        auto& space = found->second;
+        if (!frame.gpr[1]) return AllocateFromMspace(space, frame.gpr[2]);
+        auto old = space.allocations.find(frame.gpr[1]);
+        if (old == space.allocations.end()) return 0;
+        if (!frame.gpr[2]) {
+            try { space.freeBlocks.push_back({old->first, old->second}); }
+            catch (...) { return 0; }
+            space.inUse -= old->second;
+            space.allocations.erase(old);
+            return 0;
+        }
+        if (frame.gpr[2] <= old->second) return old->first;
+        const auto oldAddress = old->first, oldSize = old->second;
+        const auto address = AllocateFromMspace(space, frame.gpr[2]);
+        if (!address) return 0;
+        std::memcpy(reinterpret_cast<void*>(address), reinterpret_cast<void const*>(oldAddress),
+                    static_cast<std::size_t>(oldSize));
+        try { space.freeBlocks.push_back({oldAddress, oldSize}); }
+        catch (...) { return address; }
+        space.inUse -= oldSize;
+        space.allocations.erase(oldAddress);
+        return address;
+    }
     if (frame.gpr[0] != 0 || frame.gpr[2] > MaxGuestHeapAllocation) return 0;
     if (!frame.gpr[1]) {
         GuestCallFrame mallocFrame = frame;
@@ -920,6 +1036,18 @@ std::uint64_t HleDispatcher::MspaceRealloc(HleDispatcher& dispatcher,
 
 std::uint64_t HleDispatcher::MspaceFree(HleDispatcher& dispatcher,
                                         GuestCallFrame const& frame) noexcept {
+    if (frame.gpr[0] != 0) {
+        std::scoped_lock lock(dispatcher.allocationsMutex_);
+        auto found = dispatcher.guestMspaces_.find(frame.gpr[0]);
+        if (found == dispatcher.guestMspaces_.end()) return 0;
+        auto old = found->second.allocations.find(frame.gpr[1]);
+        if (old == found->second.allocations.end()) return 0;
+        try { found->second.freeBlocks.push_back({old->first, old->second}); }
+        catch (...) { return 0; }
+        found->second.inUse -= old->second;
+        found->second.allocations.erase(old);
+        return 0;
+    }
     if (frame.gpr[0] != 0 || frame.gpr[1] == 0) return 0;
     auto* allocation = reinterpret_cast<void*>(frame.gpr[1]);
     std::scoped_lock lock(dispatcher.allocationsMutex_);
@@ -933,6 +1061,13 @@ std::uint64_t HleDispatcher::MspaceFree(HleDispatcher& dispatcher,
 
 std::uint64_t HleDispatcher::MspaceUsableSize(HleDispatcher& dispatcher,
                                               GuestCallFrame const& frame) noexcept {
+    if (frame.gpr[0] != 0) {
+        std::scoped_lock lock(dispatcher.allocationsMutex_);
+        auto found = dispatcher.guestMspaces_.find(frame.gpr[0]);
+        if (found == dispatcher.guestMspaces_.end()) return 0;
+        auto allocation = found->second.allocations.find(frame.gpr[1]);
+        return allocation == found->second.allocations.end() ? 0 : allocation->second;
+    }
     if (frame.gpr[0] != 0 || frame.gpr[1] == 0) return 0;
     std::scoped_lock lock(dispatcher.allocationsMutex_);
     auto found = dispatcher.guestAllocations_.find(reinterpret_cast<void*>(frame.gpr[1]));

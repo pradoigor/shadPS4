@@ -316,6 +316,15 @@ bool GuestMemory::MapLazySystem(std::uint64_t address, std::uint64_t bytes,
   return true;
 }
 
+bool GuestMemory::IsLazySystemRange(std::uint64_t address,
+                                    std::uint64_t bytes) const noexcept {
+  if (!bytes || address > UINT64_MAX - bytes) return false;
+  for (auto const& range : lazy_)
+    if (address >= range.address && address - range.address <= range.size &&
+        bytes <= range.size - (address - range.address)) return true;
+  return false;
+}
+
 bool GuestMemory::CommitLazyPage(std::uint64_t address) noexcept {
   constexpr std::size_t MaxLazyCommit = 512ull * 1024 * 1024;
   for (auto const& range : lazy_) {

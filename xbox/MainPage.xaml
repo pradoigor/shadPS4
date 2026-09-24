@@ -196,7 +196,7 @@
           <StackPanel Spacing="18" Margin="0,14,0,10">
             <Border Background="#0D2630" BorderBrush="#33535D" BorderThickness="1" CornerRadius="12" Padding="24">
               <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <StackPanel Spacing="7"><TextBlock Text="XS4" FontSize="24"/><TextBlock Text="Versão instalada" FontSize="14" Foreground="#AFCBD2"/><TextBlock x:Name="CurrentVersion" Text="0.87.0.0" FontSize="20" Foreground="#F2FBFC"/></StackPanel>
+                <StackPanel Spacing="7"><TextBlock Text="XS4" FontSize="24"/><TextBlock Text="Versão instalada" FontSize="14" Foreground="#AFCBD2"/><TextBlock x:Name="CurrentVersion" Text="0.88.0.0" FontSize="20" Foreground="#F2FBFC"/></StackPanel>
                 <Border Grid.Column="1" Width="72" Height="72" CornerRadius="18" Background="#11313B" VerticalAlignment="Center"><Image Width="64" Height="64" Source="ms-appx:///Assets/XS4-Mark.png" Stretch="Uniform"/></Border>
               </Grid>
             </Border>

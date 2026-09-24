@@ -39,6 +39,7 @@ public:
                            std::uint64_t &guestAddress) noexcept;
   bool MapLazySystem(std::uint64_t address, std::uint64_t bytes,
                      std::uint64_t prot) noexcept;
+  bool IsLazySystemRange(std::uint64_t address, std::uint64_t bytes) const noexcept;
   bool CommitLazyPage(std::uint64_t address) noexcept;
   bool Unmap(std::uint64_t guestAddress, std::size_t bytes) noexcept;
   // Applies only non-executable page protection to an isolated PF_W range.
