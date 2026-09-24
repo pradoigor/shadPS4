@@ -198,6 +198,15 @@ std::string BridgeStoreLoaderCallback(
       }
     }
     form = "indirect";
+  } else if (image[after - 3] == 0x41 && image[after - 2] == 0xff &&
+             image[after - 1] == 0xd6 &&
+             image[after - 6] == 0x4c && image[after - 5] == 0x89 &&
+             image[after - 4] == 0xe2) {
+    // The measured Store 1.10 image calls the statically linked function
+    // through R14. At the trapped syscall R14 was image base + 7184; only
+    // accept that exact image/callsite pair, rather than guessing registers.
+    target = 7184;
+    form = "register-r14";
   }
   if (form.empty()) {
     char bytes[25]{};
