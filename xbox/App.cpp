@@ -30,6 +30,7 @@
 #include <cwctype>
 #include <winrt/Windows.ApplicationModel.h>
 #include <winrt/Windows.ApplicationModel.Activation.h>
+#include <winrt/Windows.ApplicationModel.Core.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Storage.h>
@@ -70,7 +71,7 @@ struct App : ApplicationT<App> {
     enum class Page { Home, Library, Settings, Diagnostics };
     enum class HomeCategory { Games, Applications };
     enum class HomeFilter { All, Favorites, Recent };
-    enum class HomeFocusArea { Tabs, Actions, Filters, Titles, EmptyAction, Resume };
+    enum class HomeFocusArea { Tabs, Actions, Filters, Titles, EmptyAction, Resume, End };
     Grid root{nullptr};
     Grid homeView{nullptr}, libraryView{nullptr}, settingsView{nullptr}, diagnosticsView{nullptr};
     ItemsControl homeItems{nullptr}, pendingItems{nullptr};
@@ -213,10 +214,10 @@ struct App : ApplicationT<App> {
     }
     void SetActiveButton(wchar_t const* name, bool active) {
         auto button = Find<Button>(name);
-        const auto background = active ? Windows::UI::ColorHelper::FromArgb(255, 23, 110, 192) :
-            Windows::UI::ColorHelper::FromArgb(255, 23, 28, 41);
-        const auto border = active ? Windows::UI::ColorHelper::FromArgb(255, 60, 165, 255) :
-            Windows::UI::ColorHelper::FromArgb(255, 48, 56, 75);
+        const auto background = active ? Windows::UI::ColorHelper::FromArgb(255, 25, 96, 106) :
+            Windows::UI::ColorHelper::FromArgb(255, 23, 45, 56);
+        const auto border = active ? Windows::UI::ColorHelper::FromArgb(255, 38, 220, 214) :
+            Windows::UI::ColorHelper::FromArgb(255, 53, 83, 94);
         button.Background(Media::SolidColorBrush(background));
         button.BorderBrush(Media::SolidColorBrush(border));
     }
@@ -229,6 +230,7 @@ struct App : ApplicationT<App> {
         Find<TextBlock>(L"HomeSubtitle").Text(category == HomeCategory::Games ?
             L"Escolha um título para iniciar" : L"Aplicativos e ferramentas instalados");
         PopulateHome();
+        FocusHome(homeVisibleIndices.empty() ? HomeFocusArea::EmptyAction : HomeFocusArea::Titles, 0);
     }
     void SetHomeFilter(HomeFilter filter) {
         homeFocusedIndex = -1;
@@ -237,9 +239,23 @@ struct App : ApplicationT<App> {
         SetActiveButton(L"FilterFavorites", filter == HomeFilter::Favorites);
         SetActiveButton(L"FilterRecent", filter == HomeFilter::Recent);
         PopulateHome();
+        Find<Grid>(L"FilterOverlay").Visibility(Visibility::Collapsed);
+        FocusHome(homeVisibleIndices.empty() ? HomeFocusArea::EmptyAction : HomeFocusArea::Titles, 0);
+    }
+    void OpenFilters() {
+        Find<Grid>(L"FilterOverlay").Visibility(Visibility::Visible);
+        FocusHome(HomeFocusArea::Filters, homeFilter == HomeFilter::All ? 0 :
+            homeFilter == HomeFilter::Favorites ? 1 : 2);
+    }
+    void CloseFilters() {
+        Find<Grid>(L"FilterOverlay").Visibility(Visibility::Collapsed);
+        FocusHome(HomeFocusArea::Actions, 0);
     }
     void ShowPage(Page page, bool focus = true) {
-        if (page != Page::Home) homeFocusedIndex = -1;
+        if (page != Page::Home) {
+            homeFocusedIndex = -1;
+            Find<Grid>(L"FilterOverlay").Visibility(Visibility::Collapsed);
+        }
         currentPage = page;
         homeView.Visibility(page == Page::Home ? Visibility::Visible : Visibility::Collapsed);
         libraryView.Visibility(page == Page::Library ? Visibility::Visible : Visibility::Collapsed);
@@ -247,7 +263,7 @@ struct App : ApplicationT<App> {
         diagnosticsView.Visibility(page == Page::Diagnostics ? Visibility::Visible : Visibility::Collapsed);
         if (page == Page::Home) {
             PopulateHome();
-            if (focus) Find<Button>(homeCategory == HomeCategory::Games ? L"GamesTab" : L"AppsTab").Focus(FocusState::Programmatic);
+            if (focus) FocusHome(homeVisibleIndices.empty() ? HomeFocusArea::EmptyAction : HomeFocusArea::Titles, 0);
         } else if (page == Page::Library) {
             PopulateLibrary();
             if (focus) Find<Button>(L"SelectContent").Focus(FocusState::Programmatic);
@@ -289,6 +305,27 @@ struct App : ApplicationT<App> {
         selectedPendingIndex = static_cast<int>(index);
         RefreshPendingSelection();
     }
+    void UpdateHomeBackdrop(size_t index) {
+        auto backdrop = Find<Image>(L"HomeBackdrop");
+        if (index >= libraryItems.size()) { backdrop.Visibility(Visibility::Collapsed); return; }
+        auto const& item = libraryItems[index];
+        auto folder = std::filesystem::path(item.path);
+        auto picture = folder / L"sce_sys" / L"pic1.png";
+        std::error_code error;
+        if (!std::filesystem::is_regular_file(picture, error)) picture = folder / L"sce_sys" / L"icon0.png";
+        if (!std::filesystem::is_regular_file(picture, error) ||
+            std::filesystem::file_size(picture, error) > 16 * 1024 * 1024) {
+            backdrop.Visibility(Visibility::Collapsed); return;
+        }
+        try {
+            Media::Imaging::BitmapImage image;
+            image.DecodePixelWidth(1600);
+            image.UriSource(Uri(L"ms-appdata:///local/Installed/" + folder.filename().wstring() +
+                L"/sce_sys/" + picture.filename().wstring()));
+            backdrop.Source(image);
+            backdrop.Visibility(Visibility::Visible);
+        } catch (...) { backdrop.Visibility(Visibility::Collapsed); }
+    }
     void PopulateHome(bool restoreFocus = false) {
         if (!homeItems || !report) return;
         homeItems.Items().Clear();
@@ -303,17 +340,17 @@ struct App : ApplicationT<App> {
             if (homeFilter == HomeFilter::Favorites && !IsFavorite(item)) continue;
             if (homeFilter == HomeFilter::Recent && !IsRecent(item)) continue;
 
-            StackPanel tile; tile.Width(220); tile.Height(220); tile.Spacing(0);
-            Grid artwork; artwork.Width(220); artwork.Height(220);
-            Border artworkBackground; artworkBackground.CornerRadius({9, 9, 9, 9});
-            artworkBackground.Background(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 20, 49, 86)));
+            StackPanel tile; tile.Width(246); tile.Height(246); tile.Spacing(0);
+            Grid artwork; artwork.Width(246); artwork.Height(246);
+            Border artworkBackground; artworkBackground.CornerRadius({12, 12, 12, 12});
+            artworkBackground.Background(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 24, 55, 66)));
             artwork.Children().Append(artworkBackground);
             auto iconPath = std::filesystem::path(item.path) / L"sce_sys" / L"icon0.png";
             std::error_code iconError;
             if (std::filesystem::is_regular_file(iconPath, iconError) && std::filesystem::file_size(iconPath, iconError) <= 8 * 1024 * 1024) {
                 auto folderName = std::filesystem::path(item.path).filename().wstring();
                 Media::Imaging::BitmapImage cover;
-                cover.DecodePixelWidth(460);
+                cover.DecodePixelWidth(560);
                 cover.UriSource(Uri(L"ms-appdata:///local/Installed/" + folderName + L"/sce_sys/icon0.png"));
                 Image image; image.Source(cover); image.Stretch(Media::Stretch::UniformToFill);
                 artwork.Children().Append(image);
@@ -327,9 +364,9 @@ struct App : ApplicationT<App> {
             artwork.Children().Append(favoriteBadge);
             tile.Children().Append(artwork);
 
-            Button card; card.Width(234); card.Height(234); card.Padding({6, 6, 6, 6});
-            card.BorderThickness({1, 1, 1, 1}); card.BorderBrush(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 33, 41, 56)));
-            card.Background(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 14, 18, 27)));
+            Button card; card.Width(264); card.Height(264); card.Padding({8, 8, 8, 8}); card.Margin({0, 0, 20, 0});
+            card.BorderThickness({2, 2, 2, 2}); card.BorderBrush(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 53, 83, 94)));
+            card.Background(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 10, 31, 40)));
             card.HorizontalContentAlignment(HorizontalAlignment::Center); card.VerticalContentAlignment(VerticalAlignment::Center);
             card.Content(tile); card.Tag(box_value(static_cast<int64_t>(index)));
             Windows::UI::Xaml::Automation::AutomationProperties::SetName(card, hstring(item.name));
@@ -338,6 +375,18 @@ struct App : ApplicationT<App> {
                 homeFocusedIndex = static_cast<int>(index);
                 homeFocusArea = HomeFocusArea::Titles;
                 homeFocusIndex = visibleIndex;
+                UpdateHomeBackdrop(index);
+                Find<TextBlock>(L"HomeSubtitle").Text(libraryItems[index].name);
+                if (auto tile = homeButtons.find(index); tile != homeButtons.end()) {
+                    tile->second.BorderBrush(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 38, 220, 214)));
+                    tile->second.BorderThickness({3, 3, 3, 3});
+                }
+            });
+            card.LostFocus([this, index](auto const&, auto const&) {
+                if (auto tile = homeButtons.find(index); tile != homeButtons.end()) {
+                    tile->second.BorderBrush(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 53, 83, 94)));
+                    tile->second.BorderThickness({2, 2, 2, 2});
+                }
             });
             card.Click([this, index](auto const&, auto const&) { LaunchInstalled(index); });
             homeItems.Items().Append(card);
@@ -346,6 +395,7 @@ struct App : ApplicationT<App> {
             favoriteMarkers[index] = favorite;
         }
         const bool empty = homeVisibleIndices.empty();
+        if (empty) UpdateHomeBackdrop(libraryItems.size());
         Find<StackPanel>(L"HomeEmpty").Visibility(empty ? Visibility::Visible : Visibility::Collapsed);
         Find<TextBlock>(L"HomeEmptyTitle").Text(homeFilter == HomeFilter::All ?
             (homeCategory == HomeCategory::Games ? L"Nenhum game instalado" : L"Nenhum aplicativo instalado") :
@@ -449,9 +499,9 @@ struct App : ApplicationT<App> {
             SetNotice(L"Selecione um arquivo ELF/SELF importado para validar.");
             return;
         }
-        ShowPage(Page::Diagnostics);
         list.SelectedIndex(0);
         RunSelected();
+        SetNotice(L"Validação iniciada. Exporte o relatório em Configurações para consultar o resultado.");
     }
     void StartHomebrew() {
         if (selectedLoaderPath.empty()) {
@@ -466,6 +516,7 @@ struct App : ApplicationT<App> {
         guestViewShown = false;
         guestPaused = false;
         Find<Button>(L"ResumeContent").Visibility(Visibility::Collapsed);
+        Find<Button>(L"EndContent").Visibility(Visibility::Collapsed);
         homebrewLaunchPending = true;
         anglePending = true;
         Find<Grid>(L"AngleTestView").Visibility(Visibility::Visible);
@@ -480,6 +531,7 @@ struct App : ApplicationT<App> {
         guestPaused = true;
         Find<Grid>(L"AngleTestView").Visibility(Visibility::Collapsed);
         Find<Button>(L"ResumeContent").Visibility(Visibility::Visible);
+        Find<Button>(L"EndContent").Visibility(Visibility::Visible);
         ShowPage(Page::Home, false);
         Find<Button>(L"ResumeContent").Focus(FocusState::Programmatic);
         SetNotice(L"Conteúdo pausado. Selecione Retomar ou pressione Menu + View novamente.");
@@ -488,8 +540,22 @@ struct App : ApplicationT<App> {
         if (!guestPaused || !homebrew || !homebrew->running()) return;
         Find<Grid>(L"AngleTestView").Visibility(Visibility::Visible);
         Find<Button>(L"ResumeContent").Visibility(Visibility::Collapsed);
+        Find<Button>(L"EndContent").Visibility(Visibility::Collapsed);
         guestPaused = false;
         homebrew->SetPaused(false);
+    }
+    fire_and_forget EndContent() {
+        auto lifetime = get_strong();
+        if (!guestPaused || !homebrew || !homebrew->running()) co_return;
+        SetNotice(L"Encerrando o conteúdo e reiniciando o XS4…");
+        try {
+            auto failure = co_await Windows::ApplicationModel::Core::CoreApplication::RequestRestartAsync(L"");
+            SetNotice(L"Não foi possível reiniciar o XS4 para encerrar o conteúdo (código " +
+                std::to_wstring(static_cast<int>(failure)) + L"). O conteúdo permanece pausado.");
+        } catch (hresult_error const& error) {
+            SetNotice(L"Não foi possível reiniciar o XS4: " + std::wstring(error.message()) +
+                L". O conteúdo permanece pausado.");
+        }
     }
     void LaunchGuest() {
         try {
@@ -805,6 +871,9 @@ struct App : ApplicationT<App> {
         }
     }
     void GoBack() {
+        if (currentPage == Page::Home && Find<Grid>(L"FilterOverlay").Visibility() == Visibility::Visible) {
+            CloseFilters(); return;
+        }
         switch (currentPage) {
         case Page::Home: break;
         case Page::Library: ShowPage(Page::Home); break;
@@ -821,8 +890,8 @@ struct App : ApplicationT<App> {
             break;
         }
         case HomeFocusArea::Actions: {
-            constexpr wchar_t const* names[]{L"OpenLibrary", L"OpenSettings"};
-            index = std::clamp(index, 0, 1);
+            constexpr wchar_t const* names[]{L"OpenFilters", L"OpenLibrary", L"OpenSettings"};
+            index = std::clamp(index, 0, 2);
             Find<Button>(names[index]).Focus(FocusState::Programmatic);
             break;
         }
@@ -847,42 +916,50 @@ struct App : ApplicationT<App> {
         case HomeFocusArea::Resume:
             if (guestPaused) Find<Button>(L"ResumeContent").Focus(FocusState::Programmatic);
             break;
+        case HomeFocusArea::End:
+            if (guestPaused) Find<Button>(L"EndContent").Focus(FocusState::Programmatic);
+            break;
         }
     }
     void NavigateHome(int dx, int dy) {
         if (dx == 0 && dy == 0) return;
+        if (Find<Grid>(L"FilterOverlay").Visibility() == Visibility::Visible) {
+            if (dy) FocusHome(HomeFocusArea::Filters, std::clamp(homeFocusIndex + dy, 0, 2));
+            return;
+        }
         switch (homeFocusArea) {
         case HomeFocusArea::Tabs:
-            if (dy > 0) FocusHome(HomeFocusArea::Filters, 0);
+            if (dy > 0) FocusHome(HomeFocusArea::Titles, 0);
             else if (dy < 0) FocusHome(guestPaused ? HomeFocusArea::Resume : HomeFocusArea::Actions, 0);
-            else if (dx > 0 && homeFocusIndex == 1) FocusHome(HomeFocusArea::Actions, 0);
             else FocusHome(HomeFocusArea::Tabs, homeFocusIndex + dx);
             break;
         case HomeFocusArea::Actions:
-            if (dy > 0) FocusHome(HomeFocusArea::Filters, 2);
-            else if (dy < 0 || (dx < 0 && homeFocusIndex == 0))
-                FocusHome(guestPaused ? HomeFocusArea::Resume : HomeFocusArea::Tabs, 1);
+            if (dy > 0) FocusHome(HomeFocusArea::Titles, 0);
+            else if (dx < 0 && homeFocusIndex == 0)
+                FocusHome(guestPaused ? HomeFocusArea::End : HomeFocusArea::Tabs, 1);
             else FocusHome(HomeFocusArea::Actions, homeFocusIndex + dx);
             break;
         case HomeFocusArea::Filters:
-            if (dy > 0) FocusHome(HomeFocusArea::Titles, 0);
-            else if (dy < 0) FocusHome(homeFocusIndex == 2 ? HomeFocusArea::Actions : HomeFocusArea::Tabs,
-                                       homeFocusIndex == 2 ? 0 : homeFocusIndex);
-            else FocusHome(HomeFocusArea::Filters, homeFocusIndex + dx);
+            FocusHome(HomeFocusArea::Filters, homeFocusIndex + dy);
             break;
         case HomeFocusArea::Titles:
-            if (dy < 0 && homeFocusIndex < 6) FocusHome(HomeFocusArea::Filters, 0);
+            if (dy < 0) FocusHome(HomeFocusArea::Tabs, homeCategory == HomeCategory::Games ? 0 : 1);
             else {
-                const auto next = homeFocusIndex + dx + dy * 6;
+                const auto next = homeFocusIndex + dx;
                 if (next >= 0 && next < static_cast<int>(homeVisibleIndices.size()))
                     FocusHome(HomeFocusArea::Titles, next);
             }
             break;
         case HomeFocusArea::EmptyAction:
-            if (dy < 0) FocusHome(HomeFocusArea::Filters, 0);
+            if (dy < 0) FocusHome(HomeFocusArea::Tabs, homeCategory == HomeCategory::Games ? 0 : 1);
             break;
         case HomeFocusArea::Resume:
             if (dy > 0) FocusHome(HomeFocusArea::Tabs, 1);
+            else if (dx > 0) FocusHome(HomeFocusArea::End);
+            break;
+        case HomeFocusArea::End:
+            if (dy > 0) FocusHome(HomeFocusArea::Tabs, 1);
+            else if (dx < 0) FocusHome(HomeFocusArea::Resume);
             else if (dx > 0) FocusHome(HomeFocusArea::Actions, 0);
             break;
         }
@@ -932,10 +1009,8 @@ struct App : ApplicationT<App> {
             ToggleFocusedFavorite();
         } else if (currentPage == Page::Home && key == Sys::VirtualKey::GamepadLeftShoulder) {
             SetHomeCategory(HomeCategory::Games);
-            Find<Button>(L"GamesTab").Focus(FocusState::Programmatic);
         } else if (currentPage == Page::Home && key == Sys::VirtualKey::GamepadRightShoulder) {
             SetHomeCategory(HomeCategory::Applications);
-            Find<Button>(L"AppsTab").Focus(FocusState::Programmatic);
         } else if (currentPage == Page::Library && key == Sys::VirtualKey::GamepadX) {
             ExtractContent();
         } else {
@@ -1006,7 +1081,6 @@ struct App : ApplicationT<App> {
             Find<TextBlock>(L"CurrentVersion").Text(std::to_wstring(version.Major) + L"." +
                 std::to_wstring(version.Minor) + L"." + std::to_wstring(version.Build) + L"." +
                 std::to_wstring(version.Revision));
-            Find<TextBlock>(L"CurrentCommit").Text(L"Commit " + std::wstring(XBOX_BUILD_COMMIT).substr(0, 12));
             LoadPreferences();
             list.SelectionChanged([this](auto const&, auto const&) { if (!refreshing) ShowDetails(); });
             Find<Button>(L"RunSelected").Click([this](auto const&, auto const&) { RunSelected(); });
@@ -1015,6 +1089,8 @@ struct App : ApplicationT<App> {
             Find<Button>(L"FilterAll").Click([this](auto const&, auto const&) { SetHomeFilter(HomeFilter::All); });
             Find<Button>(L"FilterFavorites").Click([this](auto const&, auto const&) { SetHomeFilter(HomeFilter::Favorites); });
             Find<Button>(L"FilterRecent").Click([this](auto const&, auto const&) { SetHomeFilter(HomeFilter::Recent); });
+            Find<Button>(L"OpenFilters").Click([this](auto const&, auto const&) { OpenFilters(); });
+            Find<Button>(L"CloseFilters").Click([this](auto const&, auto const&) { CloseFilters(); });
             auto trackHomeFocus = [this](wchar_t const* name, HomeFocusArea area, int index) {
                 Find<Button>(name).GotFocus([this, area, index](auto const&, auto const&) {
                     homeFocusArea = area;
@@ -1024,25 +1100,26 @@ struct App : ApplicationT<App> {
             };
             trackHomeFocus(L"GamesTab", HomeFocusArea::Tabs, 0);
             trackHomeFocus(L"AppsTab", HomeFocusArea::Tabs, 1);
-            trackHomeFocus(L"OpenLibrary", HomeFocusArea::Actions, 0);
-            trackHomeFocus(L"OpenSettings", HomeFocusArea::Actions, 1);
+            trackHomeFocus(L"OpenFilters", HomeFocusArea::Actions, 0);
+            trackHomeFocus(L"OpenLibrary", HomeFocusArea::Actions, 1);
+            trackHomeFocus(L"OpenSettings", HomeFocusArea::Actions, 2);
             trackHomeFocus(L"FilterAll", HomeFocusArea::Filters, 0);
             trackHomeFocus(L"FilterFavorites", HomeFocusArea::Filters, 1);
             trackHomeFocus(L"FilterRecent", HomeFocusArea::Filters, 2);
             trackHomeFocus(L"EmptyImport", HomeFocusArea::EmptyAction, 0);
             trackHomeFocus(L"ResumeContent", HomeFocusArea::Resume, 0);
+            trackHomeFocus(L"EndContent", HomeFocusArea::End, 0);
             Find<Button>(L"ResumeContent").Click([this](auto const&, auto const&) { ResumeContent(); });
+            Find<Button>(L"EndContent").Click([this](auto const&, auto const&) { EndContent(); });
             Find<Button>(L"OpenLibrary").Click([this](auto const&, auto const&) { ShowPage(Page::Library); });
             Find<Button>(L"EmptyImport").Click([this](auto const&, auto const&) { ShowPage(Page::Library); SelectContent(); });
             Find<Button>(L"PendingEmptyImport").Click([this](auto const&, auto const&) { SelectContent(); });
             Find<Button>(L"LibraryBack").Click([this](auto const&, auto const&) { ShowPage(Page::Home); });
             Find<Button>(L"OpenSettings").Click([this](auto const&, auto const&) { ShowPage(Page::Settings); });
             Find<Button>(L"SettingsBack").Click([this](auto const&, auto const&) { ShowPage(Page::Home); });
-            Find<Button>(L"OpenDiagnostics").Click([this](auto const&, auto const&) { ShowPage(Page::Diagnostics); });
             Find<Button>(L"DiagnosticsBack").Click([this](auto const&, auto const&) { ShowPage(Page::Settings); });
             Find<Button>(L"SelectContent").Click([this](auto const&, auto const&) { SelectContent(); });
             Find<Button>(L"ImportKeys").Click([this](auto const&, auto const&) { ImportKeys(); });
-            Find<Button>(L"SettingsImportKeys").Click([this](auto const&, auto const&) { ImportKeys(); });
             Find<Button>(L"ExtractContent").Click([this](auto const&, auto const&) { ExtractContent(); });
             Find<Button>(L"ValidateContent").Click([this](auto const&, auto const&) { ValidateSelectedContent(); });
             Find<Button>(L"TestAngle").Click([this](auto const&, auto const&) { StartAngleTest(); });
@@ -1119,6 +1196,7 @@ struct App : ApplicationT<App> {
                     homebrewCompletionShown = true;
                     guestPaused = false;
                     Find<Button>(L"ResumeContent").Visibility(Visibility::Collapsed);
+                    Find<Button>(L"EndContent").Visibility(Visibility::Collapsed);
                     Find<Border>(L"AngleLoadingView").Visibility(Visibility::Collapsed);
                     Find<Border>(L"AngleTestControls").Visibility(Visibility::Visible);
                     Find<Button>(L"CloseAngleTest").IsEnabled(true);

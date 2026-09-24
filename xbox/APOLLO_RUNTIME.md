@@ -218,6 +218,14 @@ parar, de modo que a pausa não equivale a um snapshot nem a suspensão total.
 
 ## O que falta confirmar
 
+O redesenho de interface posterior à 0.82 está preparado localmente e ainda
+não foi compilado nem instalado. A tela inicial usa uma fileira de capas maiores,
+fundo `sce_sys/pic1.png` do título focado quando disponível (com `icon0.png`
+como alternativa), filtros em modal e foco direto no primeiro título ao trocar
+de categoria. Menu + View retorna ao XS4 com o convidado pausado; Retomar volta
+à execução e Encerrar solicita reinicialização do XS4 para liberar o processo
+convidado. O comportamento de reinicialização no Xbox ainda precisa ser testado.
+
 Os traces mostram que o runtime ainda não fornece todos os serviços privados do
 PS4 usados pelo Apollo, incluindo `sceKernelDlsym`, montagem de saves e
 `sceSystemServiceLoadExec`. A versão 0.75 cobre somente a consulta de estado de
