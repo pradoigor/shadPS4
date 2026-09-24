@@ -178,7 +178,7 @@
           <StackPanel Spacing="18" Margin="0,14,0,10">
             <Border Background="#111722" BorderBrush="#252E3D" BorderThickness="1" CornerRadius="12" Padding="24">
               <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <StackPanel Spacing="7"><TextBlock Text="XS4" FontSize="22"/><TextBlock Text="Versão instalada" FontSize="13" Foreground="#9AA7BC"/><TextBlock x:Name="CurrentVersion" Text="0.76.0.0" FontSize="17" Foreground="#D7E4F5"/><TextBlock x:Name="CurrentCommit" Text="Commit local" FontSize="12" Foreground="#73839B"/></StackPanel>
+                <StackPanel Spacing="7"><TextBlock Text="XS4" FontSize="22"/><TextBlock Text="Versão instalada" FontSize="13" Foreground="#9AA7BC"/><TextBlock x:Name="CurrentVersion" Text="0.77.0.0" FontSize="17" Foreground="#D7E4F5"/><TextBlock x:Name="CurrentCommit" Text="Commit local" FontSize="12" Foreground="#73839B"/></StackPanel>
                 <Border Grid.Column="1" Width="72" Height="72" CornerRadius="18" Background="#101827" VerticalAlignment="Center"><Image Width="64" Height="64" Source="ms-appx:///Assets/XS4-Mark.png" Stretch="Uniform"/></Border>
               </Grid>
             </Border>

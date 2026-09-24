@@ -111,6 +111,29 @@ Essa correção trata o enquadramento observado; ainda é necessário verificar 
 imagem no console. O fechamento por acesso inválido permanece sem correção até
 que haja evidência suficiente para apontar a origem do ponteiro.
 
+## Alterações da versão 0.77
+
+A sessão `1790212518-7025015-272` confirmou o viewport centralizado em
+`960x540`, mas o Apollo encerrou com uma leitura inválida. O trace identifica
+uma sequência de inicialização de rede seguida da tentativa de abrir
+`/data/apollo/cache/ver.check`, usada pela verificação automática de versão do
+Apollo. O código do Apollo trata a falha de `fopen` retornando do callback de
+atualização.
+
+- `sceSysmoduleLoadModuleInternal` deixa de reportar NET e NETCTL como carregados
+  quando o runtime UWP não fornece a pilha de rede PS4; esses IDs recebem
+  `ENOSYS`.
+- A abertura POSIX de escrita apenas para `/data/apollo/cache/ver.check` retorna
+  `-1` com `ENETUNREACH`. Isso faz o Apollo pular a verificação automática de
+  atualização pelo caminho de erro previsto no próprio código. Não habilita
+  acesso à internet nem downloads online.
+- O relatório de exceção registra a base virtual, o offset na imagem, a região
+  de memória da falha e os endereços de retorno recuperáveis do stack frame.
+
+O teste no Xbox precisa confirmar se o Apollo agora chega e permanece no menu.
+As funções online, gerenciamento de saves e execução de jogos continuam fora
+do que esse marco comprova.
+
 ## O que falta confirmar
 
 Os traces mostram que o runtime ainda não fornece todos os serviços privados do

@@ -146,7 +146,7 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
   // replace that evidence with a second exception during unwinding.
   if (gGuestCrashRecorded.exchange(true))
     return EXCEPTION_EXECUTE_HANDLER;
-  char payload[3000]{};
+  char payload[5000]{};
   const auto *record = exception->ExceptionRecord;
   const auto fault = record->NumberParameters > 1
                          ? record->ExceptionInformation[1]
@@ -166,8 +166,10 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
   MEMORY_BASIC_INFORMATION tcbMemory{};
   MEMORY_BASIC_INFORMATION stackMemory{};
   MEMORY_BASIC_INFORMATION faultMemory{};
+  MEMORY_BASIC_INFORMATION instructionMemory{};
   QueryMemory(reinterpret_cast<void const*>(exception->ContextRecord->Rcx), &tcbMemory);
   QueryMemory(reinterpret_cast<void const*>(exception->ContextRecord->Rsp), &stackMemory);
+  QueryMemory(reinterpret_cast<void const*>(rip), &instructionMemory);
   if (fault)
     QueryMemory(reinterpret_cast<void const*>(fault), &faultMemory);
   std::uint64_t stackWords[8]{};
@@ -196,8 +198,52 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
                                   fault - gGuestHostBase < gGuestImageSize
                               ? gGuestVirtualBase + (fault - gGuestHostBase)
                               : 0;
+  const auto imageOffset = rip >= gGuestHostBase ? rip - gGuestHostBase : 0;
+  const auto faultBaseDelta = fault >= gGuestHostBase ? fault - gGuestHostBase : 0;
   const auto instructionDomain = guestRip ? "guest_image" : "host_runtime";
   const auto faultDomain = guestFault ? "guest_image" : "outside_guest_image";
+  std::uint64_t guestStackFrames[16]{};
+  std::size_t guestStackFrameCount{};
+  auto frameAddress = static_cast<std::uint64_t>(exception->ContextRecord->Rbp);
+  const auto stackBegin = reinterpret_cast<std::uint64_t>(stackMemory.BaseAddress);
+  const auto stackEnd = stackBegin + stackMemory.RegionSize;
+  for (std::size_t frameIndex = 0; frameIndex < 16; ++frameIndex) {
+    if (frameAddress < stackBegin || frameAddress > stackEnd ||
+        stackEnd - frameAddress < 2 * sizeof(std::uint64_t) ||
+        (frameAddress & (alignof(std::uint64_t) - 1)) != 0)
+      break;
+    MEMORY_BASIC_INFORMATION frameMemory{};
+    if (!QueryMemory(reinterpret_cast<void const*>(frameAddress), &frameMemory) ||
+        !Readable(frameMemory, frameAddress, 2 * sizeof(std::uint64_t)))
+      break;
+    std::uint64_t frameWords[2]{};
+    std::memcpy(frameWords, reinterpret_cast<void const*>(frameAddress),
+                sizeof(frameWords));
+    const auto returnAddress = frameWords[1];
+    if (returnAddress >= gGuestHostBase &&
+        returnAddress - gGuestHostBase < gGuestImageSize)
+      guestStackFrames[guestStackFrameCount++] =
+          gGuestVirtualBase + (returnAddress - gGuestHostBase);
+    if (frameWords[0] <= frameAddress || frameWords[0] >= stackEnd)
+      break;
+    frameAddress = frameWords[0];
+  }
+  char guestStackFramesJson[768] = "[";
+  std::size_t guestStackFramesLength = 1;
+  for (std::size_t index = 0; index < guestStackFrameCount; ++index) {
+    const auto available = sizeof(guestStackFramesJson) - guestStackFramesLength;
+    const auto written = std::snprintf(
+        guestStackFramesJson + guestStackFramesLength, available,
+        "%s%llu", index == 0 ? "" : ",",
+        static_cast<unsigned long long>(guestStackFrames[index]));
+    if (written < 0 || static_cast<std::size_t>(written) >= available)
+      break;
+    guestStackFramesLength += static_cast<std::size_t>(written);
+  }
+  if (guestStackFramesLength + 1 < sizeof(guestStackFramesJson)) {
+    guestStackFramesJson[guestStackFramesLength++] = ']';
+    guestStackFramesJson[guestStackFramesLength] = '\0';
+  }
   int length = std::snprintf(
       payload, sizeof(payload),
       "{\"stage\":\"guest_exception\",\"exception_code\":%lu,"
@@ -214,9 +260,16 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
       "\"tcb_page_protection\":%lu,\"tcb_thread_id\":%lu,"
       "\"stack_page_state\":%lu,\"stack_page_protection\":%lu,"
       "\"fault_page_state\":%lu,\"fault_page_protection\":%lu,"
+      "\"fault_page_base\":%llu,\"fault_allocation_base\":%llu,"
+      "\"fault_region_size\":%llu,\"fault_allocation_protect\":%lu,"
+      "\"fault_type\":%lu,\"instruction_page_base\":%llu,"
+      "\"instruction_region_size\":%llu,\"instruction_page_protection\":%lu,"
       "\"stack_words\":[%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu],"
       "\"exception_parameters\":%lu,\"access_kind\":%llu,"
-      "\"fault_address\":%llu,\"guest_virtual_rip\":%llu,"
+      "\"fault_address\":%llu,\"fault_base_delta\":%llu,"
+      "\"guest_virtual_base\":%llu,\"guest_image_offset\":%llu,"
+      "\"guest_image_size\":%llu,\"guest_stack_frames\":%s,"
+      "\"guest_virtual_rip\":%llu,"
       "\"guest_virtual_fault\":%llu,\"instruction_domain\":\"%s\","
       "\"fault_domain\":\"%s\",\"fault_address_in_guest_image\":%s,"
       "\"timestamp\":%llu}",
@@ -254,6 +307,17 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
       static_cast<unsigned long>(stackMemory.Protect),
       static_cast<unsigned long>(faultMemory.State),
       static_cast<unsigned long>(faultMemory.Protect),
+      static_cast<unsigned long long>(
+          reinterpret_cast<std::uintptr_t>(faultMemory.BaseAddress)),
+      static_cast<unsigned long long>(
+          reinterpret_cast<std::uintptr_t>(faultMemory.AllocationBase)),
+      static_cast<unsigned long long>(faultMemory.RegionSize),
+      static_cast<unsigned long>(faultMemory.AllocationProtect),
+      static_cast<unsigned long>(faultMemory.Type),
+      static_cast<unsigned long long>(
+          reinterpret_cast<std::uintptr_t>(instructionMemory.BaseAddress)),
+      static_cast<unsigned long long>(instructionMemory.RegionSize),
+      static_cast<unsigned long>(instructionMemory.Protect),
       static_cast<unsigned long long>(stackWords[0]),
       static_cast<unsigned long long>(stackWords[1]),
       static_cast<unsigned long long>(stackWords[2]),
@@ -265,6 +329,11 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
       static_cast<unsigned long>(record->NumberParameters),
       static_cast<unsigned long long>(accessKind),
       static_cast<unsigned long long>(fault),
+      static_cast<unsigned long long>(faultBaseDelta),
+      static_cast<unsigned long long>(gGuestVirtualBase),
+      static_cast<unsigned long long>(imageOffset),
+      static_cast<unsigned long long>(gGuestImageSize),
+      guestStackFramesJson,
       static_cast<unsigned long long>(guestRip),
       static_cast<unsigned long long>(guestFault),
       instructionDomain,

@@ -18,6 +18,9 @@ os arquivos originais permanecem disponíveis pelo Device Portal.
 Uma exceção registrada inclui commit, ID da sessão, código e tipo de acesso,
 endereço da falha, RIP virtual do convidado, bytes da instrução, registradores
 gerais, palavras iniciais da pilha e estado/proteção das páginas consultadas.
+Também registra a base virtual e o offset da imagem, metadados da região de
+memória que contém a falha e endereços de retorno obtidos pela cadeia de frames
+quando ela é válida; os endereços permitem mapear a falha ao EBOOT correspondente.
 Os campos de memória ficam em zero quando a consulta não está disponível ou
 quando não há endereço válido. O registro preserva a primeira exceção do
 código convidado; um tratamento posterior não a substitui.

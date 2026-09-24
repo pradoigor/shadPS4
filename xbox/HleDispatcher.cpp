@@ -172,6 +172,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sched_yield") use(&KernelSchedYield);
     if (name == "_exit") use(&GenericSuccess);
     if (name == "pthread_self") use(&KernelThreadSelf);
+    if (name == "sceSysmoduleLoadModuleInternal") use(&SysmoduleLoadInternal);
     if (name == "sceNetCtlInit") use(&NetCtlInit);
     if (name == "sceNetCtlTerm") use(&NetCtlTerm);
     if (name == "sceNetCtlGetInfo") use(&NetCtlGetInfo);
@@ -208,7 +209,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sceKernelWrite") use(&KernelWrite);
     if (name == "sceKernelLseek") use(&KernelLseek);
     if (name == "sceKernelFsync") use(&KernelFsync);
-    if (name == "_open") use(&KernelOpen);
+    if (name == "_open") use(&PosixOpen);
     if (name == "close") use(&KernelClose);
     if (name == "read" || name == "_read") use(&KernelRead);
     if (name == "_readv" || name == "readv" || name == "sceKernelReadv")
@@ -267,7 +268,6 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "_nanosleep") use(&KernelNanosleep);
     if (name == "setuid" || name == "madvise" || name == "fchmod" ||
         name == "sceSysmoduleLoadModule" ||
-        name == "sceSysmoduleLoadModuleInternal" ||
         name == "sceSysmoduleUnloadModuleInternal" ||
         name == "sceCommonDialogInitialize" ||
         name == "sceSystemServiceParamGetString" ||
@@ -637,6 +637,19 @@ std::uint64_t HleDispatcher::GlGetError(HleDispatcher&, GuestCallFrame const&) n
 }
 
 std::uint64_t HleDispatcher::NetCtlInit(HleDispatcher&, GuestCallFrame const&) noexcept {
+    return 0;
+}
+
+std::uint64_t HleDispatcher::SysmoduleLoadInternal(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t InternalNet = 0x80000010ull;
+    constexpr std::uint64_t InternalNetCtl = 0x80000011ull;
+    const auto module = static_cast<std::uint32_t>(frame.gpr[0]);
+    if (module == InternalNet || module == InternalNetCtl) {
+        dispatcher.GraphicsLog(
+            "HLE: módulo de rede PS4 indisponível; retorno ENOSYS");
+        return OrbisEnosys;
+    }
     return 0;
 }
 
@@ -1136,6 +1149,30 @@ std::uint64_t HleDispatcher::KernelOpen(HleDispatcher& dispatcher,
     } catch (...) {
         return OrbisEinval;
     }
+}
+
+std::uint64_t HleDispatcher::PosixOpen(HleDispatcher& dispatcher,
+                                       GuestCallFrame const& frame) noexcept {
+    constexpr std::int32_t PosixEnetunreach = 51;
+    try {
+        std::string guestPath;
+        if (dispatcher.ReadGuestString(frame.gpr[0], guestPath) &&
+            guestPath == "/data/apollo/cache/ver.check" &&
+            (static_cast<std::uint32_t>(frame.gpr[1]) & 0x3u) != 0) {
+            // Apollo's default startup path checks GitHub for updates before
+            // entering the main menu. Network calls are not implemented in
+            // UWP yet, so use an ordinary offline POSIX error and let Apollo
+            // take its own "update check failed" return path.
+            GuestPosixErrno = PosixEnetunreach;
+            dispatcher.GraphicsLog(
+                "Apollo: verificação automática de atualização ignorada (sem rede HLE)");
+            return UINT64_MAX;
+        }
+    } catch (...) {
+        GuestPosixErrno = 12; // POSIX ENOMEM
+        return UINT64_MAX;
+    }
+    return KernelOpen(dispatcher, frame);
 }
 
 std::uint64_t HleDispatcher::KernelClose(HleDispatcher& dispatcher,
