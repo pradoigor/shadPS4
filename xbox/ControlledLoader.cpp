@@ -276,9 +276,13 @@ ControlledLoadResult LoadElf(Reader &reader, elf_header const &header,
   };
   std::vector<LoadRange> loads;
   for (auto const &program : programs) {
-    if (program.p_type != PT_LOAD)
+    // PS4 SELF images can store live read-only data in PT_SCE_RELRO.
+    // Omitting it leaves relocated pointers valid but their target tables
+    // zero-filled (for example, libcurl's SSL backend size and callbacks).
+    if (program.p_type != PT_LOAD && program.p_type != PT_SCE_RELRO)
       continue;
-    ++result.load_segments;
+    if (program.p_type == PT_LOAD)
+      ++result.load_segments;
     Require(program.p_filesz <= program.p_memsz,
             "Segmento ELF tem filesz maior que memsz.");
     Require(program.p_memsz > 0, "Segmento ELF vazio.");
