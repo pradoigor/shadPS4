@@ -46,7 +46,7 @@
     <Link>
       <SubSystem>Windows</SubSystem><GenerateDebugInformation>true</GenerateDebugInformation>
       <GenerateWindowsMetadata>false</GenerateWindowsMetadata>
-      <AdditionalDependencies>WindowsApp.lib;bcrypt.lib;xaudio2.lib;$(ProjectDir)obj\fonts-uwp\Release\guest-fonts.lib;$(ProjectDir)obj\fonts-uwp\freetype\Release\freetype.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>WindowsApp.lib;bcrypt.lib;xaudio2.lib;ws2_32.lib;$(ProjectDir)obj\fonts-uwp\Release\guest-fonts.lib;$(ProjectDir)obj\fonts-uwp\freetype\Release\freetype.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

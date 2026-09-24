@@ -128,6 +128,15 @@ private:
     static std::uint64_t NetCtlInit(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t NetCtlTerm(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t NetCtlGetInfo(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t InetPton(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PosixSelect(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t SignalRaise(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t NetSocket(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t NetConnect(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t NetSend(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t NetRecv(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t NetSendTo(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t NetRecvFrom(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelIoctl(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t HideSplashScreen(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelDebugOutText(HleDispatcher&, GuestCallFrame const&) noexcept;
@@ -269,6 +278,9 @@ private:
     std::filesystem::path dataRoot_;
     std::unordered_map<std::int32_t, GuestFile> files_;
     std::int32_t nextFileDescriptor_{3};
+    std::mutex socketsMutex_;
+    std::unordered_map<std::int32_t, std::uintptr_t> sockets_;
+    std::int32_t nextSocketDescriptor_{256};
     std::filesystem::path tracePath_;
     std::filesystem::path traceHistoryPath_;
     std::filesystem::path traceArchivePath_;

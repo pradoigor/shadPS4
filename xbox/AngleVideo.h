@@ -13,6 +13,7 @@ public:
     ~AngleVideo() { Stop(); }
     bool Start(winrt::Windows::UI::Xaml::Controls::SwapChainPanel const& panel, std::wstring& detail);
     bool ReleaseForGuest() noexcept;
+    bool EnsureGuestContext() noexcept;
     bool Ready() const noexcept { return egl_ && gles_ && display_ && surface_ && context_; }
     int SurfaceWidth() const noexcept { return surfaceWidth_; }
     int SurfaceHeight() const noexcept { return surfaceHeight_; }

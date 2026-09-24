@@ -73,7 +73,8 @@ template<auto Function> std::uint64_t ForwardGl(HleDispatcher& dispatcher,
                                                  GuestCallFrame const& frame,
                                                  char const* name) noexcept {
     auto* graphics = dispatcher.Graphics();
-    if (!graphics || !graphics->Ready()) return OrbisEnosys;
+    if (!graphics || !graphics->Ready() || !graphics->EnsureGuestContext())
+        return OrbisEnosys;
     auto address = GetProcAddress(graphics->GlesModule(), name);
     if (!address) return OrbisEnosys;
     return Forwarder<decltype(Function)>::Call(dispatcher, frame, address, name);
@@ -233,13 +234,21 @@ EGL_FORWARD(eglGetConfigAttrib)
 EGL_FORWARD(eglGetError)
 EGL_FORWARD(eglQueryAPI)
 EGL_FORWARD(eglQueryString)
-EGL_FORWARD(eglSwapInterval)
 EGL_FORWARD(eglWaitGL)
 EGL_FORWARD(eglWaitNative)
 EGL_FORWARD(eglCreatePbufferSurface)
 #undef EGL_FORWARD
 
+std::uint64_t Call_eglSwapInterval(HleDispatcher& d,
+                                    GuestCallFrame const& f) noexcept {
+    auto* graphics = d.Graphics();
+    if (!graphics || !graphics->EnsureGuestContext()) return 0;
+    return ForwardEgl<&::eglSwapInterval>(d, f, "eglSwapInterval");
+}
+
 std::uint64_t Call_eglSwapBuffers(HleDispatcher& d, GuestCallFrame const& f) noexcept {
+    if (auto* graphics = d.Graphics(); !graphics || !graphics->EnsureGuestContext())
+        return 0;
     auto result = ForwardEgl<&::eglSwapBuffers>(d, f, "eglSwapBuffers");
     if (result) {
         if (auto* graphics = d.Graphics()) graphics->NoteGuestFrame();

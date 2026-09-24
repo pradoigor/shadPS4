@@ -109,6 +109,17 @@ bool AngleVideo::ReleaseForGuest() noexcept {
     return makeCurrent(display_, nullptr, nullptr, nullptr) != 0;
 }
 
+bool AngleVideo::EnsureGuestContext() noexcept {
+    if (!Ready()) return false;
+    auto current = Proc<void* (WINAPI*)()>(egl_, "eglGetCurrentContext");
+    auto makeCurrent = Proc<MakeCurrent>(egl_, "eglMakeCurrent");
+    if (!current || !makeCurrent) return false;
+    // SDL-based guests bind their own context. Some homebrews call GLES
+    // directly and rely on the platform to provide the current context.
+    if (current()) return true;
+    return makeCurrent(display_, surface_, surface_, context_) != 0;
+}
+
 void AngleVideo::Stop() noexcept {
     if (egl_ && display_) {
         if (auto makeCurrent = Proc<MakeCurrent>(egl_, "eglMakeCurrent")) makeCurrent(display_, nullptr, nullptr, nullptr);

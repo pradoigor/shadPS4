@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include "HleDispatcher.h"
 #include "GuestGraphics.h"
 #include "GuestFreeType.h"
@@ -30,6 +32,78 @@ constexpr std::size_t MaxGuestHeapAllocation = 256ull * 1024 * 1024;
 constexpr std::size_t MaxGuestHeapBytes = 512ull * 1024 * 1024;
 thread_local std::uint64_t CurrentGuestThreadId = 1;
 thread_local std::int32_t GuestPosixErrno = 0;
+std::once_flag WinsockOnce;
+bool WinsockReady{};
+bool EnsureWinsock() noexcept {
+    std::call_once(WinsockOnce, [] {
+        WSADATA data{};
+        WinsockReady = WSAStartup(MAKEWORD(2, 2), &data) == 0;
+    });
+    return WinsockReady;
+}
+
+std::int32_t PosixSocketError(int error) noexcept {
+    switch (error) {
+    case WSAEWOULDBLOCK: return 35;
+    case WSAEINPROGRESS: return 36;
+    case WSAEALREADY: return 37;
+    case WSAENOTSOCK: return 38;
+    case WSAEDESTADDRREQ: return 39;
+    case WSAEMSGSIZE: return 40;
+    case WSAEPROTOTYPE: return 41;
+    case WSAENOPROTOOPT: return 42;
+    case WSAEPROTONOSUPPORT: return 43;
+    case WSAEOPNOTSUPP: return 45;
+    case WSAEAFNOSUPPORT: return 47;
+    case WSAEADDRINUSE: return 48;
+    case WSAEADDRNOTAVAIL: return 49;
+    case WSAENETDOWN: return 50;
+    case WSAENETUNREACH: return 51;
+    case WSAENETRESET: return 52;
+    case WSAECONNABORTED: return 53;
+    case WSAECONNRESET: return 54;
+    case WSAENOBUFS: return 55;
+    case WSAEISCONN: return 56;
+    case WSAENOTCONN: return 57;
+    case WSAESHUTDOWN: return 58;
+    case WSAETIMEDOUT: return 60;
+    case WSAECONNREFUSED: return 61;
+    case WSAEHOSTUNREACH: return 65;
+    default: return 5;
+    }
+}
+
+std::uint64_t SocketFailure(int error) noexcept {
+    GuestPosixErrno = PosixSocketError(error);
+    return UINT64_MAX;
+}
+bool CopyGuestSockaddr(void const* source, std::size_t length,
+                       sockaddr_storage& destination, int& hostLength) noexcept {
+    if (!source || length < 4 || length > sizeof(destination)) return false;
+    auto const* bytes = static_cast<std::uint8_t const*>(source);
+    const auto family = bytes[1];
+    if (family == 2 && length >= 16) {
+        sockaddr_in address{};
+        address.sin_family = AF_INET;
+        std::memcpy(&address.sin_port, bytes + 2, 2);
+        std::memcpy(&address.sin_addr, bytes + 4, 4);
+        std::memcpy(&destination, &address, sizeof(address));
+        hostLength = sizeof(address);
+        return true;
+    }
+    if (family == 28 && length >= 28) {
+        sockaddr_in6 address{};
+        address.sin6_family = AF_INET6;
+        std::memcpy(&address.sin6_port, bytes + 2, 2);
+        std::memcpy(&address.sin6_flowinfo, bytes + 4, 4);
+        std::memcpy(&address.sin6_addr, bytes + 8, 16);
+        std::memcpy(&address.sin6_scope_id, bytes + 24, 4);
+        std::memcpy(&destination, &address, sizeof(address));
+        hostLength = sizeof(address);
+        return true;
+    }
+    return false;
+}
 thread_local std::unordered_map<std::uint32_t, std::uint64_t> GuestSpecificValues;
 struct GuestRwlockOwnership {
     bool write{};
@@ -166,6 +240,10 @@ bool IsCommittedGuestProcessRange(std::uint64_t address, std::size_t bytes,
 HleDispatcher::~HleDispatcher() {
     SetPaused(false);
     threads_.clear();
+    for (auto const& [descriptor, socket] : sockets_) {
+        (void)descriptor;
+        closesocket(static_cast<SOCKET>(socket));
+    }
     for (auto const& allocation : guestAllocations_) {
         if (guestAlignedAllocations_.contains(allocation.first))
             _aligned_free(allocation.first);
@@ -213,6 +291,15 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sceNetCtlInit") use(&NetCtlInit);
     if (name == "sceNetCtlTerm") use(&NetCtlTerm);
     if (name == "sceNetCtlGetInfo") use(&NetCtlGetInfo);
+    if (name == "inet_pton") use(&InetPton);
+    if (name == "select") use(&PosixSelect);
+    if (name == "raise") use(&SignalRaise);
+    if (name == "socket") use(&NetSocket);
+    if (name == "connect") use(&NetConnect);
+    if (name == "send") use(&NetSend);
+    if (name == "recv") use(&NetRecv);
+    if (name == "sendto") use(&NetSendTo);
+    if (name == "recvfrom") use(&NetRecvFrom);
     if (name == "_ioctl" || name == "ioctl") use(&KernelIoctl);
     if (name == "sceSystemServiceHideSplashScreen") use(&HideSplashScreen);
     if (name == "sceMsgDialogInitialize") use(&MsgDialogInitialize);
@@ -545,11 +632,13 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
     writeTrace("enter", 0, false);
     const auto result = entry.handler ? entry.handler(*self, *frame) : OrbisEnosys;
     writeTrace("return", result, true);
-    if (entry.nid == "6Z83sYWFlA8" || entry.name == "exit") {
+    if (entry.nid == "6Z83sYWFlA8" || entry.name == "exit" ||
+        (entry.name == "raise" && frame->gpr[0] == 6)) {
         if (auto* slot = WritablePointer(*self, *frame, frame->guest_stack,
                                          sizeof(std::uint64_t))) {
             const auto target = reinterpret_cast<std::uint64_t>(
-                PrepareGuestExitFromHle(static_cast<std::int32_t>(frame->gpr[0])));
+                PrepareGuestExitFromHle(entry.name == "raise" ? -6 :
+                    static_cast<std::int32_t>(frame->gpr[0])));
             if (target) std::memcpy(slot, &target, sizeof(target));
         }
     }
@@ -887,6 +976,278 @@ std::uint64_t HleDispatcher::NetCtlGetInfo(HleDispatcher&,
     // path instead of seeing a generic ENOSYS error.
     constexpr std::uint64_t OrbisNetCtlNotConnected = 0x80412108ull;
     return OrbisNetCtlNotConnected;
+}
+
+std::uint64_t HleDispatcher::InetPton(HleDispatcher& dispatcher,
+                                      GuestCallFrame const& frame) noexcept {
+    // Orbis uses 28 for AF_INET6; Winsock uses 23. Both use 2 for AF_INET.
+    const auto family = frame.gpr[0] == 2 ? AF_INET
+                      : frame.gpr[0] == 28 ? AF_INET6 : 0;
+    if (!family) {
+        GuestPosixErrno = 47; // EAFNOSUPPORT
+        return UINT64_MAX;
+    }
+    std::string address;
+    if (!dispatcher.ReadGuestString(frame.gpr[1], address, 128)) {
+        GuestPosixErrno = 14; // EFAULT
+        return UINT64_MAX;
+    }
+    const auto bytes = family == AF_INET ? 4u : 16u;
+    auto* output = WritablePointer(dispatcher, frame, frame.gpr[2], bytes);
+    if (!output) {
+        GuestPosixErrno = 14;
+        return UINT64_MAX;
+    }
+    IN_ADDR ipv4{};
+    IN6_ADDR ipv6{};
+    void* parsed = family == AF_INET ? static_cast<void*>(&ipv4)
+                                    : static_cast<void*>(&ipv6);
+    const auto result = InetPtonA(family, address.c_str(), parsed);
+    if (result == 1) std::memcpy(output, parsed, bytes);
+    if (result == -1) GuestPosixErrno = 22; // EINVAL
+    return static_cast<std::uint64_t>(static_cast<std::int64_t>(result));
+}
+
+std::uint64_t HleDispatcher::PosixSelect(HleDispatcher& dispatcher,
+                                         GuestCallFrame const& frame) noexcept {
+    struct GuestTimeval { std::int64_t seconds, microseconds; };
+    GuestTimeval guestTimeout{};
+    if (frame.gpr[4]) {
+        auto* input = ReadablePointer(dispatcher, frame, frame.gpr[4], sizeof(GuestTimeval));
+        if (!input) { GuestPosixErrno = 14; return UINT64_MAX; }
+        std::memcpy(&guestTimeout, input, sizeof(guestTimeout));
+        if (guestTimeout.seconds < 0 || guestTimeout.microseconds < 0 ||
+            guestTimeout.microseconds >= 1000000) {
+            GuestPosixErrno = 22;
+            return UINT64_MAX;
+        }
+    }
+    const bool hasSets = frame.gpr[1] || frame.gpr[2] || frame.gpr[3];
+    if (!hasSets) {
+        if (!frame.gpr[4]) { GuestPosixErrno = 22; return UINT64_MAX; }
+        const auto milliseconds = guestTimeout.seconds >= 60 ? std::int64_t{60000}
+            : guestTimeout.seconds * 1000 + guestTimeout.microseconds / 1000;
+        if (milliseconds > 0)
+            std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
+        return 0;
+    }
+    if (!EnsureWinsock() || frame.gpr[0] > 1024) {
+        GuestPosixErrno = 22;
+        return UINT64_MAX;
+    }
+    constexpr std::size_t GuestFdSetBytes = 128;
+    fd_set hostSets[3]{};
+    std::array<std::array<std::uint8_t, GuestFdSetBytes>, 3> guestSets{};
+    std::array<void*, 3> output{};
+    std::scoped_lock lock(dispatcher.socketsMutex_);
+    for (unsigned set = 0; set < 3; ++set) {
+        FD_ZERO(&hostSets[set]);
+        if (!frame.gpr[set + 1]) continue;
+        auto* input = ReadablePointer(dispatcher, frame, frame.gpr[set + 1],
+                                      GuestFdSetBytes);
+        output[set] = WritablePointer(dispatcher, frame, frame.gpr[set + 1],
+                                      GuestFdSetBytes);
+        if (!input || !output[set]) { GuestPosixErrno = 14; return UINT64_MAX; }
+        std::memcpy(guestSets[set].data(), input, GuestFdSetBytes);
+        for (std::uint64_t descriptor = 0; descriptor < frame.gpr[0]; ++descriptor) {
+            if (!(guestSets[set][descriptor / 8] & (1u << (descriptor % 8)))) continue;
+            auto found = dispatcher.sockets_.find(static_cast<std::int32_t>(descriptor));
+            if (found == dispatcher.sockets_.end()) { GuestPosixErrno = 9; return UINT64_MAX; }
+            if (hostSets[set].fd_count == FD_SETSIZE) { GuestPosixErrno = 22; return UINT64_MAX; }
+            FD_SET(static_cast<SOCKET>(found->second), &hostSets[set]);
+        }
+    }
+    timeval timeout{};
+    timeval* timeoutPointer{};
+    if (frame.gpr[4]) {
+        timeout.tv_sec = static_cast<long>((std::min<std::int64_t>)(guestTimeout.seconds, 60));
+        timeout.tv_usec = static_cast<long>(guestTimeout.microseconds);
+        timeoutPointer = &timeout;
+    }
+    const auto result = ::select(0, frame.gpr[1] ? &hostSets[0] : nullptr,
+        frame.gpr[2] ? &hostSets[1] : nullptr,
+        frame.gpr[3] ? &hostSets[2] : nullptr, timeoutPointer);
+    if (result == SOCKET_ERROR) return SocketFailure(WSAGetLastError());
+    for (unsigned set = 0; set < 3; ++set) {
+        if (!output[set]) continue;
+        std::array<std::uint8_t, GuestFdSetBytes> ready{};
+        for (std::uint64_t descriptor = 0; descriptor < frame.gpr[0]; ++descriptor) {
+            if (!(guestSets[set][descriptor / 8] & (1u << (descriptor % 8)))) continue;
+            auto found = dispatcher.sockets_.find(static_cast<std::int32_t>(descriptor));
+            if (found != dispatcher.sockets_.end() &&
+                FD_ISSET(static_cast<SOCKET>(found->second), &hostSets[set]))
+                ready[descriptor / 8] |= static_cast<std::uint8_t>(1u << (descriptor % 8));
+        }
+        std::memcpy(output[set], ready.data(), ready.size());
+    }
+    return static_cast<std::uint64_t>(result);
+}
+
+std::uint64_t HleDispatcher::SignalRaise(HleDispatcher&,
+                                         GuestCallFrame const& frame) noexcept {
+    // SIGABRT from an uncaught guest exception must end the guest session,
+    // not the UWP process hosting it. The dispatcher redirects its return to
+    // the same exit trampoline used for guest exit(-6).
+    if (frame.gpr[0] == 6) return 0;
+    GuestPosixErrno = 38;
+    return UINT64_MAX;
+}
+
+std::uint64_t HleDispatcher::NetSocket(HleDispatcher& dispatcher,
+                                       GuestCallFrame const& frame) noexcept {
+    if (!EnsureWinsock()) return SocketFailure(WSANOTINITIALISED);
+    const auto family = frame.gpr[0] == 2 ? AF_INET :
+                        frame.gpr[0] == 28 ? AF_INET6 : 0;
+    if (!family) return SocketFailure(WSAEAFNOSUPPORT);
+    const auto type = static_cast<int>(frame.gpr[1]);
+    if (type != SOCK_STREAM && type != SOCK_DGRAM)
+        return SocketFailure(WSAESOCKTNOSUPPORT);
+    const auto protocol = static_cast<int>(frame.gpr[2]);
+    auto socket = ::socket(family, type, protocol);
+    if (socket == INVALID_SOCKET) return SocketFailure(WSAGetLastError());
+    std::scoped_lock lock(dispatcher.socketsMutex_);
+    const auto descriptor = dispatcher.nextSocketDescriptor_++;
+    try { dispatcher.sockets_.emplace(descriptor, static_cast<std::uintptr_t>(socket)); }
+    catch (...) { closesocket(socket); GuestPosixErrno = 12; return UINT64_MAX; }
+    return static_cast<std::uint64_t>(descriptor);
+}
+
+std::uint64_t HleDispatcher::NetConnect(HleDispatcher& dispatcher,
+                                        GuestCallFrame const& frame) noexcept {
+    SOCKET socket{};
+    {
+        std::scoped_lock lock(dispatcher.socketsMutex_);
+        auto found = dispatcher.sockets_.find(static_cast<std::int32_t>(frame.gpr[0]));
+        if (found == dispatcher.sockets_.end()) return SocketFailure(WSAENOTSOCK);
+        socket = static_cast<SOCKET>(found->second);
+    }
+    if (frame.gpr[2] > sizeof(sockaddr_storage)) { GuestPosixErrno = 22; return UINT64_MAX; }
+    auto* source = ReadablePointer(dispatcher, frame, frame.gpr[1],
+                                   static_cast<std::size_t>(frame.gpr[2]));
+    sockaddr_storage address{};
+    int length{};
+    if (!CopyGuestSockaddr(source, static_cast<std::size_t>(frame.gpr[2]), address, length)) {
+        GuestPosixErrno = 22;
+        return UINT64_MAX;
+    }
+    const auto result = ::connect(socket, reinterpret_cast<sockaddr*>(&address), length);
+    return result == SOCKET_ERROR ? SocketFailure(WSAGetLastError()) : 0;
+}
+
+std::uint64_t HleDispatcher::NetSend(HleDispatcher& dispatcher,
+                                     GuestCallFrame const& frame) noexcept {
+    SOCKET socket{};
+    {
+        std::scoped_lock lock(dispatcher.socketsMutex_);
+        auto found = dispatcher.sockets_.find(static_cast<std::int32_t>(frame.gpr[0]));
+        if (found == dispatcher.sockets_.end()) return SocketFailure(WSAENOTSOCK);
+        socket = static_cast<SOCKET>(found->second);
+    }
+    if (frame.gpr[2] > INT_MAX) { GuestPosixErrno = 22; return UINT64_MAX; }
+    const auto length = static_cast<int>(frame.gpr[2]);
+    auto* data = static_cast<char const*>(ReadablePointer(
+        dispatcher, frame, frame.gpr[1], length ? length : 1));
+    if (!data) { GuestPosixErrno = 14; return UINT64_MAX; }
+    const auto result = ::send(socket, data, length, static_cast<int>(frame.gpr[3]));
+    return result == SOCKET_ERROR ? SocketFailure(WSAGetLastError()) :
+        static_cast<std::uint64_t>(result);
+}
+
+std::uint64_t HleDispatcher::NetRecv(HleDispatcher& dispatcher,
+                                     GuestCallFrame const& frame) noexcept {
+    SOCKET socket{};
+    {
+        std::scoped_lock lock(dispatcher.socketsMutex_);
+        auto found = dispatcher.sockets_.find(static_cast<std::int32_t>(frame.gpr[0]));
+        if (found == dispatcher.sockets_.end()) return SocketFailure(WSAENOTSOCK);
+        socket = static_cast<SOCKET>(found->second);
+    }
+    if (frame.gpr[2] > INT_MAX) { GuestPosixErrno = 22; return UINT64_MAX; }
+    const auto length = static_cast<int>(frame.gpr[2]);
+    auto* data = static_cast<char*>(WritablePointer(
+        dispatcher, frame, frame.gpr[1], length ? length : 1));
+    if (!data) { GuestPosixErrno = 14; return UINT64_MAX; }
+    const auto result = ::recv(socket, data, length, static_cast<int>(frame.gpr[3]));
+    return result == SOCKET_ERROR ? SocketFailure(WSAGetLastError()) :
+        static_cast<std::uint64_t>(result);
+}
+
+std::uint64_t HleDispatcher::NetSendTo(HleDispatcher& dispatcher,
+                                       GuestCallFrame const& frame) noexcept {
+    if (frame.gpr[4] == 0) return NetSend(dispatcher, frame);
+    SOCKET socket{};
+    {
+        std::scoped_lock lock(dispatcher.socketsMutex_);
+        auto found = dispatcher.sockets_.find(static_cast<std::int32_t>(frame.gpr[0]));
+        if (found == dispatcher.sockets_.end()) return SocketFailure(WSAENOTSOCK);
+        socket = static_cast<SOCKET>(found->second);
+    }
+    if (frame.gpr[2] > INT_MAX || frame.gpr[5] > sizeof(sockaddr_storage)) {
+        GuestPosixErrno = 22; return UINT64_MAX;
+    }
+    const auto length = static_cast<int>(frame.gpr[2]);
+    auto* data = static_cast<char const*>(ReadablePointer(
+        dispatcher, frame, frame.gpr[1], length ? length : 1));
+    auto* source = ReadablePointer(dispatcher, frame, frame.gpr[4],
+                                   static_cast<std::size_t>(frame.gpr[5]));
+    sockaddr_storage address{};
+    int addressLength{};
+    if (!data || !CopyGuestSockaddr(source, static_cast<std::size_t>(frame.gpr[5]),
+                                    address, addressLength)) {
+        GuestPosixErrno = 14; return UINT64_MAX;
+    }
+    const auto result = ::sendto(socket, data, length, static_cast<int>(frame.gpr[3]),
+        reinterpret_cast<sockaddr*>(&address), addressLength);
+    return result == SOCKET_ERROR ? SocketFailure(WSAGetLastError()) :
+        static_cast<std::uint64_t>(result);
+}
+
+std::uint64_t HleDispatcher::NetRecvFrom(HleDispatcher& dispatcher,
+                                         GuestCallFrame const& frame) noexcept {
+    if (frame.gpr[4] == 0) return NetRecv(dispatcher, frame);
+    SOCKET socket{};
+    {
+        std::scoped_lock lock(dispatcher.socketsMutex_);
+        auto found = dispatcher.sockets_.find(static_cast<std::int32_t>(frame.gpr[0]));
+        if (found == dispatcher.sockets_.end()) return SocketFailure(WSAENOTSOCK);
+        socket = static_cast<SOCKET>(found->second);
+    }
+    if (frame.gpr[2] > INT_MAX || !frame.gpr[5]) { GuestPosixErrno = 22; return UINT64_MAX; }
+    auto* guestAddressLength = static_cast<std::uint32_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[5], sizeof(std::uint32_t)));
+    const auto length = static_cast<int>(frame.gpr[2]);
+    auto* data = static_cast<char*>(WritablePointer(
+        dispatcher, frame, frame.gpr[1], length ? length : 1));
+    if (!guestAddressLength || !data) { GuestPosixErrno = 14; return UINT64_MAX; }
+    const auto capacity = *guestAddressLength;
+    auto* guestAddress = static_cast<std::uint8_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[4], capacity));
+    if (!guestAddress) { GuestPosixErrno = 14; return UINT64_MAX; }
+    sockaddr_storage source{};
+    int sourceLength = sizeof(source);
+    const auto result = ::recvfrom(socket, data, length, static_cast<int>(frame.gpr[3]),
+        reinterpret_cast<sockaddr*>(&source), &sourceLength);
+    if (result == SOCKET_ERROR) return SocketFailure(WSAGetLastError());
+    if (source.ss_family == AF_INET && capacity >= 16) {
+        auto const& address = reinterpret_cast<sockaddr_in const&>(source);
+        std::memset(guestAddress, 0, 16);
+        guestAddress[0] = 16; guestAddress[1] = 2;
+        std::memcpy(guestAddress + 2, &address.sin_port, 2);
+        std::memcpy(guestAddress + 4, &address.sin_addr, 4);
+        *guestAddressLength = 16;
+    } else if (source.ss_family == AF_INET6 && capacity >= 28) {
+        auto const& address = reinterpret_cast<sockaddr_in6 const&>(source);
+        std::memset(guestAddress, 0, 28);
+        guestAddress[0] = 28; guestAddress[1] = 28;
+        std::memcpy(guestAddress + 2, &address.sin6_port, 2);
+        std::memcpy(guestAddress + 4, &address.sin6_flowinfo, 4);
+        std::memcpy(guestAddress + 8, &address.sin6_addr, 16);
+        std::memcpy(guestAddress + 24, &address.sin6_scope_id, 4);
+        *guestAddressLength = 28;
+    } else {
+        *guestAddressLength = static_cast<std::uint32_t>(sourceLength);
+    }
+    return static_cast<std::uint64_t>(result);
 }
 
 std::uint64_t HleDispatcher::KernelIoctl(HleDispatcher& dispatcher,
@@ -1833,6 +2194,15 @@ std::uint64_t HleDispatcher::KernelClose(HleDispatcher& dispatcher,
                                          GuestCallFrame const& frame) noexcept {
     constexpr std::uint64_t OrbisEbadf = 0x80020009ull;
     const auto descriptor = static_cast<std::int32_t>(frame.gpr[0]);
+    {
+        std::scoped_lock lock(dispatcher.socketsMutex_);
+        auto socket = dispatcher.sockets_.find(descriptor);
+        if (socket != dispatcher.sockets_.end()) {
+            const auto result = closesocket(static_cast<SOCKET>(socket->second));
+            dispatcher.sockets_.erase(socket);
+            return result == SOCKET_ERROR ? SocketFailure(WSAGetLastError()) : 0;
+        }
+    }
     auto found = dispatcher.files_.find(descriptor);
     if (found == dispatcher.files_.end()) return OrbisEbadf;
     if (found->second.stream.is_open()) found->second.stream.close();
