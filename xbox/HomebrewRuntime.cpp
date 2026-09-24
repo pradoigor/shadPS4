@@ -139,6 +139,31 @@ std::uint32_t PatchFsTcbReads(std::vector<std::uint8_t>& image,
   return patched;
 }
 
+std::uint32_t TrapGuestSyscalls(std::vector<std::uint8_t>& image,
+                                std::uint64_t virtualBase,
+                                std::vector<GuestSegmentInfo> const& segments) {
+  // A FreeBSD/PS4 `syscall` would enter the Windows kernel with PS4 register
+  // values. Replace its two-byte opcode with UD2 so the existing guest fault
+  // recorder captures the syscall number and guest RIP without crossing the
+  // host kernel boundary. This is enabled only for Store loaders below.
+  std::uint32_t trapped{};
+  for (auto const& segment : segments) {
+    if ((segment.flags & 0x1u) == 0 || segment.address < virtualBase) continue;
+    const auto begin64 = segment.address - virtualBase;
+    if (begin64 >= image.size()) continue;
+    const auto begin = static_cast<std::size_t>(begin64);
+    const auto bytes = static_cast<std::size_t>((std::min<std::uint64_t>)(
+        segment.size, image.size() - begin));
+    for (std::size_t index = begin; index + 1 < begin + bytes; ++index) {
+      if (image[index] != 0x0f || image[index + 1] != 0x05) continue;
+      image[index + 1] = 0x0b;
+      ++trapped;
+      ++index;
+    }
+  }
+  return trapped;
+}
+
 int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
   if (!exception || !exception->ExceptionRecord || !exception->ContextRecord ||
       gCrashStateFile.empty())
@@ -550,6 +575,16 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
                                     load_.guest_segments, tlsSlot_);
   if (patchedFsReads_ == 0)
     throw std::runtime_error("Nenhum acesso PS4 fs:[0] foi localizado para tradução.");
+  std::error_code storePathError;
+  if (std::filesystem::is_regular_file(
+          executable_.parent_path() / L"Media" / L"rsa.prx", storePathError) &&
+      !storePathError) {
+    const auto syscalls = TrapGuestSyscalls(load_.private_image,
+                                           load_.min_virtual_address,
+                                           load_.guest_segments);
+    Record("guest_syscall_guard", "Interceptadas " + std::to_string(syscalls) +
+        " instruções syscall do loader; uma chamada PS4 não entrará no kernel Windows.");
+  }
   mainTlsPage_ = Core::PlatformMemory::Allocate(
       GetCurrentProcess(), nullptr, 4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
   if (!mainTlsPage_)

@@ -178,9 +178,10 @@
           </Grid>
         </Border>
         <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="24">
-          <TextBlock Text="Ⓐ  Selecionar arquivo" FontSize="14" Foreground="#C9E2E8"/>
-          <TextBlock Text="Ⓑ  Voltar" FontSize="14" Foreground="#C9E2E8"/>
-          <TextBlock Text="⒳  Instalar" FontSize="14" Foreground="#C9E2E8"/>
+          <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"><Border Style="{StaticResource LegendBadge}"><Grid><TextBlock Text="▲" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Top"/><TextBlock Text="▼" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Bottom"/><TextBlock Text="◀" FontSize="9" HorizontalAlignment="Left" VerticalAlignment="Center"/><TextBlock Text="▶" FontSize="9" HorizontalAlignment="Right" VerticalAlignment="Center"/></Grid></Border><TextBlock Text="Navegar" FontSize="15" Foreground="#C9E2E8" VerticalAlignment="Center"/></StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"><Border Style="{StaticResource LegendBadge}"><TextBlock Text="A" FontSize="15" Foreground="#70D568" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Selecionar arquivo" FontSize="15" Foreground="#C9E2E8" VerticalAlignment="Center"/></StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"><Border Style="{StaticResource LegendBadge}"><TextBlock Text="B" FontSize="15" Foreground="#F36868" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Voltar" FontSize="15" Foreground="#C9E2E8" VerticalAlignment="Center"/></StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"><Border Style="{StaticResource LegendBadge}"><TextBlock Text="X" FontSize="15" Foreground="#64AAFF" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Instalar" FontSize="15" Foreground="#C9E2E8" VerticalAlignment="Center"/></StackPanel>
         </StackPanel>
       </Grid>
 
@@ -196,7 +197,7 @@
           <StackPanel Spacing="18" Margin="0,14,0,10">
             <Border Background="#0D2630" BorderBrush="#33535D" BorderThickness="1" CornerRadius="12" Padding="24">
               <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <StackPanel Spacing="7"><TextBlock Text="XS4" FontSize="24"/><TextBlock Text="Versão instalada" FontSize="14" Foreground="#AFCBD2"/><TextBlock x:Name="CurrentVersion" Text="0.90.0.0" FontSize="20" Foreground="#F2FBFC"/></StackPanel>
+                <StackPanel Spacing="7"><TextBlock Text="XS4" FontSize="24"/><TextBlock Text="Versão instalada" FontSize="14" Foreground="#AFCBD2"/><TextBlock x:Name="CurrentVersion" Text="0.91.0.0" FontSize="20" Foreground="#F2FBFC"/></StackPanel>
                 <Border Grid.Column="1" Width="72" Height="72" CornerRadius="18" Background="#11313B" VerticalAlignment="Center"><Image Width="64" Height="64" Source="ms-appx:///Assets/XS4-Mark.png" Stretch="Uniform"/></Border>
               </Grid>
             </Border>

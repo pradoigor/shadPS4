@@ -94,6 +94,7 @@ struct App : ApplicationT<App> {
     HomeCategory homeCategory{HomeCategory::Games};
     HomeFilter homeFilter{HomeFilter::All};
     int selectedPendingIndex{-1};
+    int libraryFocusIndex{-1};
     int homeFocusedIndex{-1};
     HomeFocusArea homeFocusArea{HomeFocusArea::Tabs};
     int homeFocusIndex{};
@@ -271,6 +272,7 @@ struct App : ApplicationT<App> {
             if (focus) FocusHome(homeVisibleIndices.empty() ? HomeFocusArea::EmptyAction : HomeFocusArea::Titles, 0);
         } else if (page == Page::Library) {
             PopulateLibrary();
+            libraryFocusIndex = -1;
             if (focus) Find<Button>(L"SelectContent").Focus(FocusState::Programmatic);
         } else if (page == Page::Settings) {
             if (focus) Find<Button>(L"SettingsBack").Focus(FocusState::Programmatic);
@@ -309,6 +311,14 @@ struct App : ApplicationT<App> {
         if (index >= libraryItems.size() || libraryItems[index].installed) return;
         selectedPendingIndex = static_cast<int>(index);
         RefreshPendingSelection();
+    }
+    void FocusPending(int position) {
+        if (position < 0 || position >= static_cast<int>(pendingItems.Items().Size())) return;
+        auto card = pendingItems.Items().GetAt(static_cast<std::uint32_t>(position)).try_as<Button>();
+        if (!card) return;
+        libraryFocusIndex = position;
+        card.Focus(FocusState::Programmatic);
+        SelectPending(pendingIndices[static_cast<size_t>(position)]);
     }
     void UpdateHomeBackdrop(size_t index) {
         auto backdrop = Find<Image>(L"HomeBackdrop");
@@ -756,9 +766,15 @@ struct App : ApplicationT<App> {
                 card.Background(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 14, 18, 27)));
                 card.Content(tile); card.Tag(box_value(static_cast<int64_t>(index)));
                 card.Click([this, index](auto const&, auto const&) { SelectPending(index); });
+                const auto focusPosition = static_cast<int>(pendingIndices.size() - 1);
+                card.GotFocus([this, focusPosition, index](auto const&, auto const&) {
+                    libraryFocusIndex = focusPosition;
+                    SelectPending(index);
+                });
                 pendingItems.Items().Append(card);
             }
             selectedPendingIndex = -1;
+            libraryFocusIndex = -1;
             RefreshPendingSelection();
             Find<TextBlock>(L"PendingCount").Text(std::to_wstring(pendingIndices.size()) +
                 (pendingIndices.size() == 1 ? L" arquivo" : L" arquivos"));
@@ -1049,6 +1065,30 @@ struct App : ApplicationT<App> {
                 lastHomeMove = now;
                 NavigateHome(dx, dy);
             }
+        } else if (currentPage == Page::Library && (dx || dy) &&
+                   !pendingIndices.empty()) {
+            if (libraryFocusIndex < 0) {
+                if (dy > 0) FocusPending(0);
+                else if (dy < 0 && selectedPendingIndex >= 0) {
+                    auto found = std::find(pendingIndices.begin(), pendingIndices.end(),
+                                           static_cast<size_t>(selectedPendingIndex));
+                    if (found != pendingIndices.end())
+                        FocusPending(static_cast<int>(found - pendingIndices.begin()));
+                }
+                else handled = false;
+            } else {
+                const auto next = libraryFocusIndex + dx + dy * 6;
+                if (next < 0) {
+                    libraryFocusIndex = -1;
+                    Find<Button>(L"SelectContent").Focus(FocusState::Programmatic);
+                } else if (next >= static_cast<int>(pendingIndices.size())) {
+                    libraryFocusIndex = -1;
+                    auto action = Find<Button>(L"ExtractContent");
+                    if (!action.IsEnabled()) action = Find<Button>(L"ValidateContent");
+                    if (action.IsEnabled()) action.Focus(FocusState::Programmatic);
+                    else FocusPending(static_cast<int>(pendingIndices.size() - 1));
+                } else FocusPending(next);
+            }
         } else if (key == Sys::VirtualKey::GamepadB) {
             const bool angleVisible = Find<Grid>(L"AngleTestView").Visibility() == Visibility::Visible;
             if (angleVisible && !(homebrew && homebrew->running()) && !homebrewLaunchPending)
@@ -1180,6 +1220,11 @@ struct App : ApplicationT<App> {
             Find<Button>(L"OpenLibrary").Click([this](auto const&, auto const&) { ShowPage(Page::Library); });
             Find<Button>(L"EmptyImport").Click([this](auto const&, auto const&) { ShowPage(Page::Library); SelectContent(); });
             Find<Button>(L"PendingEmptyImport").Click([this](auto const&, auto const&) { SelectContent(); });
+            for (auto name : {L"LibraryBack", L"ImportKeys", L"SelectContent",
+                              L"ValidateContent", L"ExtractContent"})
+                Find<Button>(name).GotFocus([this](auto const&, auto const&) {
+                    libraryFocusIndex = -1;
+                });
             Find<Button>(L"LibraryBack").Click([this](auto const&, auto const&) { ShowPage(Page::Home); });
             Find<Button>(L"OpenSettings").Click([this](auto const&, auto const&) { ShowPage(Page::Settings); });
             Find<Button>(L"SettingsBack").Click([this](auto const&, auto const&) { ShowPage(Page::Home); });
