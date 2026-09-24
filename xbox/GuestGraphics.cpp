@@ -85,12 +85,14 @@ std::uint64_t Call_##name(HleDispatcher& d, GuestCallFrame const& f) noexcept { 
 #undef GL_FUNCTION
 
 std::uint64_t Call_glShaderBinary(HleDispatcher&, GuestCallFrame const&) noexcept;
+std::uint64_t Call_glViewport(HleDispatcher&, GuestCallFrame const&) noexcept;
 struct NamedHandler { std::string_view name; HleHandler handler; };
 constexpr NamedHandler GlHandlers[] = {
 #define GL_FUNCTION(name) {#name, &Call_##name},
 #include "GuestGlFunctions.inc"
 #undef GL_FUNCTION
     {"glShaderBinary", &Call_glShaderBinary},
+    {"glViewport", &Call_glViewport},
 };
 
 template<auto Function> std::uint64_t ForwardEgl(HleDispatcher& dispatcher,
@@ -206,6 +208,27 @@ std::uint64_t Call_glShaderBinary(HleDispatcher& d,
         }
     }
     return 0;
+}
+
+std::uint64_t Call_glViewport(HleDispatcher& d,
+                              GuestCallFrame const& f) noexcept {
+    const auto result = ForwardGl<&::glViewport>(d, f, "glViewport");
+    static std::atomic_uint32_t logged{};
+    if (logged.fetch_add(1, std::memory_order_relaxed) < 4) {
+        char message[192]{};
+        auto* graphics = d.Graphics();
+        std::snprintf(message, sizeof(message),
+                      "GL: viewport convidado=(%lld,%lld,%lld,%lld); "
+                      "superfície EGL=%dx%d px",
+                      static_cast<long long>(f.gpr[0]),
+                      static_cast<long long>(f.gpr[1]),
+                      static_cast<long long>(f.gpr[2]),
+                      static_cast<long long>(f.gpr[3]),
+                      graphics ? graphics->SurfaceWidth() : 0,
+                      graphics ? graphics->SurfaceHeight() : 0);
+        d.GraphicsLog(message);
+    }
+    return result;
 }
 
 std::uint64_t Call_sceKernelLoadStartModule(HleDispatcher& d, GuestCallFrame const& f) noexcept {

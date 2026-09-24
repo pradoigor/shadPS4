@@ -1,4 +1,4 @@
-# Apollo no runtime UWP — versão 0.74
+# Apollo no runtime UWP — versão 0.75
 
 ## Resultado do teste 0.71
 
@@ -61,12 +61,35 @@ Essa adaptação ainda precisa ser verificada no Xbox. Ela cobre a conversão de
 shader Piglet observada no Apollo, não todo o renderer Piglet nem os shaders GNM
 de jogos PS4.
 
+## Resultado do teste 0.74
+
+A sessão `1790210045-4552031-5816` confirmou que a conversão funcionou: os três
+shaders registrados foram aceitos pelo compilador ANGLE, houve duas chamadas de
+`glLinkProgram`, 512 chamadas de desenho e 256 trocas de buffer. O viewport
+convidado foi `(0,0,1920,1080)`. Isso confirma atividade de desenho do Apollo,
+mas o trace não identifica a tela mostrada nem permite avaliar seu centramento.
+
+O aplicativo fechou com a mesma instrução e violação de acesso da versão 0.73,
+tentando ler uma página fora da imagem mapeada. O trace termina após abrir
+`/data/apollo/cache/ver.check` e receber `ENOSYS` de `_ioctl` para `TIOCGWINSZ`;
+isso é uma pista, mas ainda não prova que a chamada causou a exceção.
+
+## Alterações da versão 0.75
+
+- Implementa `sceNetCtlGetInfo` com o resultado PS4 de rede indisponível usado
+  pelo shadPS4, para o Apollo seguir o caminho offline em vez de receber `ENOSYS`.
+- Implementa o comportamento POSIX de `_ioctl(TIOCGWINSZ)`: dimensões para
+  descritores de terminal e `ENOTTY` para arquivos comuns.
+- Registra as dimensões em pixels da superfície EGL e os primeiros viewports
+  convidados para comparar a resolução lógica com a área real de apresentação.
+
 ## O que falta confirmar
 
-O trace 0.73 mostra que `sceKernelLoadStartModule` não encontrou
-`libSceFsInternalForVsh.sprx`; em consequência `sceKernelDlsym` não pode resolver
-os símbolos privados do PS4. `sceKernelSendNotificationRequest`, `_ioctl` e
-`sceSystemServiceLoadExec` também continuam sem handler.
+Os traces mostram que o runtime ainda não fornece todos os serviços privados do
+PS4 usados pelo Apollo, incluindo `sceKernelDlsym`, montagem de saves e
+`sceSystemServiceLoadExec`. A versão 0.75 cobre somente a consulta de estado de
+rede e o `TIOCGWINSZ` observados nesta sessão; ela não implementa acesso a rede,
+serviços privados ou saves.
 Além disso, o caminho de montagem de saves do Apollo depende de serviços
 privilegiados e bibliotecas internas do PS4 que não existem no ambiente UWP.
 Mesmo que o menu apareça, isso não significará que gerenciamento, importação ou

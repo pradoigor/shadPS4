@@ -10,6 +10,7 @@ using BindApi = unsigned (WINAPI*)(unsigned);
 using ChooseConfig = unsigned (WINAPI*)(void*, const int*, void**, int, int*);
 using CreateWindowSurface = void* (WINAPI*)(void*, void*, void*, const int*);
 using CreateContext = void* (WINAPI*)(void*, void*, void*, const int*);
+using QuerySurface = unsigned (WINAPI*)(void*, void*, int, int*);
 using MakeCurrent = unsigned (WINAPI*)(void*, void*, void*, void*);
 using SwapBuffers = unsigned (WINAPI*)(void*, void*);
 using GetError = unsigned (WINAPI*)();
@@ -41,13 +42,14 @@ bool AngleVideo::Start(winrt::Windows::UI::Xaml::Controls::SwapChainPanel const&
     auto chooseConfig = Proc<ChooseConfig>(egl_, "eglChooseConfig");
     auto createSurface = Proc<CreateWindowSurface>(egl_, "eglCreateWindowSurface");
     auto createContext = Proc<CreateContext>(egl_, "eglCreateContext");
+    auto querySurface = Proc<QuerySurface>(egl_, "eglQuerySurface");
     auto makeCurrent = Proc<MakeCurrent>(egl_, "eglMakeCurrent");
     auto swapBuffers = Proc<SwapBuffers>(egl_, "eglSwapBuffers");
     auto viewport = Proc<Viewport>(gles_, "glViewport");
     auto clearColor = Proc<ClearColor>(gles_, "glClearColor");
     auto clear = Proc<Clear>(gles_, "glClear");
     if (!getDisplay || !initialize || !bindApi || !chooseConfig || !createSurface ||
-        !createContext || !makeCurrent || !swapBuffers || !viewport || !clearColor || !clear)
+        !createContext || !querySurface || !makeCurrent || !swapBuffers || !viewport || !clearColor || !clear)
         return fail(L"Símbolo EGL/GLES ausente");
     display_ = getDisplay(nullptr);
     if (!display_) return fail(L"eglGetDisplay");
@@ -72,15 +74,21 @@ bool AngleVideo::Start(winrt::Windows::UI::Xaml::Controls::SwapChainPanel const&
     context_ = createContext(display_, config, nullptr, contextAttrs);
     if (!context_) return fail(L"eglCreateContext ES2");
     if (!makeCurrent(display_, surface_, surface_, context_)) return fail(L"eglMakeCurrent");
-    auto width = static_cast<int>(panel.ActualWidth());
-    auto height = static_cast<int>(panel.ActualHeight());
-    if (width <= 0 || height <= 0) return fail(L"SwapChainPanel sem dimensões");
-    viewport(0, 0, width, height);
+    const auto panelWidth = static_cast<int>(panel.ActualWidth());
+    const auto panelHeight = static_cast<int>(panel.ActualHeight());
+    if (panelWidth <= 0 || panelHeight <= 0) return fail(L"SwapChainPanel sem dimensões");
+    if (!querySurface(display_, surface_, 0x3057, &surfaceWidth_) ||
+        !querySurface(display_, surface_, 0x3056, &surfaceHeight_) ||
+        surfaceWidth_ <= 0 || surfaceHeight_ <= 0)
+        return fail(L"eglQuerySurface(EGL_WIDTH/EGL_HEIGHT)");
+    viewport(0, 0, surfaceWidth_, surfaceHeight_);
     clearColor(0.05f, 0.55f, 0.85f, 1.f);
     clear(0x4000);
     if (!swapBuffers(display_, surface_)) return fail(L"eglSwapBuffers");
     detail = L"ANGLE EGL " + std::to_wstring(major) + L"." + std::to_wstring(minor) +
-             L"; GLES2; quadro azul apresentado em " + std::to_wstring(width) + L"x" + std::to_wstring(height);
+             L"; GLES2; quadro azul em EGL " + std::to_wstring(surfaceWidth_) +
+             L"x" + std::to_wstring(surfaceHeight_) + L" pixels; SwapChainPanel " +
+             std::to_wstring(panelWidth) + L"x" + std::to_wstring(panelHeight) + L" DIP";
     return true;
 }
 
@@ -108,6 +116,7 @@ void AngleVideo::Stop() noexcept {
         if (auto terminate = Proc<Terminate>(egl_, "eglTerminate")) terminate(display_);
     }
     context_ = surface_ = display_ = config_ = nullptr;
+    surfaceWidth_ = surfaceHeight_ = 0;
     properties_ = nullptr;
     if (gles_) FreeLibrary(gles_);
     if (egl_) FreeLibrary(egl_);

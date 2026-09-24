@@ -114,6 +114,8 @@ private:
     static std::uint64_t GlGetError(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t NetCtlInit(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t NetCtlTerm(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t NetCtlGetInfo(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelIoctl(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t HideSplashScreen(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelDebugOutText(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelMprotect(HleDispatcher&, GuestCallFrame const&) noexcept;

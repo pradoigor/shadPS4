@@ -174,6 +174,8 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "pthread_self") use(&KernelThreadSelf);
     if (name == "sceNetCtlInit") use(&NetCtlInit);
     if (name == "sceNetCtlTerm") use(&NetCtlTerm);
+    if (name == "sceNetCtlGetInfo") use(&NetCtlGetInfo);
+    if (name == "_ioctl" || name == "ioctl") use(&KernelIoctl);
     if (name == "sceSystemServiceHideSplashScreen") use(&HideSplashScreen);
     if (name == "sceKernelDebugOutText") use(&KernelDebugOutText);
     if (name == "sceKernelMprotect") use(&KernelMprotect);
@@ -639,6 +641,55 @@ std::uint64_t HleDispatcher::NetCtlInit(HleDispatcher&, GuestCallFrame const&) n
 }
 
 std::uint64_t HleDispatcher::NetCtlTerm(HleDispatcher&, GuestCallFrame const&) noexcept {
+    return 0;
+}
+
+std::uint64_t HleDispatcher::NetCtlGetInfo(HleDispatcher&,
+                                           GuestCallFrame const&) noexcept {
+    // The current UWP HLE has no PS4 network-control implementation. Match the
+    // official shadPS4 offline result so applications can take their offline
+    // path instead of seeing a generic ENOSYS error.
+    constexpr std::uint64_t OrbisNetCtlNotConnected = 0x80412108ull;
+    return OrbisNetCtlNotConnected;
+}
+
+std::uint64_t HleDispatcher::KernelIoctl(HleDispatcher& dispatcher,
+                                         GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t Tiocgwinsz = 0x5413;
+    constexpr std::int32_t PosixEbadf = 9;
+    constexpr std::int32_t PosixEfault = 14;
+    constexpr std::int32_t PosixEnotty = 25;
+    struct GuestWindowSize {
+        std::uint16_t rows{};
+        std::uint16_t columns{};
+        std::uint16_t pixelWidth{};
+        std::uint16_t pixelHeight{};
+    };
+    static_assert(sizeof(GuestWindowSize) == 8);
+
+    const auto descriptor = static_cast<std::int32_t>(frame.gpr[0]);
+    const bool standardDescriptor = descriptor >= 0 && descriptor <= 2;
+    if (!standardDescriptor && !dispatcher.files_.contains(descriptor)) {
+        GuestPosixErrno = PosixEbadf;
+        return UINT64_MAX;
+    }
+    if (frame.gpr[1] != Tiocgwinsz) {
+        GuestPosixErrno = PosixEnotty;
+        return UINT64_MAX;
+    }
+    if (dispatcher.files_.contains(descriptor)) {
+        // TIOCGWINSZ on a regular file (the observed Apollo call) is POSIX
+        // ENOTTY, not an unimplemented Orbis import.
+        GuestPosixErrno = PosixEnotty;
+        return UINT64_MAX;
+    }
+    auto* output = static_cast<GuestWindowSize*>(dispatcher.GuestWritable(
+        frame, frame.gpr[2], sizeof(GuestWindowSize)));
+    if (!output) {
+        GuestPosixErrno = PosixEfault;
+        return UINT64_MAX;
+    }
+    *output = GuestWindowSize{45, 80, 1920, 1080};
     return 0;
 }
 
