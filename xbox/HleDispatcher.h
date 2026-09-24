@@ -127,6 +127,11 @@ private:
     static std::uint64_t MemoryMemcmp(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MemoryStrlen(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MemoryMmap(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t MspaceMalloc(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t MspaceCalloc(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t MspaceRealloc(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t MspaceFree(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t MspaceUsableSize(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelMmap(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MemoryMunmap(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelMunmap(HleDispatcher&, GuestCallFrame const&) noexcept;
@@ -208,6 +213,9 @@ private:
     SysvThunkArena thunks_;
     std::vector<Entry> entries_;
     GuestMemory* memory_{};
+    std::mutex allocationsMutex_;
+    std::unordered_map<void*, std::size_t> guestAllocations_;
+    std::size_t guestAllocationBytes_{};
     std::unordered_map<std::uint32_t, std::vector<std::uint8_t>> registry_;
     struct GuestFile {
         struct DirectoryEntry {

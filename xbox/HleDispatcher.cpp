@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -21,6 +22,8 @@ namespace Lab {
 namespace {
 
 constexpr std::uint64_t OrbisEnosys = 0x8002004Eull;
+constexpr std::size_t MaxGuestHeapAllocation = 256ull * 1024 * 1024;
+constexpr std::size_t MaxGuestHeapBytes = 512ull * 1024 * 1024;
 thread_local std::uint64_t CurrentGuestThreadId = 1;
 thread_local std::int32_t GuestPosixErrno = 0;
 thread_local std::unordered_map<std::uint32_t, std::uint64_t> GuestSpecificValues;
@@ -152,6 +155,7 @@ bool IsCommittedGuestProcessRange(std::uint64_t address, std::size_t bytes,
 HleDispatcher::~HleDispatcher() {
     SetPaused(false);
     threads_.clear();
+    for (auto const& allocation : guestAllocations_) std::free(allocation.first);
 }
 
 void HleDispatcher::SetPaused(bool paused) noexcept {
@@ -191,6 +195,11 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "memcmp") use(&MemoryMemcmp);
     if (name == "strlen") use(&MemoryStrlen);
     if (name == "mmap" || name == "mmap_np" || name == "__wrap_mmap") use(&MemoryMmap);
+    if (name == "sceLibcMspaceMalloc") use(&MspaceMalloc);
+    if (name == "sceLibcMspaceCalloc") use(&MspaceCalloc);
+    if (name == "sceLibcMspaceRealloc") use(&MspaceRealloc);
+    if (name == "sceLibcMspaceFree") use(&MspaceFree);
+    if (name == "sceLibcMspaceMallocUsableSize") use(&MspaceUsableSize);
     if (name == "sceKernelMmap") use(&KernelMmap);
     if (name == "munmap") use(&MemoryMunmap);
     if (name == "sceKernelMunmap") use(&KernelMunmap);
@@ -276,6 +285,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
         name == "sceSysmoduleLoadModuleInternal" ||
         name == "sceSysmoduleUnloadModuleInternal" ||
         name == "sceCommonDialogInitialize" ||
+        name == "sceMsgDialogInitialize" ||
         name == "sceSystemServiceParamGetString" ||
         name == "sceKernelSync" || name == "pthread_setcancelstate" ||
         name == "pthread_setcanceltype" ||
@@ -807,6 +817,92 @@ std::uint64_t HleDispatcher::MemoryStrlen(HleDispatcher& dispatcher,
         if (*byte == '\0') return length;
     }
     return OrbisEfault;
+}
+
+std::uint64_t HleDispatcher::MspaceMalloc(HleDispatcher& dispatcher,
+                                          GuestCallFrame const& frame) noexcept {
+    // The zero handle is the default libc mspace used by the observed store.
+    // Do not pretend that a nonzero, guest-owned mspace is a host heap.
+    if (frame.gpr[0] != 0 || frame.gpr[1] > MaxGuestHeapAllocation) return 0;
+    const auto bytes = static_cast<std::size_t>(frame.gpr[1] ? frame.gpr[1] : std::uint64_t{1});
+    std::scoped_lock lock(dispatcher.allocationsMutex_);
+    if (bytes > MaxGuestHeapBytes - dispatcher.guestAllocationBytes_) return 0;
+    auto* allocation = std::malloc(bytes);
+    if (!allocation) return 0;
+    try { dispatcher.guestAllocations_.emplace(allocation, bytes); }
+    catch (...) { std::free(allocation); return 0; }
+    dispatcher.guestAllocationBytes_ += bytes;
+    return reinterpret_cast<std::uint64_t>(allocation);
+}
+
+std::uint64_t HleDispatcher::MspaceCalloc(HleDispatcher& dispatcher,
+                                          GuestCallFrame const& frame) noexcept {
+    if (frame.gpr[0] != 0 ||
+        (frame.gpr[2] != 0 && frame.gpr[1] > MaxGuestHeapAllocation / frame.gpr[2]))
+        return 0;
+    const auto product = frame.gpr[1] * frame.gpr[2];
+    if (product > MaxGuestHeapAllocation) return 0;
+    const auto bytes = static_cast<std::size_t>(product ? product : std::uint64_t{1});
+    std::scoped_lock lock(dispatcher.allocationsMutex_);
+    if (bytes > MaxGuestHeapBytes - dispatcher.guestAllocationBytes_) return 0;
+    auto* allocation = std::calloc(1, bytes);
+    if (!allocation) return 0;
+    try { dispatcher.guestAllocations_.emplace(allocation, bytes); }
+    catch (...) { std::free(allocation); return 0; }
+    dispatcher.guestAllocationBytes_ += bytes;
+    return reinterpret_cast<std::uint64_t>(allocation);
+}
+
+std::uint64_t HleDispatcher::MspaceRealloc(HleDispatcher& dispatcher,
+                                           GuestCallFrame const& frame) noexcept {
+    if (frame.gpr[0] != 0 || frame.gpr[2] > MaxGuestHeapAllocation) return 0;
+    if (!frame.gpr[1]) {
+        GuestCallFrame mallocFrame = frame;
+        mallocFrame.gpr[1] = frame.gpr[2];
+        return MspaceMalloc(dispatcher, mallocFrame);
+    }
+    auto* old = reinterpret_cast<void*>(frame.gpr[1]);
+    std::scoped_lock lock(dispatcher.allocationsMutex_);
+    auto found = dispatcher.guestAllocations_.find(old);
+    if (found == dispatcher.guestAllocations_.end()) return 0;
+    if (!frame.gpr[2]) {
+        dispatcher.guestAllocationBytes_ -= found->second;
+        dispatcher.guestAllocations_.erase(found);
+        std::free(old);
+        return 0;
+    }
+    const auto bytes = static_cast<std::size_t>(frame.gpr[2]);
+    if (bytes > MaxGuestHeapBytes - (dispatcher.guestAllocationBytes_ - found->second)) return 0;
+    const auto oldBytes = found->second;
+    auto* resized = std::realloc(old, bytes);
+    if (!resized) return 0;
+    auto node = dispatcher.guestAllocations_.extract(found);
+    node.key() = resized;
+    node.mapped() = bytes;
+    dispatcher.guestAllocations_.insert(std::move(node));
+    dispatcher.guestAllocationBytes_ = dispatcher.guestAllocationBytes_ - oldBytes + bytes;
+    return reinterpret_cast<std::uint64_t>(resized);
+}
+
+std::uint64_t HleDispatcher::MspaceFree(HleDispatcher& dispatcher,
+                                        GuestCallFrame const& frame) noexcept {
+    if (frame.gpr[0] != 0 || frame.gpr[1] == 0) return 0;
+    auto* allocation = reinterpret_cast<void*>(frame.gpr[1]);
+    std::scoped_lock lock(dispatcher.allocationsMutex_);
+    auto found = dispatcher.guestAllocations_.find(allocation);
+    if (found == dispatcher.guestAllocations_.end()) return 0;
+    dispatcher.guestAllocationBytes_ -= found->second;
+    dispatcher.guestAllocations_.erase(found);
+    std::free(allocation);
+    return 0;
+}
+
+std::uint64_t HleDispatcher::MspaceUsableSize(HleDispatcher& dispatcher,
+                                              GuestCallFrame const& frame) noexcept {
+    if (frame.gpr[0] != 0 || frame.gpr[1] == 0) return 0;
+    std::scoped_lock lock(dispatcher.allocationsMutex_);
+    auto found = dispatcher.guestAllocations_.find(reinterpret_cast<void*>(frame.gpr[1]));
+    return found == dispatcher.guestAllocations_.end() ? 0 : found->second;
 }
 
 std::uint64_t HleDispatcher::MemoryMmap(HleDispatcher& dispatcher,
