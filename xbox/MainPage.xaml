@@ -15,6 +15,12 @@
       <Setter Property="FocusVisualPrimaryBrush" Value="#E5F2FF"/>
       <Setter Property="FocusVisualSecondaryBrush" Value="#22DDD6"/>
     </Style>
+    <Style x:Key="LegendBadge" TargetType="Border">
+      <Setter Property="Width" Value="32"/>
+      <Setter Property="Height" Value="32"/>
+      <Setter Property="CornerRadius" Value="16"/>
+      <Setter Property="Background" Value="#B51B2A43"/>
+    </Style>
   </Grid.Resources>
 
   <Grid.RowDefinitions>
@@ -22,7 +28,7 @@
   </Grid.RowDefinitions>
 
   <Viewbox Stretch="Uniform">
-    <Grid Width="1600" Height="900" Background="#061119">
+    <Grid Width="1600" Height="900" Background="#091F49">
       <Grid.RowDefinitions>
         <RowDefinition Height="*"/>
       </Grid.RowDefinitions>
@@ -51,9 +57,8 @@
           <StackPanel Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="10">
             <Button x:Name="ResumeContent" Content="▶  Retomar" Visibility="Collapsed" Background="#19606A" BorderBrush="#26DCD6"/>
             <Button x:Name="EndContent" Content="■  Encerrar" Visibility="Collapsed"/>
-            <Button x:Name="OpenFilters" Content="☷  Filtros" Width="144" Height="64" Padding="0" AutomationProperties.Name="Abrir filtros"/>
-            <Button x:Name="OpenLibrary" Width="64" Height="64" Padding="0" Content="↓" FontSize="33" AutomationProperties.Name="Abrir biblioteca e importar"/>
-            <Button x:Name="OpenSettings" Width="64" Height="64" Padding="0" Content="⚙" FontSize="30" AutomationProperties.Name="Configurações"/>
+            <Button x:Name="OpenLibrary" Width="64" Height="64" Padding="0" Content="📦" FontSize="31" Background="Transparent" BorderThickness="0" AutomationProperties.Name="Abrir biblioteca e instalar pacotes"/>
+            <Button x:Name="OpenSettings" Width="64" Height="64" Padding="0" Content="⚙" FontSize="30" Background="Transparent" BorderThickness="0" AutomationProperties.Name="Configurações"/>
           </StackPanel>
         </Grid>
 
@@ -92,11 +97,11 @@
             <TextBlock x:Name="HomeNoticeText" FontSize="13" Foreground="#DCE8F8" TextWrapping="Wrap" MaxWidth="560"/>
           </Border>
           <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="25">
-            <TextBlock Text="Direcional  Navegar" FontSize="15" Foreground="#C9E2E8"/>
-            <StackPanel Orientation="Horizontal" Spacing="5"><TextBlock Text="A" FontSize="15" Foreground="#70D568"/><TextBlock Text="Selecionar" FontSize="15" Foreground="#C9E2E8"/></StackPanel>
-            <StackPanel Orientation="Horizontal" Spacing="5"><TextBlock Text="B" FontSize="15" Foreground="#F36868"/><TextBlock Text="Voltar" FontSize="15" Foreground="#C9E2E8"/></StackPanel>
-            <StackPanel Orientation="Horizontal" Spacing="5"><TextBlock Text="Y" FontSize="15" Foreground="#F5D45C"/><TextBlock Text="Favorito" FontSize="15" Foreground="#C9E2E8"/></StackPanel>
-            <StackPanel Orientation="Horizontal" Spacing="5"><TextBlock Text="Menu + View" FontSize="15" Foreground="#70D568"/><TextBlock Text="Início" FontSize="15" Foreground="#C9E2E8"/></StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"><Border Style="{StaticResource LegendBadge}"><Grid><TextBlock Text="▲" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Top"/><TextBlock Text="▼" FontSize="9" HorizontalAlignment="Center" VerticalAlignment="Bottom"/><TextBlock Text="◀" FontSize="9" HorizontalAlignment="Left" VerticalAlignment="Center"/><TextBlock Text="▶" FontSize="9" HorizontalAlignment="Right" VerticalAlignment="Center"/></Grid></Border><TextBlock Text="Navegar" FontSize="15" Foreground="#C9E2E8" VerticalAlignment="Center"/></StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"><Border Style="{StaticResource LegendBadge}"><TextBlock Text="A" FontSize="15" Foreground="#70D568" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Selecionar" FontSize="15" Foreground="#C9E2E8" VerticalAlignment="Center"/></StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"><Border Style="{StaticResource LegendBadge}"><TextBlock Text="B" FontSize="15" Foreground="#F36868" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Voltar" FontSize="15" Foreground="#C9E2E8" VerticalAlignment="Center"/></StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"><Border Style="{StaticResource LegendBadge}"><TextBlock Text="Y" FontSize="15" Foreground="#F5D45C" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Favorito" FontSize="15" Foreground="#C9E2E8" VerticalAlignment="Center"/></StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="5" VerticalAlignment="Center"><Border Style="{StaticResource LegendBadge}"><TextBlock Text="≡" FontSize="17" Foreground="#C9E2E8" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="+" FontSize="13" Foreground="#C9E2E8" VerticalAlignment="Center"/><Border Style="{StaticResource LegendBadge}"><TextBlock Text="▣" FontSize="14" Foreground="#C9E2E8" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Início" FontSize="15" Foreground="#C9E2E8" VerticalAlignment="Center"/></StackPanel>
           </StackPanel>
         </Grid>
         </Grid>
@@ -191,7 +196,7 @@
           <StackPanel Spacing="18" Margin="0,14,0,10">
             <Border Background="#0D2630" BorderBrush="#33535D" BorderThickness="1" CornerRadius="12" Padding="24">
               <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <StackPanel Spacing="7"><TextBlock Text="XS4" FontSize="24"/><TextBlock Text="Versão instalada" FontSize="14" Foreground="#AFCBD2"/><TextBlock x:Name="CurrentVersion" Text="0.85.0.0" FontSize="20" Foreground="#F2FBFC"/></StackPanel>
+                <StackPanel Spacing="7"><TextBlock Text="XS4" FontSize="24"/><TextBlock Text="Versão instalada" FontSize="14" Foreground="#AFCBD2"/><TextBlock x:Name="CurrentVersion" Text="0.86.0.0" FontSize="20" Foreground="#F2FBFC"/></StackPanel>
                 <Border Grid.Column="1" Width="72" Height="72" CornerRadius="18" Background="#11313B" VerticalAlignment="Center"><Image Width="64" Height="64" Source="ms-appx:///Assets/XS4-Mark.png" Stretch="Uniform"/></Border>
               </Grid>
             </Border>
@@ -203,7 +208,7 @@
             </Border>
           </StackPanel>
         </ScrollViewer>
-        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="24"><TextBlock Text="Ⓐ  Abrir" FontSize="14" Foreground="#C9E2E8"/><TextBlock Text="Ⓑ  Voltar" FontSize="14" Foreground="#C9E2E8"/></StackPanel>
+        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="24"><StackPanel Orientation="Horizontal" Spacing="7"><Border Style="{StaticResource LegendBadge}"><TextBlock Text="A" FontSize="15" Foreground="#70D568" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Abrir" FontSize="14" Foreground="#C9E2E8" VerticalAlignment="Center"/></StackPanel><StackPanel Orientation="Horizontal" Spacing="7"><Border Style="{StaticResource LegendBadge}"><TextBlock Text="B" FontSize="15" Foreground="#F36868" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="Voltar" FontSize="14" Foreground="#C9E2E8" VerticalAlignment="Center"/></StackPanel></StackPanel>
       </Grid>
 
       <Grid x:Name="DiagnosticsView" Margin="54,24,54,20" Visibility="Collapsed">
@@ -242,15 +247,13 @@
     </Border>
   </Grid>
 
-  <Grid x:Name="ShortcutOverlay" Visibility="Collapsed" Background="#DC04122C">
-    <Border Width="600" Padding="36" Background="#112D64" BorderBrush="#61B6F8" BorderThickness="1" CornerRadius="18" HorizontalAlignment="Center" VerticalAlignment="Center">
-      <StackPanel Spacing="15">
-        <TextBlock Text="Atalhos do XS4" FontSize="30" FontWeight="SemiBold" Margin="0,0,0,8"/>
-        <Button x:Name="ShortcutExport" Content="Exportar relatório" HorizontalAlignment="Stretch" Height="58"/>
-        <Button x:Name="ShortcutResume" Content="Retomar aplicativo / game" HorizontalAlignment="Stretch" Height="58"/>
-        <Button x:Name="ShortcutEnd" Content="Encerrar aplicativo / game" HorizontalAlignment="Stretch" Height="58"/>
-        <Button x:Name="ShortcutExit" Content="Sair do XS4" HorizontalAlignment="Stretch" Height="58"/>
-        <Button x:Name="ShortcutClose" Content="Voltar" HorizontalAlignment="Right"/>
+  <Grid x:Name="ShortcutOverlay" Visibility="Collapsed" Background="#D908183C">
+    <Border Width="510" Padding="24" Background="#F0112B5B" CornerRadius="20" HorizontalAlignment="Center" VerticalAlignment="Center">
+      <StackPanel Spacing="8">
+        <Button x:Name="ShortcutExport" Content="Exportar relatório" HorizontalAlignment="Stretch" Height="62" HorizontalContentAlignment="Left" Background="#193B70" BorderThickness="0"/>
+        <Button x:Name="ShortcutResume" Content="Retomar processo" HorizontalAlignment="Stretch" Height="62" HorizontalContentAlignment="Left" Background="#193B70" BorderThickness="0" Visibility="Collapsed"/>
+        <Button x:Name="ShortcutEnd" Content="Encerrar processo" HorizontalAlignment="Stretch" Height="62" HorizontalContentAlignment="Left" Background="#193B70" BorderThickness="0" Visibility="Collapsed"/>
+        <Button x:Name="ShortcutExit" Content="Sair do XS4" HorizontalAlignment="Stretch" Height="62" HorizontalContentAlignment="Left" Background="#193B70" BorderThickness="0"/>
       </StackPanel>
     </Border>
   </Grid>

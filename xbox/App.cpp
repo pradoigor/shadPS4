@@ -109,6 +109,7 @@ struct App : ApplicationT<App> {
     bool guestViewShown{};
     bool guestPaused{}, pauseComboHeld{};
     bool shortcutsPausedGuest{};
+    bool focusFirstTitlePending{};
     std::uint64_t guestDialogGeneration{};
     bool importing{}, listing{};
     Windows::System::Display::DisplayRequest displayRequest{nullptr};
@@ -232,9 +233,9 @@ struct App : ApplicationT<App> {
         Find<TextBlock>(L"HomeSubtitle").Text(category == HomeCategory::Games ?
             L"Escolha um título para iniciar" : L"Aplicativos e ferramentas instalados");
         PopulateHome();
-        Window::Current().Dispatcher().RunAsync(Core::CoreDispatcherPriority::Low, [this]() {
-            FocusHome(homeVisibleIndices.empty() ? HomeFocusArea::EmptyAction : HomeFocusArea::Titles, 0);
-        });
+        // A click can restore focus to the tab after its Click handler returns.
+        // Transfer focus after the gamepad A button is released in the UI tick.
+        focusFirstTitlePending = true;
     }
     void SetHomeFilter(HomeFilter filter) {
         homeFocusedIndex = -1;
@@ -896,8 +897,8 @@ struct App : ApplicationT<App> {
             break;
         }
         case HomeFocusArea::Actions: {
-            constexpr wchar_t const* names[]{L"OpenFilters", L"OpenLibrary", L"OpenSettings"};
-            index = std::clamp(index, 0, 2);
+            constexpr wchar_t const* names[]{L"OpenLibrary", L"OpenSettings"};
+            index = std::clamp(index, 0, 1);
             Find<Button>(names[index]).Focus(FocusState::Programmatic);
             break;
         }
@@ -982,8 +983,8 @@ struct App : ApplicationT<App> {
             else shortcutsPausedGuest = false;
         }
         const bool available = homebrew && homebrew->running();
-        Find<Button>(L"ShortcutResume").IsEnabled(available);
-        Find<Button>(L"ShortcutEnd").IsEnabled(available);
+        Find<Button>(L"ShortcutResume").Visibility(available ? Visibility::Visible : Visibility::Collapsed);
+        Find<Button>(L"ShortcutEnd").Visibility(available ? Visibility::Visible : Visibility::Collapsed);
         Find<Grid>(L"ShortcutOverlay").Visibility(Visibility::Visible);
         Find<Button>(L"ShortcutExport").Focus(FocusState::Programmatic);
     }
@@ -1140,7 +1141,6 @@ struct App : ApplicationT<App> {
             Find<Button>(L"FilterAll").Click([this](auto const&, auto const&) { SetHomeFilter(HomeFilter::All); });
             Find<Button>(L"FilterFavorites").Click([this](auto const&, auto const&) { SetHomeFilter(HomeFilter::Favorites); });
             Find<Button>(L"FilterRecent").Click([this](auto const&, auto const&) { SetHomeFilter(HomeFilter::Recent); });
-            Find<Button>(L"OpenFilters").Click([this](auto const&, auto const&) { OpenFilters(); });
             Find<Button>(L"CloseFilters").Click([this](auto const&, auto const&) { CloseFilters(); });
             auto trackHomeFocus = [this](wchar_t const* name, HomeFocusArea area, int index) {
                 Find<Button>(name).GotFocus([this, area, index](auto const&, auto const&) {
@@ -1151,9 +1151,8 @@ struct App : ApplicationT<App> {
             };
             trackHomeFocus(L"GamesTab", HomeFocusArea::Tabs, 0);
             trackHomeFocus(L"AppsTab", HomeFocusArea::Tabs, 1);
-            trackHomeFocus(L"OpenFilters", HomeFocusArea::Actions, 0);
-            trackHomeFocus(L"OpenLibrary", HomeFocusArea::Actions, 1);
-            trackHomeFocus(L"OpenSettings", HomeFocusArea::Actions, 2);
+            trackHomeFocus(L"OpenLibrary", HomeFocusArea::Actions, 0);
+            trackHomeFocus(L"OpenSettings", HomeFocusArea::Actions, 1);
             trackHomeFocus(L"FilterAll", HomeFocusArea::Filters, 0);
             trackHomeFocus(L"FilterFavorites", HomeFocusArea::Filters, 1);
             trackHomeFocus(L"FilterRecent", HomeFocusArea::Filters, 2);
@@ -1178,7 +1177,6 @@ struct App : ApplicationT<App> {
             Find<Button>(L"ShortcutExit").Click([](auto const&, auto const&) {
                 Application::Current().Exit();
             });
-            Find<Button>(L"ShortcutClose").Click([this](auto const&, auto const&) { CloseShortcuts(); });
             Find<Button>(L"OpenLibrary").Click([this](auto const&, auto const&) { ShowPage(Page::Library); });
             Find<Button>(L"EmptyImport").Click([this](auto const&, auto const&) { ShowPage(Page::Library); SelectContent(); });
             Find<Button>(L"PendingEmptyImport").Click([this](auto const&, auto const&) { SelectContent(); });
@@ -1247,6 +1245,21 @@ struct App : ApplicationT<App> {
                     else PauseContent();
                 }
                 pauseComboHeld = shortcutDown;
+                if (focusFirstTitlePending && currentPage == Page::Home &&
+                    Find<Grid>(L"ShortcutOverlay").Visibility() != Visibility::Visible) {
+                    bool selectHeld = false;
+                    try {
+                        auto pads = Windows::Gaming::Input::Gamepad::Gamepads();
+                        if (pads.Size())
+                            selectHeld = (pads.GetAt(0).GetCurrentReading().Buttons &
+                                Windows::Gaming::Input::GamepadButtons::A) !=
+                                Windows::Gaming::Input::GamepadButtons::None;
+                    } catch (...) {}
+                    if (!selectHeld) {
+                        focusFirstTitlePending = false;
+                        FocusHome(homeVisibleIndices.empty() ? HomeFocusArea::EmptyAction : HomeFocusArea::Titles, 0);
+                    }
+                }
                 if (anglePending) {
                     anglePending = false;
                     std::wstring detail;
