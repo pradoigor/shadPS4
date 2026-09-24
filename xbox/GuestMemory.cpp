@@ -4,6 +4,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <cstring>
 
 namespace Lab {
@@ -39,6 +40,9 @@ DWORD ProtectionFor(std::uint64_t prot) noexcept {
 
 GuestMemory::~GuestMemory() {
   for (auto const &range : anonymous_)
+    if (range.host && !range.insideReservation)
+      VirtualFree(range.host, 0, MEM_RELEASE);
+  for (auto const &range : reserved_)
     if (range.host)
       VirtualFree(range.host, 0, MEM_RELEASE);
   if (base_)
@@ -228,18 +232,60 @@ bool GuestMemory::MapAnonymous(std::size_t bytes, std::uint64_t prot,
     return false;
   }
 
+  bool insideReservation = false;
+  if (fixed) {
+    for (auto const& range : reserved_) {
+      if (address >= range.address && address - range.address <= range.size &&
+          size <= range.size - (address - range.address)) {
+        insideReservation = true;
+        break;
+      }
+    }
+  }
   const auto protection = ProtectionFor(prot);
   auto *host = VirtualAllocFromApp(
       fixed ? reinterpret_cast<void *>(address) : nullptr,
-      static_cast<SIZE_T>(size), MEM_RESERVE | MEM_COMMIT, protection);
+      static_cast<SIZE_T>(size), insideReservation ? MEM_COMMIT : MEM_RESERVE | MEM_COMMIT,
+      protection);
   if (!host)
     return false;
   address = reinterpret_cast<std::uint64_t>(host);
   if (fixed && address != requestedAddress) {
+    VirtualFree(host, insideReservation ? static_cast<SIZE_T>(size) : 0,
+                insideReservation ? MEM_DECOMMIT : MEM_RELEASE);
+    return false;
+  }
+  try { anonymous_.push_back(AnonymousRange{address, size, host, protection, insideReservation}); }
+  catch (...) {
+    VirtualFree(host, insideReservation ? static_cast<SIZE_T>(size) : 0,
+                insideReservation ? MEM_DECOMMIT : MEM_RELEASE);
+    return false;
+  }
+  guestAddress = address;
+  return true;
+}
+
+bool GuestMemory::ReserveVirtualRange(std::uint64_t bytes,
+                                      std::uint64_t requestedAddress, bool fixed,
+                                      std::uint64_t alignment,
+                                      std::uint64_t& guestAddress) noexcept {
+  constexpr std::uint64_t MaxReservation = 4ull * 1024 * 1024 * 1024;
+  if (!base_ || bytes == 0 || bytes > MaxReservation || bytes % GuestPage != 0 ||
+      (alignment && (alignment < GuestPage || (alignment & (alignment - 1)) != 0)) ||
+      (fixed && (!requestedAddress || requestedAddress % GuestPage != 0)))
+    return false;
+  auto* host = VirtualAllocFromApp(
+      fixed ? reinterpret_cast<void*>(requestedAddress) : nullptr,
+      static_cast<SIZE_T>(bytes), MEM_RESERVE, PAGE_NOACCESS);
+  if (!host) return false;
+  const auto address = reinterpret_cast<std::uint64_t>(host);
+  if ((fixed && address != requestedAddress) ||
+      (alignment && address % alignment != 0)) {
     VirtualFree(host, 0, MEM_RELEASE);
     return false;
   }
-  anonymous_.push_back(AnonymousRange{address, size, host, protection});
+  try { reserved_.push_back(ReservedRange{address, bytes, host}); }
+  catch (...) { VirtualFree(host, 0, MEM_RELEASE); return false; }
   guestAddress = address;
   return true;
 }
@@ -257,8 +303,21 @@ bool GuestMemory::Unmap(std::uint64_t guestAddress,
        ++iterator) {
     if (iterator->address == guestAddress && iterator->size == size) {
       if (iterator->host)
-        VirtualFree(iterator->host, 0, MEM_RELEASE);
+        VirtualFree(iterator->host, iterator->insideReservation ? static_cast<SIZE_T>(size) : 0,
+                    iterator->insideReservation ? MEM_DECOMMIT : MEM_RELEASE);
       anonymous_.erase(iterator);
+      return true;
+    }
+  }
+  for (auto iterator = reserved_.begin(); iterator != reserved_.end(); ++iterator) {
+    if (iterator->address == guestAddress && iterator->size == size) {
+      if (!VirtualFree(iterator->host, 0, MEM_RELEASE)) return false;
+      anonymous_.erase(std::remove_if(anonymous_.begin(), anonymous_.end(),
+          [=](auto const& range) {
+            return range.insideReservation && range.address >= guestAddress &&
+                   range.address - guestAddress < size;
+          }), anonymous_.end());
+      reserved_.erase(iterator);
       return true;
     }
   }

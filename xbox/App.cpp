@@ -108,6 +108,7 @@ struct App : ApplicationT<App> {
     bool homebrewCompletionShown{};
     bool guestViewShown{};
     bool guestPaused{}, pauseComboHeld{};
+    std::uint64_t guestDialogGeneration{};
     bool importing{}, listing{};
     Windows::System::Display::DisplayRequest displayRequest{nullptr};
 
@@ -515,6 +516,8 @@ struct App : ApplicationT<App> {
         angleReturnPage = currentPage;
         guestViewShown = false;
         guestPaused = false;
+        guestDialogGeneration = 0;
+        Find<Grid>(L"GuestDialogOverlay").Visibility(Visibility::Collapsed);
         Find<Button>(L"ResumeContent").Visibility(Visibility::Collapsed);
         Find<Button>(L"EndContent").Visibility(Visibility::Collapsed);
         homebrewLaunchPending = true;
@@ -529,6 +532,7 @@ struct App : ApplicationT<App> {
     void PauseContent() {
         if (guestPaused || !homebrew || !homebrew->SetPaused(true)) return;
         guestPaused = true;
+        Find<Grid>(L"GuestDialogOverlay").Visibility(Visibility::Collapsed);
         Find<Grid>(L"AngleTestView").Visibility(Visibility::Collapsed);
         Find<Button>(L"ResumeContent").Visibility(Visibility::Visible);
         Find<Button>(L"EndContent").Visibility(Visibility::Visible);
@@ -964,10 +968,24 @@ struct App : ApplicationT<App> {
             break;
         }
     }
+    void DismissGuestDialog(bool canceled) {
+        if (homebrew) homebrew->CompleteMessageDialog(canceled);
+        Find<Grid>(L"GuestDialogOverlay").Visibility(Visibility::Collapsed);
+    }
     void OnGamepadKey(Core::CoreWindow const&, Core::KeyEventArgs const& args) {
         // The guest polls the physical pad directly. Do not also navigate XS4
         // when B/Menu are pressed inside a running title.
         if (homebrew && homebrew->running() && !guestPaused) {
+            if (Find<Grid>(L"GuestDialogOverlay").Visibility() == Visibility::Visible) {
+                if (args.VirtualKey() == Sys::VirtualKey::GamepadB) {
+                    DismissGuestDialog(true);
+                    args.Handled(true);
+                } else if (args.VirtualKey() != Sys::VirtualKey::GamepadA) {
+                    args.Handled(true);
+                }
+                // A is handled by the focused dialog button.
+                return;
+            }
             // The guest reads the physical pad through scePadReadState. Consume
             // the parallel UWP key event so Xbox does not treat B as Back and
             // close the host while the guest is still displaying a menu.
@@ -1111,6 +1129,8 @@ struct App : ApplicationT<App> {
             trackHomeFocus(L"EndContent", HomeFocusArea::End, 0);
             Find<Button>(L"ResumeContent").Click([this](auto const&, auto const&) { ResumeContent(); });
             Find<Button>(L"EndContent").Click([this](auto const&, auto const&) { EndContent(); });
+            Find<Button>(L"GuestDialogAccept").Click([this](auto const&, auto const&) { DismissGuestDialog(false); });
+            Find<Button>(L"GuestDialogCancel").Click([this](auto const&, auto const&) { DismissGuestDialog(true); });
             Find<Button>(L"OpenLibrary").Click([this](auto const&, auto const&) { ShowPage(Page::Library); });
             Find<Button>(L"EmptyImport").Click([this](auto const&, auto const&) { ShowPage(Page::Library); SelectContent(); });
             Find<Button>(L"PendingEmptyImport").Click([this](auto const&, auto const&) { SelectContent(); });
@@ -1141,6 +1161,21 @@ struct App : ApplicationT<App> {
             Window::Current().CoreWindow().PointerCursor(nullptr);
             timer = DispatcherTimer(); timer.Interval(std::chrono::milliseconds(100));
             timer.Tick([this](auto const&, auto const&) {
+                if (homebrew && homebrew->running() && !guestPaused) {
+                    try {
+                        auto dialog = homebrew->GetMessageDialog();
+                        if (dialog.status == 2) {
+                            if (dialog.generation != guestDialogGeneration ||
+                                Find<Grid>(L"GuestDialogOverlay").Visibility() != Visibility::Visible) {
+                                guestDialogGeneration = dialog.generation;
+                                try { Find<TextBlock>(L"GuestDialogMessage").Text(to_hstring(dialog.message)); }
+                                catch (...) { Find<TextBlock>(L"GuestDialogMessage").Text(L"O conteúdo abriu uma caixa de diálogo."); }
+                                Find<Grid>(L"GuestDialogOverlay").Visibility(Visibility::Visible);
+                                Find<Button>(L"GuestDialogAccept").Focus(FocusState::Programmatic);
+                            }
+                        } else Find<Grid>(L"GuestDialogOverlay").Visibility(Visibility::Collapsed);
+                    } catch (...) {}
+                } else Find<Grid>(L"GuestDialogOverlay").Visibility(Visibility::Collapsed);
                 bool shortcutDown = false;
                 try {
                     using namespace Windows::Gaming::Input;
@@ -1195,6 +1230,7 @@ struct App : ApplicationT<App> {
                 if (homebrew && !homebrew->running() && !homebrewCompletionShown) {
                     homebrewCompletionShown = true;
                     guestPaused = false;
+                    Find<Grid>(L"GuestDialogOverlay").Visibility(Visibility::Collapsed);
                     Find<Button>(L"ResumeContent").Visibility(Visibility::Collapsed);
                     Find<Button>(L"EndContent").Visibility(Visibility::Collapsed);
                     Find<Border>(L"AngleLoadingView").Visibility(Visibility::Collapsed);

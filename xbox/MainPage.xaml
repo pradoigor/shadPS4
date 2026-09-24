@@ -191,7 +191,7 @@
           <StackPanel Spacing="18" Margin="0,14,0,10">
             <Border Background="#0D2630" BorderBrush="#33535D" BorderThickness="1" CornerRadius="12" Padding="24">
               <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <StackPanel Spacing="7"><TextBlock Text="XS4" FontSize="24"/><TextBlock Text="Versão instalada" FontSize="14" Foreground="#AFCBD2"/><TextBlock x:Name="CurrentVersion" Text="0.83.0.0" FontSize="20" Foreground="#F2FBFC"/></StackPanel>
+                <StackPanel Spacing="7"><TextBlock Text="XS4" FontSize="24"/><TextBlock Text="Versão instalada" FontSize="14" Foreground="#AFCBD2"/><TextBlock x:Name="CurrentVersion" Text="0.84.0.0" FontSize="20" Foreground="#F2FBFC"/></StackPanel>
                 <Border Grid.Column="1" Width="72" Height="72" CornerRadius="18" Background="#11313B" VerticalAlignment="Center"><Image Width="64" Height="64" Source="ms-appx:///Assets/XS4-Mark.png" Stretch="Uniform"/></Border>
               </Grid>
             </Border>
@@ -226,6 +226,19 @@
     </Border>
     <Border x:Name="AngleTestControls" VerticalAlignment="Bottom" Background="#E60B111C" Padding="30,22">
       <Grid><StackPanel Spacing="5"><TextBlock Text="XS4 · EXECUÇÃO" FontSize="14" CharacterSpacing="110" Foreground="#8CBDEB"/><TextBlock x:Name="AngleStatus" Text="Preparando superfície…" FontSize="16" TextWrapping="Wrap"/></StackPanel><Button x:Name="CloseAngleTest" Content="Voltar" HorizontalAlignment="Right" VerticalAlignment="Center"/></Grid>
+    </Border>
+  </Grid>
+
+  <Grid x:Name="GuestDialogOverlay" Visibility="Collapsed" Background="#E8041119">
+    <Border Width="680" Padding="34" Background="#102630" BorderBrush="#26DCD6" BorderThickness="1" CornerRadius="18" HorizontalAlignment="Center" VerticalAlignment="Center">
+      <StackPanel Spacing="20">
+        <TextBlock Text="Mensagem do conteúdo" FontSize="28" FontWeight="SemiBold"/>
+        <TextBlock x:Name="GuestDialogMessage" FontSize="18" Foreground="#DFEFF1" TextWrapping="Wrap" MaxHeight="330"/>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="12">
+          <Button x:Name="GuestDialogCancel" Content="B  Cancelar"/>
+          <Button x:Name="GuestDialogAccept" Content="A  Continuar" Background="#19606A" BorderBrush="#26DCD6"/>
+        </StackPanel>
+      </StackPanel>
     </Border>
   </Grid>
 

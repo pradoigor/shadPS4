@@ -27,6 +27,8 @@ public:
   void Start(std::filesystem::path executable, std::filesystem::path stateRoot, AngleVideo* graphics);
   bool running() const noexcept { return running_.load(); }
   bool SetPaused(bool paused) noexcept;
+  HleDispatcher::MessageDialogSnapshot GetMessageDialog() const;
+  void CompleteMessageDialog(bool canceled) noexcept;
 
 private:
   void Record(std::string const &stage, std::string const &detail) noexcept;

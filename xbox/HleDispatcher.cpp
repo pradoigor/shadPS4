@@ -163,6 +163,18 @@ void HleDispatcher::SetPaused(bool paused) noexcept {
     if (!paused) pauseChanged_.notify_all();
 }
 
+HleDispatcher::MessageDialogSnapshot HleDispatcher::GetMessageDialog() const {
+    std::scoped_lock lock(dialogMutex_);
+    return dialog_;
+}
+
+void HleDispatcher::CompleteMessageDialog(bool canceled) noexcept {
+    std::scoped_lock lock(dialogMutex_);
+    if (dialog_.status != 2) return;
+    dialogCanceled_ = canceled;
+    dialog_.status = 3;
+}
+
 HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     const auto encoded = std::string(encodedSymbol);
     const auto nid = BaseNid(encoded);
@@ -187,6 +199,13 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sceNetCtlGetInfo") use(&NetCtlGetInfo);
     if (name == "_ioctl" || name == "ioctl") use(&KernelIoctl);
     if (name == "sceSystemServiceHideSplashScreen") use(&HideSplashScreen);
+    if (name == "sceMsgDialogInitialize") use(&MsgDialogInitialize);
+    if (name == "sceMsgDialogTerminate") use(&MsgDialogTerminate);
+    if (name == "sceMsgDialogOpen") use(&MsgDialogOpen);
+    if (name == "sceMsgDialogUpdateStatus" || name == "sceMsgDialogGetStatus")
+        use(&MsgDialogStatus);
+    if (name == "sceMsgDialogClose") use(&MsgDialogClose);
+    if (name == "sceMsgDialogGetResult") use(&MsgDialogGetResult);
     if (name == "sceKernelDebugOutText") use(&KernelDebugOutText);
     if (name == "sceKernelMprotect") use(&KernelMprotect);
     if (name == "memcpy") use(&MemoryMemcpy);
@@ -201,6 +220,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sceLibcMspaceFree") use(&MspaceFree);
     if (name == "sceLibcMspaceMallocUsableSize") use(&MspaceUsableSize);
     if (name == "sceKernelMmap") use(&KernelMmap);
+    if (name == "sceKernelReserveVirtualRange") use(&KernelReserveVirtualRange);
     if (name == "munmap") use(&MemoryMunmap);
     if (name == "sceKernelMunmap") use(&KernelMunmap);
     if (name == "clock_gettime") use(&ClockGetTime);
@@ -285,7 +305,6 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
         name == "sceSysmoduleLoadModuleInternal" ||
         name == "sceSysmoduleUnloadModuleInternal" ||
         name == "sceCommonDialogInitialize" ||
-        name == "sceMsgDialogInitialize" ||
         name == "sceSystemServiceParamGetString" ||
         name == "sceKernelSync" || name == "pthread_setcancelstate" ||
         name == "pthread_setcanceltype" ||
@@ -414,10 +433,15 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
     }
     const auto entry = self->entries_[static_cast<std::size_t>(slot)];
     std::uint64_t sequence{};
+    const bool dialogPoll = entry.name == "sceMsgDialogUpdateStatus" ||
+                            entry.name == "sceMsgDialogGetStatus";
+    const auto pollCount = dialogPoll
+        ? self->dialogPollCount_.fetch_add(1, std::memory_order_relaxed) + 1 : 0;
     const auto thread = static_cast<std::uint64_t>(GetCurrentThreadId());
     auto writeTrace = [&](char const* phase, std::uint64_t result,
                           bool includeResult) noexcept {
         if (self->tracePath_.empty()) return;
+        if (dialogPoll && pollCount > 8 && pollCount % 1024 != 0) return;
         // Preserve startup in full; avoid synchronous disk writes for every
         // glyph/GL call once the render loop starts. Always retain guest errors,
         // missing services, presentation and exit, even after the startup cap.
@@ -943,6 +967,132 @@ std::uint64_t HleDispatcher::KernelMmap(HleDispatcher& dispatcher,
                                           (frame.gpr[3] & 0x10ull) != 0, address))
         return OrbisEnomem;
     std::memcpy(output, &address, sizeof(address));
+    return 0;
+}
+
+std::uint64_t HleDispatcher::KernelReserveVirtualRange(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEnomem = 0x8002000Cull;
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    constexpr std::uint64_t OrbisEinval = 0x80020016ull;
+    if (!dispatcher.memory_ || frame.gpr[0] == 0 || frame.gpr[1] == 0 ||
+        (frame.gpr[1] & 0x3fffull) != 0 || (frame.gpr[2] & ~0x10ull) != 0)
+        return OrbisEinval;
+    auto* output = WritablePointer(dispatcher, frame, frame.gpr[0], sizeof(std::uint64_t));
+    if (!output) return OrbisEfault;
+    std::uint64_t requested{};
+    std::memcpy(&requested, output, sizeof(requested));
+    std::uint64_t address{};
+    if (!dispatcher.memory_->ReserveVirtualRange(frame.gpr[1], requested,
+        (frame.gpr[2] & 0x10ull) != 0, frame.gpr[3], address))
+        return OrbisEnomem;
+    std::memcpy(output, &address, sizeof(address));
+    return 0;
+}
+
+std::uint64_t HleDispatcher::MsgDialogInitialize(
+    HleDispatcher& dispatcher, GuestCallFrame const&) noexcept {
+    std::scoped_lock lock(dispatcher.dialogMutex_);
+    if (dispatcher.dialog_.status != 0) return 0x80B80004ull;
+    dispatcher.dialog_.status = 1;
+    dispatcher.dialog_.message.clear();
+    return 0;
+}
+
+std::uint64_t HleDispatcher::MsgDialogTerminate(
+    HleDispatcher& dispatcher, GuestCallFrame const&) noexcept {
+    std::scoped_lock lock(dispatcher.dialogMutex_);
+    if (dispatcher.dialog_.status == 0) return 0x80B80003ull;
+    dispatcher.dialog_.status = 0;
+    dispatcher.dialog_.message.clear();
+    return 0;
+}
+
+std::uint64_t HleDispatcher::MsgDialogOpen(HleDispatcher& dispatcher,
+                                           GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t InvalidState = 0x80B80006ull;
+    constexpr std::uint64_t NullArgument = 0x80B8000Dull;
+    {
+        std::scoped_lock lock(dispatcher.dialogMutex_);
+        if (dispatcher.dialog_.status != 1 && dispatcher.dialog_.status != 3)
+            return InvalidState;
+    }
+    // OrbisParam: BaseParam[48], size[8], mode[4], padding[4], then
+    // pointers to user/progress/system parameter blocks at offsets 64/72/80.
+    auto* param = static_cast<std::uint8_t const*>(
+        ReadablePointer(dispatcher, frame, frame.gpr[0], 88));
+    if (!param) return NullArgument;
+    std::uint32_t mode{};
+    std::memcpy(&mode, param + 56, sizeof(mode));
+    if (mode < 1 || mode > 3) return 0x80B8000Aull;
+    std::uint64_t block{};
+    std::memcpy(&block, param + (mode == 1 ? 64 : mode == 2 ? 72 : 80), sizeof(block));
+    std::string message;
+    if ((mode == 1 || mode == 2) && block <= UINT64_MAX - 16) {
+        auto* textPointer = static_cast<std::uint8_t const*>(
+            ReadablePointer(dispatcher, frame, block, 16));
+        std::uint64_t textAddress{};
+        if (textPointer) std::memcpy(&textAddress, textPointer + 8, sizeof(textAddress));
+        if (textAddress) {
+            try {
+                for (std::size_t i = 0; i < 512 && textAddress <= UINT64_MAX - i; ++i) {
+                    auto* character = static_cast<char const*>(
+                        ReadablePointer(dispatcher, frame, textAddress + i, 1));
+                    if (!character || !*character) break;
+                    if (static_cast<unsigned char>(*character) >= 0x20 ||
+                        *character == '\n') message.push_back(*character);
+                }
+            } catch (...) { message.clear(); }
+        }
+    }
+    try {
+        if (message.empty()) message = "O conteúdo abriu uma caixa de diálogo.";
+        std::scoped_lock lock(dispatcher.dialogMutex_);
+        dispatcher.dialog_.status = 2;
+        dispatcher.dialog_.mode = mode;
+        ++dispatcher.dialog_.generation;
+        dispatcher.dialog_.message = std::move(message);
+        dispatcher.dialogCanceled_ = false;
+    } catch (...) { return 0x80B80009ull; }
+    return 0;
+}
+
+std::uint64_t HleDispatcher::MsgDialogStatus(
+    HleDispatcher& dispatcher, GuestCallFrame const&) noexcept {
+    std::uint32_t status{};
+    {
+        std::scoped_lock lock(dispatcher.dialogMutex_);
+        status = dispatcher.dialog_.status;
+    }
+    if (status == 2) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    return status;
+}
+
+std::uint64_t HleDispatcher::MsgDialogClose(
+    HleDispatcher& dispatcher, GuestCallFrame const&) noexcept {
+    std::scoped_lock lock(dispatcher.dialogMutex_);
+    if (dispatcher.dialog_.status != 2) return 0x80B8000Bull;
+    dispatcher.dialog_.status = 3;
+    dispatcher.dialogCanceled_ = true;
+    return 0;
+}
+
+std::uint64_t HleDispatcher::MsgDialogGetResult(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    std::uint32_t result{};
+    std::uint32_t button{1};
+    {
+        std::scoped_lock lock(dispatcher.dialogMutex_);
+        if (dispatcher.dialog_.status != 3) return 0x80B80005ull;
+        result = dispatcher.dialogCanceled_ ? 1u : 0u;
+        button = dispatcher.dialogCanceled_ ? 0u : 1u;
+    }
+    auto* output = WritablePointer(dispatcher, frame, frame.gpr[0], 44);
+    if (!output) return 0x80B8000Dull;
+    std::array<std::uint8_t, 44> data{};
+    std::memcpy(data.data() + 4, &result, sizeof(result));
+    std::memcpy(data.data() + 8, &button, sizeof(button));
+    std::memcpy(output, data.data(), data.size());
     return 0;
 }
 

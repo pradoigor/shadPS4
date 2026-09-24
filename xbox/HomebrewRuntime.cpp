@@ -419,6 +419,15 @@ bool HomebrewRuntime::SetPaused(bool paused) noexcept {
   return true;
 }
 
+HleDispatcher::MessageDialogSnapshot HomebrewRuntime::GetMessageDialog() const {
+  return dispatcher_ ? dispatcher_->GetMessageDialog()
+                     : HleDispatcher::MessageDialogSnapshot{};
+}
+
+void HomebrewRuntime::CompleteMessageDialog(bool canceled) noexcept {
+  if (dispatcher_) dispatcher_->CompleteMessageDialog(canceled);
+}
+
 void HomebrewRuntime::Record(std::string const &stage,
                              std::string const &detail) noexcept {
   try {

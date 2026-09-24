@@ -45,6 +45,14 @@ using HleHandler = std::uint64_t (*)(HleDispatcher&, GuestCallFrame const&) noex
 
 class HleDispatcher {
 public:
+    struct MessageDialogSnapshot {
+        std::uint32_t status{};
+        std::uint32_t mode{};
+        std::uint64_t generation{};
+        std::string message;
+    };
+    MessageDialogSnapshot GetMessageDialog() const;
+    void CompleteMessageDialog(bool canceled) noexcept;
     HleDispatcher() = default;
     ~HleDispatcher();
 
@@ -133,6 +141,13 @@ private:
     static std::uint64_t MspaceFree(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MspaceUsableSize(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelMmap(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelReserveVirtualRange(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t MsgDialogInitialize(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t MsgDialogTerminate(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t MsgDialogOpen(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t MsgDialogStatus(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t MsgDialogClose(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t MsgDialogGetResult(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MemoryMunmap(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelMunmap(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t ClockGetTime(HleDispatcher&, GuestCallFrame const&) noexcept;
@@ -244,6 +259,10 @@ private:
     std::mutex traceMutex_;
     std::uint64_t callSequence_{};
     std::atomic_bool paused_{};
+    mutable std::mutex dialogMutex_;
+    MessageDialogSnapshot dialog_{};
+    bool dialogCanceled_{};
+    std::atomic_uint64_t dialogPollCount_{};
     std::mutex pauseMutex_;
     std::condition_variable pauseChanged_;
     struct GuestSignalAction {

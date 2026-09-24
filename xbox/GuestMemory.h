@@ -34,6 +34,9 @@ public:
   bool MapAnonymous(std::size_t bytes, std::uint64_t prot,
                     std::uint64_t requestedAddress, bool fixed,
                     std::uint64_t &guestAddress) noexcept;
+  bool ReserveVirtualRange(std::uint64_t bytes, std::uint64_t requestedAddress,
+                           bool fixed, std::uint64_t alignment,
+                           std::uint64_t &guestAddress) noexcept;
   bool Unmap(std::uint64_t guestAddress, std::size_t bytes) noexcept;
   // Applies only non-executable page protection to an isolated PF_W range.
   // The UWP image mapping and all code/read-only ranges remain unchanged.
@@ -75,8 +78,11 @@ private:
     std::uint64_t size{};
     void *host{};
     std::uint32_t protection{};
+    bool insideReservation{};
   };
   std::vector<AnonymousRange> anonymous_;
+  struct ReservedRange { std::uint64_t address{}, size{}; void* host{}; };
+  std::vector<ReservedRange> reserved_;
 };
 
 } // namespace Lab
