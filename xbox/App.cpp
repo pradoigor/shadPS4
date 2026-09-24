@@ -69,6 +69,7 @@ struct App : ApplicationT<App> {
     enum class Page { Home, Library, Settings, Diagnostics };
     enum class HomeCategory { Games, Applications };
     enum class HomeFilter { All, Favorites, Recent };
+    enum class HomeFocusArea { Tabs, Actions, Filters, Titles, EmptyAction };
     Grid root{nullptr};
     Grid homeView{nullptr}, libraryView{nullptr}, settingsView{nullptr}, diagnosticsView{nullptr};
     ItemsControl homeItems{nullptr}, pendingItems{nullptr};
@@ -92,6 +93,8 @@ struct App : ApplicationT<App> {
     HomeFilter homeFilter{HomeFilter::All};
     int selectedPendingIndex{-1};
     int homeFocusedIndex{-1};
+    HomeFocusArea homeFocusArea{HomeFocusArea::Tabs};
+    int homeFocusIndex{};
     std::wstring selectedLoaderPath;
     std::shared_ptr<Lab::InstallProgress> extraction;
     std::unique_ptr<Lab::HomebrewRuntime> homebrew;
@@ -326,7 +329,12 @@ struct App : ApplicationT<App> {
             card.HorizontalContentAlignment(HorizontalAlignment::Center); card.VerticalContentAlignment(VerticalAlignment::Center);
             card.Content(tile); card.Tag(box_value(static_cast<int64_t>(index)));
             Windows::UI::Xaml::Automation::AutomationProperties::SetName(card, hstring(item.name));
-            card.GotFocus([this, index](auto const&, auto const&) { homeFocusedIndex = static_cast<int>(index); });
+            const auto visibleIndex = static_cast<int>(homeVisibleIndices.size());
+            card.GotFocus([this, index, visibleIndex](auto const&, auto const&) {
+                homeFocusedIndex = static_cast<int>(index);
+                homeFocusArea = HomeFocusArea::Titles;
+                homeFocusIndex = visibleIndex;
+            });
             card.Click([this, index](auto const&, auto const&) { LaunchInstalled(index); });
             homeItems.Items().Append(card);
             homeVisibleIndices.push_back(index);
@@ -781,13 +789,97 @@ struct App : ApplicationT<App> {
         case Page::Diagnostics: ShowPage(Page::Settings); break;
         }
     }
+    void FocusHome(HomeFocusArea area, int index = 0) {
+        switch (area) {
+        case HomeFocusArea::Tabs: {
+            constexpr wchar_t const* names[]{L"GamesTab", L"AppsTab"};
+            index = std::clamp(index, 0, 1);
+            Find<Button>(names[index]).Focus(FocusState::Programmatic);
+            break;
+        }
+        case HomeFocusArea::Actions: {
+            constexpr wchar_t const* names[]{L"OpenLibrary", L"OpenSettings"};
+            index = std::clamp(index, 0, 1);
+            Find<Button>(names[index]).Focus(FocusState::Programmatic);
+            break;
+        }
+        case HomeFocusArea::Filters: {
+            constexpr wchar_t const* names[]{L"FilterAll", L"FilterFavorites", L"FilterRecent"};
+            index = std::clamp(index, 0, 2);
+            Find<Button>(names[index]).Focus(FocusState::Programmatic);
+            break;
+        }
+        case HomeFocusArea::Titles:
+            if (homeVisibleIndices.empty()) {
+                FocusHome(HomeFocusArea::EmptyAction);
+                return;
+            }
+            index = std::clamp(index, 0, static_cast<int>(homeVisibleIndices.size()) - 1);
+            if (auto found = homeButtons.find(homeVisibleIndices[index]); found != homeButtons.end())
+                found->second.Focus(FocusState::Programmatic);
+            break;
+        case HomeFocusArea::EmptyAction:
+            Find<Button>(L"EmptyImport").Focus(FocusState::Programmatic);
+            break;
+        }
+    }
+    void NavigateHome(int dx, int dy) {
+        if (dx == 0 && dy == 0) return;
+        switch (homeFocusArea) {
+        case HomeFocusArea::Tabs:
+            if (dy > 0) FocusHome(HomeFocusArea::Filters, 0);
+            else if (dy < 0) FocusHome(HomeFocusArea::Actions, 0);
+            else if (dx > 0 && homeFocusIndex == 1) FocusHome(HomeFocusArea::Actions, 0);
+            else FocusHome(HomeFocusArea::Tabs, homeFocusIndex + dx);
+            break;
+        case HomeFocusArea::Actions:
+            if (dy > 0) FocusHome(HomeFocusArea::Filters, 2);
+            else if (dy < 0 || (dx < 0 && homeFocusIndex == 0))
+                FocusHome(HomeFocusArea::Tabs, 1);
+            else FocusHome(HomeFocusArea::Actions, homeFocusIndex + dx);
+            break;
+        case HomeFocusArea::Filters:
+            if (dy > 0) FocusHome(HomeFocusArea::Titles, 0);
+            else if (dy < 0) FocusHome(homeFocusIndex == 2 ? HomeFocusArea::Actions : HomeFocusArea::Tabs,
+                                       homeFocusIndex == 2 ? 0 : homeFocusIndex);
+            else FocusHome(HomeFocusArea::Filters, homeFocusIndex + dx);
+            break;
+        case HomeFocusArea::Titles:
+            if (dy < 0 && homeFocusIndex < 6) FocusHome(HomeFocusArea::Filters, 0);
+            else {
+                const auto next = homeFocusIndex + dx + dy * 6;
+                if (next >= 0 && next < static_cast<int>(homeVisibleIndices.size()))
+                    FocusHome(HomeFocusArea::Titles, next);
+            }
+            break;
+        case HomeFocusArea::EmptyAction:
+            if (dy < 0) FocusHome(HomeFocusArea::Filters, 0);
+            break;
+        }
+    }
     void OnGamepadKey(Core::CoreWindow const&, Core::KeyEventArgs const& args) {
         // The guest polls the physical pad directly. Do not also navigate XS4
         // when B/Menu are pressed inside a running title.
         if (homebrew && homebrew->running()) return;
         const auto key = args.VirtualKey();
         bool handled = true;
-        if (key == Sys::VirtualKey::GamepadB) {
+        int dx{}, dy{};
+        if (key == Sys::VirtualKey::GamepadDPadLeft ||
+            key == Sys::VirtualKey::GamepadLeftThumbstickLeft ||
+            key == Sys::VirtualKey::Left) dx = -1;
+        else if (key == Sys::VirtualKey::GamepadDPadRight ||
+                 key == Sys::VirtualKey::GamepadLeftThumbstickRight ||
+                 key == Sys::VirtualKey::Right) dx = 1;
+        else if (key == Sys::VirtualKey::GamepadDPadUp ||
+                 key == Sys::VirtualKey::GamepadLeftThumbstickUp ||
+                 key == Sys::VirtualKey::Up) dy = -1;
+        else if (key == Sys::VirtualKey::GamepadDPadDown ||
+                 key == Sys::VirtualKey::GamepadLeftThumbstickDown ||
+                 key == Sys::VirtualKey::Down) dy = 1;
+        if (currentPage == Page::Home && (dx || dy) &&
+            Find<Grid>(L"AngleTestView").Visibility() != Visibility::Visible) {
+            NavigateHome(dx, dy);
+        } else if (key == Sys::VirtualKey::GamepadB) {
             const bool angleVisible = Find<Grid>(L"AngleTestView").Visibility() == Visibility::Visible;
             if (angleVisible && !(homebrew && homebrew->running()) && !homebrewLaunchPending)
                 FinishAngleTest();
@@ -879,6 +971,21 @@ struct App : ApplicationT<App> {
             Find<Button>(L"FilterAll").Click([this](auto const&, auto const&) { SetHomeFilter(HomeFilter::All); });
             Find<Button>(L"FilterFavorites").Click([this](auto const&, auto const&) { SetHomeFilter(HomeFilter::Favorites); });
             Find<Button>(L"FilterRecent").Click([this](auto const&, auto const&) { SetHomeFilter(HomeFilter::Recent); });
+            auto trackHomeFocus = [this](wchar_t const* name, HomeFocusArea area, int index) {
+                Find<Button>(name).GotFocus([this, area, index](auto const&, auto const&) {
+                    homeFocusArea = area;
+                    homeFocusIndex = index;
+                    if (area != HomeFocusArea::Titles) homeFocusedIndex = -1;
+                });
+            };
+            trackHomeFocus(L"GamesTab", HomeFocusArea::Tabs, 0);
+            trackHomeFocus(L"AppsTab", HomeFocusArea::Tabs, 1);
+            trackHomeFocus(L"OpenLibrary", HomeFocusArea::Actions, 0);
+            trackHomeFocus(L"OpenSettings", HomeFocusArea::Actions, 1);
+            trackHomeFocus(L"FilterAll", HomeFocusArea::Filters, 0);
+            trackHomeFocus(L"FilterFavorites", HomeFocusArea::Filters, 1);
+            trackHomeFocus(L"FilterRecent", HomeFocusArea::Filters, 2);
+            trackHomeFocus(L"EmptyImport", HomeFocusArea::EmptyAction, 0);
             Find<Button>(L"OpenLibrary").Click([this](auto const&, auto const&) { ShowPage(Page::Library); });
             Find<Button>(L"EmptyImport").Click([this](auto const&, auto const&) { ShowPage(Page::Library); SelectContent(); });
             Find<Button>(L"PendingEmptyImport").Click([this](auto const&, auto const&) { SelectContent(); });

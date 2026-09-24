@@ -1,4 +1,4 @@
-# Apollo no runtime UWP — versão 0.79
+# Apollo no runtime UWP — versão 0.80
 
 ## Resultado do teste 0.71
 
@@ -164,6 +164,17 @@ do XS4 durante a execução. Os primeiros uploads de textura e desenhos registra
 formato, tamanho, programa, textura e estado de blend no console log. Isso
 permite identificar a origem dos quadrados pretos sem aplicar uma conversão de
 cor presumida que poderia danificar outros aplicativos.
+
+## Navegação do XS4 na versão 0.80
+
+O primeiro teste da 0.79 confirmou que o cursor desapareceu, mas o foco da tela
+inicial ficava preso nas categorias quando o controle tentava descer. O XAML
+usava navegação espacial automática em botões dentro de um `Viewbox` e de um
+`ItemsControl` preenchido dinamicamente. A 0.80 define a sequência de foco com
+D-pad, analógico esquerdo e setas: abas, botões superiores, filtros e cards de
+títulos. Quando a categoria não tem títulos, o foco chega ao botão de importar.
+O botão A continua acionando o controle em foco; o convidado mantém o controle
+físico durante a execução.
 
 ## O que falta confirmar
 
