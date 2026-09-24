@@ -46,6 +46,9 @@ int main(int argc,char** argv) {
         Check(argc==2,"font directory required");
         Check(SandboxAppPath("/mnt/sandbox/APOL00004_000/app0/assets/fonts/font.ttf")=="/app0/assets/fonts/font.ttf","sandbox app0 alias");
         Check(SandboxAppPath("/mnt/sandbox/OTHER0001_000/app0")=="/app0","generic process mount");
+        Check(SandboxAppPath("/mnt/sandbox/pfsmnt/NPXS39041-app0/langs//1/lang.ini")=="/app0/langs//1/lang.ini","pfsmnt app0 alias");
+        Check(!SandboxAppPath("/mnt/sandbox/pfsmnt/NPXS39041-data/file"),"pfsmnt other mount rejected");
+        Check(!SandboxAppPath("/mnt/sandbox/pfsmnt/../NPXS39041-app0/file"),"pfsmnt traversal rejected");
         Check(!SandboxAppPath("/mnt/sandbox/../app0/asset"),"sandbox traversal rejected");
         Check(!SandboxAppPath("/mnt/sandbox/APP_000/app0-other/asset"),"mount boundary");
         Check(!SandboxAppPath("/mnt/sandbox/APP_000/data/file"),"other mount rejected");

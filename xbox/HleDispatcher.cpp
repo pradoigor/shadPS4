@@ -487,6 +487,14 @@ void HleDispatcher::ConfigureFileSystem(std::filesystem::path appRoot,
         !dataRoot_.is_absolute())
         throw std::invalid_argument("Raízes do VFS UWP inválidas.");
     std::filesystem::create_directories(dataRoot_);
+    const auto etcRoot = dataRoot_ / L"system" / L"etc";
+    std::filesystem::create_directories(etcRoot);
+    const auto hostsPath = etcRoot / L"hosts";
+    if (!std::filesystem::exists(hostsPath)) {
+        std::ofstream hosts(hostsPath, std::ios::binary | std::ios::trunc);
+        if (!hosts) throw std::runtime_error("Falha ao criar /etc/hosts virtual.");
+        hosts << "127.0.0.1 localhost\n::1 localhost\n";
+    }
 }
 
 void HleDispatcher::ConfigureTrace(std::filesystem::path path,
@@ -2069,6 +2077,25 @@ bool HleDispatcher::ResolveGuestPath(std::string const& guestPath, bool write,
         if (auto alias = SandboxAppPath(guestPath)) return ResolveGuestPath(*alias, write, hostPath);
         if (guestPath.empty() || guestPath.find('\\') != std::string::npos)
             return false;
+        if (guestPath == "/etc/hosts") {
+            if (write) return false;
+            hostPath = dataRoot_ / L"system" / L"etc" / L"hosts";
+            return !dataRoot_.empty();
+        }
+        // The console exposes the installed package icon through appmeta as
+        // well as app0. Keep this alias confined to the current title.
+        constexpr std::string_view iconSuffix = "/icon0.png";
+        for (std::string_view prefix : {std::string_view("/user/appmeta/"),
+                                        std::string_view("/user/appmeta/external/")}) {
+            if (!write && guestPath.starts_with(prefix) && guestPath.ends_with(iconSuffix)) {
+                const auto title = std::string_view(guestPath).substr(
+                    prefix.size(), guestPath.size() - prefix.size() - iconSuffix.size());
+                if (title == appRoot_.filename().string()) {
+                    hostPath = appRoot_ / L"sce_sys" / L"icon0.png";
+                    return true;
+                }
+            }
+        }
         std::filesystem::path root;
         std::string relative;
         if (guestPath == "/app0" || guestPath.starts_with("/app0/")) {
