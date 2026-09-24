@@ -26,6 +26,7 @@ public:
   // The runtime owns memory, HLE thunks and the worker for the whole session.
   void Start(std::filesystem::path executable, std::filesystem::path stateRoot, AngleVideo* graphics);
   bool running() const noexcept { return running_.load(); }
+  bool SetPaused(bool paused) noexcept;
 
 private:
   void Record(std::string const &stage, std::string const &detail) noexcept;

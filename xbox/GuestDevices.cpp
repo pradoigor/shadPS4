@@ -82,7 +82,14 @@ template<Op operation> std::uint64_t Call(HleDispatcher& d,GuestCallFrame const&
                     map(GamepadButtons::A,0x4000); map(GamepadButtons::B,0x2000); map(GamepadButtons::X,0x8000); map(GamepadButtons::Y,0x1000);
                     map(GamepadButtons::DPadUp,0x10); map(GamepadButtons::DPadRight,0x20); map(GamepadButtons::DPadDown,0x40); map(GamepadButtons::DPadLeft,0x80);
                     map(GamepadButtons::LeftShoulder,0x400); map(GamepadButtons::RightShoulder,0x800);
-                    map(GamepadButtons::LeftThumbstick,2); map(GamepadButtons::RightThumbstick,4); map(GamepadButtons::Menu,8); map(GamepadButtons::View,0x100000);
+                    map(GamepadButtons::LeftThumbstick,2); map(GamepadButtons::RightThumbstick,4);
+                    const bool hostShortcut =
+                        (r.Buttons & GamepadButtons::Menu) != GamepadButtons::None &&
+                        (r.Buttons & GamepadButtons::View) != GamepadButtons::None;
+                    if (!hostShortcut) {
+                        map(GamepadButtons::Menu,8);
+                        map(GamepadButtons::View,0x100000);
+                    }
                     auto axis=[](double x){return static_cast<std::uint8_t>(std::clamp((x+1)*127.5,0.0,255.0)+0.5);};
                     value.lx=axis(r.LeftThumbstickX); value.ly=axis(-r.LeftThumbstickY); value.rx=axis(r.RightThumbstickX); value.ry=axis(-r.RightThumbstickY);
                     value.l2=static_cast<std::uint8_t>(r.LeftTrigger*255); value.r2=static_cast<std::uint8_t>(r.RightTrigger*255);

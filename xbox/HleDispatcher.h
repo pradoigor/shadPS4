@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <array>
+#include <atomic>
 #include <condition_variable>
 #include <filesystem>
 #include <fstream>
@@ -71,6 +72,7 @@ public:
     void ConfigureFileSystem(std::filesystem::path appRoot,
                              std::filesystem::path dataRoot);
     void ConfigureTrace(std::filesystem::path path, std::string const& sessionId = {});
+    void SetPaused(bool paused) noexcept;
 
     std::size_t implementedCount() const noexcept;
     std::size_t unresolvedCount() const noexcept;
@@ -233,6 +235,9 @@ private:
     void AppendConsole(void const* bytes, std::size_t length) noexcept;
     std::mutex traceMutex_;
     std::uint64_t callSequence_{};
+    std::atomic_bool paused_{};
+    std::mutex pauseMutex_;
+    std::condition_variable pauseChanged_;
     struct GuestSignalAction {
         std::uint64_t handler{};
         std::int32_t flags{};

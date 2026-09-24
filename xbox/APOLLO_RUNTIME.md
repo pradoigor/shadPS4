@@ -198,6 +198,24 @@ não tratado também podia acionar o Back do host e fechar o XS4. No menu
 principal do próprio Apollo, Círculo/B solicita saída por diálogo; isso é
 comportamento do homebrew e não deve fechar o host sem confirmação.
 
+## Correção de imagem e retorno ao XS4 na versão 0.82
+
+Na sessão `1790219737-14244859-4936`, o Apollo continuou em execução e o B
+deixou de fechar o aplicativo. O diagnóstico dos uploads iniciais mostrou que
+o quarto canal tinha alfa 255 em todas as 256 amostras, enquanto o primeiro
+canal variava como máscara de transparência. O shader do Apollo lia o texel
+como `abgr`, mas trocava só vermelho e azul. A 0.82 adapta somente esse shader
+conhecido para converter os quatro canais com `.abgr`. Outros shaders continuam
+inalterados; a correção visual ainda requer confirmação no console.
+
+Durante a execução, Menu + View no controle Xbox pede uma pausa cooperativa no
+próximo serviço HLE e retorna à tela inicial do XS4. O botão Retomar ou a mesma
+combinação restaura a apresentação. Os dois botões pressionados juntos não são
+entregues ao convidado. Não há encerramento forçado seguro do processo PS4;
+enquanto ele estiver pausado, outro título não pode ser iniciado. Código
+convidado que não entra em serviço HLE pode continuar por algum tempo antes de
+parar, de modo que a pausa não equivale a um snapshot nem a suspensão total.
+
 ## O que falta confirmar
 
 Os traces mostram que o runtime ainda não fornece todos os serviços privados do

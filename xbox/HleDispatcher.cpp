@@ -150,7 +150,13 @@ bool IsCommittedGuestProcessRange(std::uint64_t address, std::size_t bytes,
 } // namespace
 
 HleDispatcher::~HleDispatcher() {
+    SetPaused(false);
     threads_.clear();
+}
+
+void HleDispatcher::SetPaused(bool paused) noexcept {
+    paused_.store(paused, std::memory_order_release);
+    if (!paused) pauseChanged_.notify_all();
 }
 
 HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
@@ -390,6 +396,12 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
     if (!self || !frame || slot >= self->entries_.size() ||
         frame->guest_stack != reinterpret_cast<std::uint64_t>(guestStack))
         return OrbisEnosys;
+    if (self->paused_.load(std::memory_order_acquire)) {
+        std::unique_lock pauseLock(self->pauseMutex_);
+        self->pauseChanged_.wait(pauseLock, [self] {
+            return !self->paused_.load(std::memory_order_acquire);
+        });
+    }
     const auto entry = self->entries_[static_cast<std::size_t>(slot)];
     std::uint64_t sequence{};
     const auto thread = static_cast<std::uint64_t>(GetCurrentThreadId());

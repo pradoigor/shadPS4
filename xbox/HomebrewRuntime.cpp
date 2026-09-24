@@ -411,6 +411,14 @@ HomebrewRuntime::~HomebrewRuntime() {
     Core::PlatformMemory::Free(GetCurrentProcess(), mainTlsPage_, 0, MEM_RELEASE);
 }
 
+bool HomebrewRuntime::SetPaused(bool paused) noexcept {
+  if (!running_.load() || !dispatcher_) return false;
+  dispatcher_->SetPaused(paused);
+  dispatcher_->GraphicsLog(paused ? "XS4: execução convidada pausada no próximo serviço HLE." :
+                                    "XS4: execução convidada retomada.");
+  return true;
+}
+
 void HomebrewRuntime::Record(std::string const &stage,
                              std::string const &detail) noexcept {
   try {

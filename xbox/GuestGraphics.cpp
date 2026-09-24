@@ -292,12 +292,17 @@ std::uint64_t Call_glShaderBinary(HleDispatcher& d,
     auto setSource = reinterpret_cast<decltype(&::glShaderSource)>(sourceFunction);
     auto compile = reinterpret_cast<decltype(&::glCompileShader)>(compileFunction);
     auto getShader = reinterpret_cast<decltype(&::glGetShaderiv)>(statusFunction);
-    const GLchar* sourceText = source.data();
-    const GLint sourceLength = static_cast<GLint>(source.size());
+    std::string adaptedSource;
+    const bool adaptedAlpha = AdaptApolloTextureShader(source, adaptedSource);
+    const auto shaderSource = adaptedAlpha ? std::string_view(adaptedSource) : source;
+    const GLchar* sourceText = shaderSource.data();
+    const GLint sourceLength = static_cast<GLint>(shaderSource.size());
     static std::atomic_uint32_t translated{};
     const auto ordinal = translated.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (adaptedAlpha)
+        d.GraphicsLog("Piglet: shader de textura ABGR adaptado para RGBA com alfa correto.");
     if (ordinal <= 3) {
-        std::string printable(source);
+        std::string printable(shaderSource);
         std::replace(printable.begin(), printable.end(), '\n', ' ');
         std::replace(printable.begin(), printable.end(), '\r', ' ');
         d.GraphicsLog("Piglet: GLSL " + std::to_string(ordinal) + ": " + printable);

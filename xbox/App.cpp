@@ -10,6 +10,7 @@
 #include <windows.h>
 #include <fileapifromapp.h>
 #include <winrt/Windows.UI.Core.h>
+#include <winrt/Windows.Gaming.Input.h>
 #include <winrt/Windows.System.h>
 #include <winrt/Windows.UI.Xaml.Media.Imaging.h>
 #include <winrt/Windows.Data.Json.h>
@@ -69,7 +70,7 @@ struct App : ApplicationT<App> {
     enum class Page { Home, Library, Settings, Diagnostics };
     enum class HomeCategory { Games, Applications };
     enum class HomeFilter { All, Favorites, Recent };
-    enum class HomeFocusArea { Tabs, Actions, Filters, Titles, EmptyAction };
+    enum class HomeFocusArea { Tabs, Actions, Filters, Titles, EmptyAction, Resume };
     Grid root{nullptr};
     Grid homeView{nullptr}, libraryView{nullptr}, settingsView{nullptr}, diagnosticsView{nullptr};
     ItemsControl homeItems{nullptr}, pendingItems{nullptr};
@@ -105,6 +106,7 @@ struct App : ApplicationT<App> {
     bool homebrewLaunchPending{};
     bool homebrewCompletionShown{};
     bool guestViewShown{};
+    bool guestPaused{}, pauseComboHeld{};
     bool importing{}, listing{};
     Windows::System::Display::DisplayRequest displayRequest{nullptr};
 
@@ -385,7 +387,8 @@ struct App : ApplicationT<App> {
             return;
         }
         if (homebrew && homebrew->running()) {
-            SetNotice(L"Um título já está em execução.");
+            SetNotice(guestPaused ? L"Há um título pausado. Retome-o antes de iniciar outro." :
+                                    L"Um título já está em execução.");
             return;
         }
         selectedLoaderPath = eboot.wstring();
@@ -461,6 +464,8 @@ struct App : ApplicationT<App> {
         }
         angleReturnPage = currentPage;
         guestViewShown = false;
+        guestPaused = false;
+        Find<Button>(L"ResumeContent").Visibility(Visibility::Collapsed);
         homebrewLaunchPending = true;
         anglePending = true;
         Find<Grid>(L"AngleTestView").Visibility(Visibility::Visible);
@@ -469,6 +474,22 @@ struct App : ApplicationT<App> {
         Find<TextBlock>(L"AngleStatus").Text(L"Preparando vídeo e iniciando conteúdo…");
         Find<Button>(L"CloseAngleTest").IsEnabled(false);
         RecordAngle(L"running", L"Inicialização EGL do homebrew iniciada.");
+    }
+    void PauseContent() {
+        if (guestPaused || !homebrew || !homebrew->SetPaused(true)) return;
+        guestPaused = true;
+        Find<Grid>(L"AngleTestView").Visibility(Visibility::Collapsed);
+        Find<Button>(L"ResumeContent").Visibility(Visibility::Visible);
+        ShowPage(Page::Home, false);
+        Find<Button>(L"ResumeContent").Focus(FocusState::Programmatic);
+        SetNotice(L"Conteúdo pausado. Selecione Retomar ou pressione Menu + View novamente.");
+    }
+    void ResumeContent() {
+        if (!guestPaused || !homebrew || !homebrew->running()) return;
+        Find<Grid>(L"AngleTestView").Visibility(Visibility::Visible);
+        Find<Button>(L"ResumeContent").Visibility(Visibility::Collapsed);
+        guestPaused = false;
+        homebrew->SetPaused(false);
     }
     void LaunchGuest() {
         try {
@@ -823,6 +844,9 @@ struct App : ApplicationT<App> {
         case HomeFocusArea::EmptyAction:
             Find<Button>(L"EmptyImport").Focus(FocusState::Programmatic);
             break;
+        case HomeFocusArea::Resume:
+            if (guestPaused) Find<Button>(L"ResumeContent").Focus(FocusState::Programmatic);
+            break;
         }
     }
     void NavigateHome(int dx, int dy) {
@@ -830,14 +854,14 @@ struct App : ApplicationT<App> {
         switch (homeFocusArea) {
         case HomeFocusArea::Tabs:
             if (dy > 0) FocusHome(HomeFocusArea::Filters, 0);
-            else if (dy < 0) FocusHome(HomeFocusArea::Actions, 0);
+            else if (dy < 0) FocusHome(guestPaused ? HomeFocusArea::Resume : HomeFocusArea::Actions, 0);
             else if (dx > 0 && homeFocusIndex == 1) FocusHome(HomeFocusArea::Actions, 0);
             else FocusHome(HomeFocusArea::Tabs, homeFocusIndex + dx);
             break;
         case HomeFocusArea::Actions:
             if (dy > 0) FocusHome(HomeFocusArea::Filters, 2);
             else if (dy < 0 || (dx < 0 && homeFocusIndex == 0))
-                FocusHome(HomeFocusArea::Tabs, 1);
+                FocusHome(guestPaused ? HomeFocusArea::Resume : HomeFocusArea::Tabs, 1);
             else FocusHome(HomeFocusArea::Actions, homeFocusIndex + dx);
             break;
         case HomeFocusArea::Filters:
@@ -857,12 +881,16 @@ struct App : ApplicationT<App> {
         case HomeFocusArea::EmptyAction:
             if (dy < 0) FocusHome(HomeFocusArea::Filters, 0);
             break;
+        case HomeFocusArea::Resume:
+            if (dy > 0) FocusHome(HomeFocusArea::Tabs, 1);
+            else if (dx > 0) FocusHome(HomeFocusArea::Actions, 0);
+            break;
         }
     }
     void OnGamepadKey(Core::CoreWindow const&, Core::KeyEventArgs const& args) {
         // The guest polls the physical pad directly. Do not also navigate XS4
         // when B/Menu are pressed inside a running title.
-        if (homebrew && homebrew->running()) {
+        if (homebrew && homebrew->running() && !guestPaused) {
             // The guest reads the physical pad through scePadReadState. Consume
             // the parallel UWP key event so Xbox does not treat B as Back and
             // close the host while the guest is still displaying a menu.
@@ -1002,6 +1030,8 @@ struct App : ApplicationT<App> {
             trackHomeFocus(L"FilterFavorites", HomeFocusArea::Filters, 1);
             trackHomeFocus(L"FilterRecent", HomeFocusArea::Filters, 2);
             trackHomeFocus(L"EmptyImport", HomeFocusArea::EmptyAction, 0);
+            trackHomeFocus(L"ResumeContent", HomeFocusArea::Resume, 0);
+            Find<Button>(L"ResumeContent").Click([this](auto const&, auto const&) { ResumeContent(); });
             Find<Button>(L"OpenLibrary").Click([this](auto const&, auto const&) { ShowPage(Page::Library); });
             Find<Button>(L"EmptyImport").Click([this](auto const&, auto const&) { ShowPage(Page::Library); SelectContent(); });
             Find<Button>(L"PendingEmptyImport").Click([this](auto const&, auto const&) { SelectContent(); });
@@ -1034,6 +1064,21 @@ struct App : ApplicationT<App> {
             Window::Current().CoreWindow().PointerCursor(nullptr);
             timer = DispatcherTimer(); timer.Interval(std::chrono::milliseconds(100));
             timer.Tick([this](auto const&, auto const&) {
+                bool shortcutDown = false;
+                try {
+                    using namespace Windows::Gaming::Input;
+                    auto pads = Gamepad::Gamepads();
+                    if (pads.Size()) {
+                        const auto buttons = pads.GetAt(0).GetCurrentReading().Buttons;
+                        shortcutDown = (buttons & GamepadButtons::Menu) != GamepadButtons::None &&
+                                       (buttons & GamepadButtons::View) != GamepadButtons::None;
+                    }
+                } catch (...) {}
+                if (shortcutDown && !pauseComboHeld && homebrew && homebrew->running()) {
+                    if (guestPaused) ResumeContent();
+                    else PauseContent();
+                }
+                pauseComboHeld = shortcutDown;
                 if (anglePending) {
                     anglePending = false;
                     std::wstring detail;
@@ -1072,6 +1117,8 @@ struct App : ApplicationT<App> {
                 }
                 if (homebrew && !homebrew->running() && !homebrewCompletionShown) {
                     homebrewCompletionShown = true;
+                    guestPaused = false;
+                    Find<Button>(L"ResumeContent").Visibility(Visibility::Collapsed);
                     Find<Border>(L"AngleLoadingView").Visibility(Visibility::Collapsed);
                     Find<Border>(L"AngleTestControls").Visibility(Visibility::Visible);
                     Find<Button>(L"CloseAngleTest").IsEnabled(true);

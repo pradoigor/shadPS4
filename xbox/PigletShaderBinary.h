@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <string>
 #include <string_view>
 
 namespace Lab {
@@ -43,6 +44,30 @@ inline bool DecodePigletShaderSource(void const* binary, std::size_t length,
             return false;
     }
     source = candidate;
+    return true;
+}
+
+// Apollo's SDL/Piglet fragment shader treats the uploaded byte stream as
+// ABGR but only swaps red and blue. Its RGBA upload is actually laid out as
+// [alpha, blue, green, red], so ANGLE sees opaque texels where alpha is zero.
+// Match this one known shader exactly; other Piglet shaders are untouched.
+inline bool AdaptApolloTextureShader(std::string_view source,
+                                     std::string& adapted) {
+    constexpr std::string_view sample = "vec4 abgr = texture2D(u_texture, v_texCoord);";
+    constexpr std::string_view assign = "gl_FragColor = abgr;";
+    constexpr std::string_view red = "gl_FragColor.r = abgr.b;";
+    constexpr std::string_view blue = "gl_FragColor.b = abgr.r;";
+    constexpr std::string_view tint = "gl_FragColor *= v_color;";
+    if (source.find(sample) == std::string_view::npos ||
+        source.find(assign) == std::string_view::npos ||
+        source.find(red) == std::string_view::npos ||
+        source.find(blue) == std::string_view::npos ||
+        source.find(tint) == std::string_view::npos) return false;
+    adapted.assign(source);
+    adapted.replace(adapted.find(assign), assign.size(),
+                    "gl_FragColor = abgr.abgr;");
+    adapted.erase(adapted.find(red), red.size());
+    adapted.erase(adapted.find(blue), blue.size());
     return true;
 }
 
