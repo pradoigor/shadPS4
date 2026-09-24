@@ -99,6 +99,7 @@ struct App : ApplicationT<App> {
     bool anglePending{}, angleActive{};
     bool homebrewLaunchPending{};
     bool homebrewCompletionShown{};
+    bool guestViewShown{};
     bool importing{}, listing{};
     Windows::System::Display::DisplayRequest displayRequest{nullptr};
 
@@ -449,9 +450,12 @@ struct App : ApplicationT<App> {
             return;
         }
         angleReturnPage = currentPage;
+        guestViewShown = false;
         homebrewLaunchPending = true;
         anglePending = true;
         Find<Grid>(L"AngleTestView").Visibility(Visibility::Visible);
+        Find<Border>(L"AngleLoadingView").Visibility(Visibility::Visible);
+        Find<Border>(L"AngleTestControls").Visibility(Visibility::Collapsed);
         Find<TextBlock>(L"AngleStatus").Text(L"Preparando vídeo e iniciando conteúdo…");
         Find<Button>(L"CloseAngleTest").IsEnabled(false);
         RecordAngle(L"running", L"Inicialização EGL do homebrew iniciada.");
@@ -465,11 +469,15 @@ struct App : ApplicationT<App> {
             Find<TextBlock>(L"AngleStatus").Text(L"Conteúdo em execução. A imagem será exibida quando o programa apresentar o primeiro quadro.");
         } catch (std::exception const& e) {
             homebrew.reset();
+            Find<Border>(L"AngleLoadingView").Visibility(Visibility::Collapsed);
+            Find<Border>(L"AngleTestControls").Visibility(Visibility::Visible);
             SetNotice(L"Não foi possível iniciar o conteúdo: " + std::wstring(to_hstring(e.what())));
             Find<TextBlock>(L"AngleStatus").Text(L"Falha ao iniciar: " + std::wstring(to_hstring(e.what())));
             Find<Button>(L"CloseAngleTest").IsEnabled(true);
         } catch (hresult_error const& e) {
             homebrew.reset();
+            Find<Border>(L"AngleLoadingView").Visibility(Visibility::Collapsed);
+            Find<Border>(L"AngleTestControls").Visibility(Visibility::Visible);
             SetNotice(L"Não foi possível iniciar o conteúdo: " + std::wstring(e.message()));
             Find<TextBlock>(L"AngleStatus").Text(L"Falha ao iniciar: " + std::wstring(e.message()));
             Find<Button>(L"CloseAngleTest").IsEnabled(true);
@@ -774,6 +782,9 @@ struct App : ApplicationT<App> {
         }
     }
     void OnGamepadKey(Core::CoreWindow const&, Core::KeyEventArgs const& args) {
+        // The guest polls the physical pad directly. Do not also navigate XS4
+        // when B/Menu are pressed inside a running title.
+        if (homebrew && homebrew->running()) return;
         const auto key = args.VirtualKey();
         bool handled = true;
         if (key == Sys::VirtualKey::GamepadB) {
@@ -816,6 +827,8 @@ struct App : ApplicationT<App> {
         angleReturnPage = currentPage;
         angleVideo.Stop(); angleActive = false;
         Find<Grid>(L"AngleTestView").Visibility(Visibility::Visible);
+        Find<Border>(L"AngleLoadingView").Visibility(Visibility::Collapsed);
+        Find<Border>(L"AngleTestControls").Visibility(Visibility::Visible);
         Find<TextBlock>(L"AngleStatus").Text(L"Preparando superfície EGL…");
         Find<Button>(L"CloseAngleTest").IsEnabled(true);
         anglePending = true;
@@ -827,6 +840,8 @@ struct App : ApplicationT<App> {
         anglePending = false; angleActive = false;
         angleVideo.Stop();
         Find<Grid>(L"AngleTestView").Visibility(Visibility::Collapsed);
+        Find<Border>(L"AngleLoadingView").Visibility(Visibility::Collapsed);
+        Find<Border>(L"AngleTestControls").Visibility(Visibility::Visible);
         ShowPage(angleReturnPage);
     }
     void OnLaunched(Windows::ApplicationModel::Activation::LaunchActivatedEventArgs const&) {
@@ -891,6 +906,9 @@ struct App : ApplicationT<App> {
             Window::Current().CoreWindow().KeyDown([this](Core::CoreWindow const& sender, Core::KeyEventArgs const& args) {
                 OnGamepadKey(sender, args);
             });
+            // XS4 and the guest use a gamepad-first UI; hide the system mouse
+            // cursor while this window is active.
+            Window::Current().CoreWindow().PointerCursor(nullptr);
             timer = DispatcherTimer(); timer.Interval(std::chrono::milliseconds(100));
             timer.Tick([this](auto const&, auto const&) {
                 if (anglePending) {
@@ -907,11 +925,17 @@ struct App : ApplicationT<App> {
                         homebrewLaunchPending = false;
                         if (angleActive && angleVideo.ReleaseForGuest()) LaunchGuest();
                         else {
+                            Find<Border>(L"AngleLoadingView").Visibility(Visibility::Collapsed);
+                            Find<Border>(L"AngleTestControls").Visibility(Visibility::Visible);
                             Find<TextBlock>(L"AngleStatus").Text(L"Não foi possível entregar o contexto EGL ao homebrew: " + detail);
                             Find<Button>(L"CloseAngleTest").IsEnabled(true);
                             SetNotice(L"O vídeo não está disponível. O conteúdo não foi iniciado.");
                         }
                     }
+                }
+                if (homebrew && homebrew->running() && !guestViewShown && angleVideo.GuestFrames() > 0) {
+                    guestViewShown = true;
+                    Find<Border>(L"AngleLoadingView").Visibility(Visibility::Collapsed);
                 }
                 if (extraction) {
                     const auto percent = extraction->percent.load();
@@ -925,6 +949,8 @@ struct App : ApplicationT<App> {
                 }
                 if (homebrew && !homebrew->running() && !homebrewCompletionShown) {
                     homebrewCompletionShown = true;
+                    Find<Border>(L"AngleLoadingView").Visibility(Visibility::Collapsed);
+                    Find<Border>(L"AngleTestControls").Visibility(Visibility::Visible);
                     Find<Button>(L"CloseAngleTest").IsEnabled(true);
                     auto statePath = std::filesystem::path(report->directory) / L"homebrew-runtime.json";
                     try {

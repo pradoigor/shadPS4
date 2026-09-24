@@ -88,6 +88,10 @@ std::uint64_t Call_##name(HleDispatcher& d, GuestCallFrame const& f) noexcept { 
 
 std::uint64_t Call_glShaderBinary(HleDispatcher&, GuestCallFrame const&) noexcept;
 std::uint64_t Call_glViewport(HleDispatcher&, GuestCallFrame const&) noexcept;
+std::uint64_t Call_glDrawElements(HleDispatcher&, GuestCallFrame const&) noexcept;
+std::uint64_t Call_glDrawArrays(HleDispatcher&, GuestCallFrame const&) noexcept;
+std::uint64_t Call_glTexImage2D(HleDispatcher&, GuestCallFrame const&) noexcept;
+std::uint64_t Call_glTexSubImage2D(HleDispatcher&, GuestCallFrame const&) noexcept;
 struct NamedHandler { std::string_view name; HleHandler handler; };
 constexpr NamedHandler GlHandlers[] = {
 #define GL_FUNCTION(name) {#name, &Call_##name},
@@ -95,7 +99,91 @@ constexpr NamedHandler GlHandlers[] = {
 #undef GL_FUNCTION
     {"glShaderBinary", &Call_glShaderBinary},
     {"glViewport", &Call_glViewport},
+    {"glDrawElements", &Call_glDrawElements},
+    {"glDrawArrays", &Call_glDrawArrays},
+    {"glTexImage2D", &Call_glTexImage2D},
+    {"glTexSubImage2D", &Call_glTexSubImage2D},
 };
+
+std::uint64_t GuestStackWord(HleDispatcher& d, GuestCallFrame const& f,
+                             std::size_t index) noexcept {
+    auto* word = static_cast<std::uint64_t const*>(
+        d.GuestReadable(f, f.guest_stack + 8 + index * 8, 8));
+    return word ? *word : 0;
+}
+
+std::uint64_t Call_glTexImage2D(HleDispatcher& d,
+                                 GuestCallFrame const& f) noexcept {
+    static std::atomic_uint32_t logged{};
+    if (logged.fetch_add(1, std::memory_order_relaxed) < 12) {
+        char line[256]{};
+        std::snprintf(line, sizeof(line),
+                      "GL: texImage2D internal=0x%x size=%dx%d format=0x%x type=0x%x pixels=%s",
+                      static_cast<unsigned>(f.gpr[2]),
+                      static_cast<int>(f.gpr[3]), static_cast<int>(f.gpr[4]),
+                      static_cast<unsigned>(GuestStackWord(d, f, 1)),
+                      static_cast<unsigned>(GuestStackWord(d, f, 2)),
+                      GuestStackWord(d, f, 3) ? "present" : "null");
+        d.GraphicsLog(line);
+    }
+    return ForwardGl<&::glTexImage2D>(d, f, "glTexImage2D");
+}
+
+std::uint64_t Call_glTexSubImage2D(HleDispatcher& d,
+                                    GuestCallFrame const& f) noexcept {
+    static std::atomic_uint32_t logged{};
+    if (logged.fetch_add(1, std::memory_order_relaxed) < 12) {
+        char line[256]{};
+        std::snprintf(line, sizeof(line),
+                      "GL: texSubImage2D size=%dx%d format=0x%x type=0x%x pixels=%s",
+                      static_cast<int>(f.gpr[4]), static_cast<int>(f.gpr[5]),
+                      static_cast<unsigned>(GuestStackWord(d, f, 0)),
+                      static_cast<unsigned>(GuestStackWord(d, f, 1)),
+                      GuestStackWord(d, f, 2) ? "present" : "null");
+        d.GraphicsLog(line);
+    }
+    return ForwardGl<&::glTexSubImage2D>(d, f, "glTexSubImage2D");
+}
+
+void LogDrawState(HleDispatcher& d, GuestCallFrame const& f,
+                  char const* operation, std::int32_t count) noexcept {
+    static std::atomic_uint32_t logged{};
+    if (logged.fetch_add(1, std::memory_order_relaxed) < 8) {
+        auto* graphics = d.Graphics();
+        if (graphics && graphics->Ready()) {
+            auto isEnabled = reinterpret_cast<decltype(&::glIsEnabled)>(
+                GetProcAddress(graphics->GlesModule(), "glIsEnabled"));
+            auto getInteger = reinterpret_cast<decltype(&::glGetIntegerv)>(
+                GetProcAddress(graphics->GlesModule(), "glGetIntegerv"));
+            if (isEnabled && getInteger) {
+                GLint src{}, dst{}, program{}, texture{};
+                getInteger(GL_BLEND_SRC_RGB, &src);
+                getInteger(GL_BLEND_DST_RGB, &dst);
+                getInteger(GL_CURRENT_PROGRAM, &program);
+                getInteger(GL_TEXTURE_BINDING_2D, &texture);
+                char line[256]{};
+                std::snprintf(line, sizeof(line),
+                              "GL: %s blend=%u src=0x%x dst=0x%x program=%d texture=%d count=%d",
+                              operation,
+                              static_cast<unsigned>(isEnabled(GL_BLEND)), src, dst,
+                              program, texture, count);
+                d.GraphicsLog(line);
+            }
+        }
+    }
+}
+
+std::uint64_t Call_glDrawElements(HleDispatcher& d,
+                                  GuestCallFrame const& f) noexcept {
+    LogDrawState(d, f, "drawElements", static_cast<std::int32_t>(f.gpr[1]));
+    return ForwardGl<&::glDrawElements>(d, f, "glDrawElements");
+}
+
+std::uint64_t Call_glDrawArrays(HleDispatcher& d,
+                                GuestCallFrame const& f) noexcept {
+    LogDrawState(d, f, "drawArrays", static_cast<std::int32_t>(f.gpr[2]));
+    return ForwardGl<&::glDrawArrays>(d, f, "glDrawArrays");
+}
 
 template<auto Function> std::uint64_t ForwardEgl(HleDispatcher& dispatcher,
                                                   GuestCallFrame const& frame,
@@ -123,6 +211,9 @@ EGL_FORWARD(eglCreatePbufferSurface)
 
 std::uint64_t Call_eglSwapBuffers(HleDispatcher& d, GuestCallFrame const& f) noexcept {
     auto result = ForwardEgl<&::eglSwapBuffers>(d, f, "eglSwapBuffers");
+    if (result) {
+        if (auto* graphics = d.Graphics()) graphics->NoteGuestFrame();
+    }
     static thread_local std::uint64_t frames{};
     if (result && ++frames <= 3) {
         d.GraphicsLog("EGL: quadro apresentado pelo homebrew #" + std::to_string(frames));

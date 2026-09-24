@@ -178,7 +178,7 @@
           <StackPanel Spacing="18" Margin="0,14,0,10">
             <Border Background="#111722" BorderBrush="#252E3D" BorderThickness="1" CornerRadius="12" Padding="24">
               <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <StackPanel Spacing="7"><TextBlock Text="XS4" FontSize="22"/><TextBlock Text="Versão instalada" FontSize="13" Foreground="#9AA7BC"/><TextBlock x:Name="CurrentVersion" Text="0.78.0.0" FontSize="17" Foreground="#D7E4F5"/><TextBlock x:Name="CurrentCommit" Text="Commit local" FontSize="12" Foreground="#73839B"/></StackPanel>
+                <StackPanel Spacing="7"><TextBlock Text="XS4" FontSize="22"/><TextBlock Text="Versão instalada" FontSize="13" Foreground="#9AA7BC"/><TextBlock x:Name="CurrentVersion" Text="0.79.0.0" FontSize="17" Foreground="#D7E4F5"/><TextBlock x:Name="CurrentCommit" Text="Commit local" FontSize="12" Foreground="#73839B"/></StackPanel>
                 <Border Grid.Column="1" Width="72" Height="72" CornerRadius="18" Background="#101827" VerticalAlignment="Center"><Image Width="64" Height="64" Source="ms-appx:///Assets/XS4-Mark.png" Stretch="Uniform"/></Border>
               </Grid>
             </Border>
@@ -211,7 +211,14 @@
 
   <Grid x:Name="AngleTestView" Visibility="Collapsed" Background="#050810">
     <SwapChainPanel x:Name="AnglePanel"/>
-    <Border VerticalAlignment="Bottom" Background="#E60B111C" Padding="30,22">
+    <Border x:Name="AngleLoadingView" Width="560" Padding="36" Background="#F0141B29" BorderBrush="#365070" BorderThickness="1" CornerRadius="16" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed">
+      <StackPanel Spacing="17">
+        <TextBlock Text="Iniciando conteúdo" FontSize="28" FontWeight="SemiBold"/>
+        <ProgressBar IsIndeterminate="True" Height="5" Foreground="#2694F3"/>
+        <TextBlock Text="Preparando vídeo e aguardando o primeiro quadro…" FontSize="16" Foreground="#B7C7DC" TextWrapping="Wrap"/>
+      </StackPanel>
+    </Border>
+    <Border x:Name="AngleTestControls" VerticalAlignment="Bottom" Background="#E60B111C" Padding="30,22">
       <Grid><StackPanel Spacing="5"><TextBlock Text="XS4 · EXECUÇÃO" FontSize="14" CharacterSpacing="110" Foreground="#8CBDEB"/><TextBlock x:Name="AngleStatus" Text="Preparando superfície…" FontSize="16" TextWrapping="Wrap"/></StackPanel><Button x:Name="CloseAngleTest" Content="Voltar" HorizontalAlignment="Right" VerticalAlignment="Center"/></Grid>
     </Border>
   </Grid>

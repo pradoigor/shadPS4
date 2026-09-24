@@ -25,6 +25,7 @@ template<class T> T Proc(HMODULE module, char const* name) { return reinterpret_
 
 bool AngleVideo::Start(winrt::Windows::UI::Xaml::Controls::SwapChainPanel const& panel, std::wstring& detail) {
     Stop();
+    guestFrames_.store(0, std::memory_order_relaxed);
     auto fail = [&](wchar_t const* stage) {
         auto error = egl_ ? Proc<GetError>(egl_, "eglGetError") : nullptr;
         std::wostringstream out;

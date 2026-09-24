@@ -3,6 +3,8 @@
 #include <windows.h>
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.Foundation.Collections.h>
+#include <atomic>
+#include <cstdint>
 #include <string>
 
 namespace Lab {
@@ -14,6 +16,8 @@ public:
     bool Ready() const noexcept { return egl_ && gles_ && display_ && surface_ && context_; }
     int SurfaceWidth() const noexcept { return surfaceWidth_; }
     int SurfaceHeight() const noexcept { return surfaceHeight_; }
+    void NoteGuestFrame() noexcept { guestFrames_.fetch_add(1, std::memory_order_relaxed); }
+    std::uint64_t GuestFrames() const noexcept { return guestFrames_.load(std::memory_order_relaxed); }
     HMODULE EglModule() const noexcept { return egl_; }
     HMODULE GlesModule() const noexcept { return gles_; }
     void* Display() const noexcept { return display_; }
@@ -30,6 +34,7 @@ private:
     void* config_{};
     int surfaceWidth_{};
     int surfaceHeight_{};
+    std::atomic_uint64_t guestFrames_{};
     winrt::Windows::Foundation::Collections::PropertySet properties_{nullptr};
 };
 }

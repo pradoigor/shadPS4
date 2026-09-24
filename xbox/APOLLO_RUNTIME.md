@@ -1,4 +1,4 @@
-# Apollo no runtime UWP — versão 0.78
+# Apollo no runtime UWP — versão 0.79
 
 ## Resultado do teste 0.71
 
@@ -148,6 +148,22 @@ O tratamento de rede offline permanece na consulta `sceNetCtlGetInfo` e na
 abertura POSIX de escrita de `/data/apollo/cache/ver.check`; o relatório de
 exceção ampliado da 0.77 também permanece. O Xbox ainda precisa confirmar se a
 falha de abertura evita a leitura inválida posterior ao primeiro quadro.
+
+## Resultado da 0.78 e alterações da 0.79
+
+O usuário confirmou que o Apollo abriu e permaneceu no menu na 0.78. A imagem
+estava centralizada, mas cores e transparência de fontes e ícones estavam
+incorretas, com quadrados pretos. O aviso fixo de execução cobria parte do
+conteúdo e o cursor do sistema aparecia.
+
+Na 0.79, o XS4 exibe um modal de carregamento até a primeira apresentação EGL
+do convidado, então deixa apenas a superfície gráfica em tela cheia. A faixa de
+status reaparece se a execução terminar ou o vídeo falhar. O cursor do sistema
+fica oculto e as teclas do controle usadas pelo convidado não navegam pela UI
+do XS4 durante a execução. Os primeiros uploads de textura e desenhos registram
+formato, tamanho, programa, textura e estado de blend no console log. Isso
+permite identificar a origem dos quadrados pretos sem aplicar uma conversão de
+cor presumida que poderia danificar outros aplicativos.
 
 ## O que falta confirmar
 
