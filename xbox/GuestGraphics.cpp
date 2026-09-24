@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "GuestGraphics.h"
 #include "AngleVideo.h"
+#include "PigletShaderBinary.h"
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
 #include <algorithm>
+#include <array>
+#include <atomic>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <sstream>
@@ -80,11 +84,13 @@ std::uint64_t Call_##name(HleDispatcher& d, GuestCallFrame const& f) noexcept { 
 #include "GuestGlFunctions.inc"
 #undef GL_FUNCTION
 
+std::uint64_t Call_glShaderBinary(HleDispatcher&, GuestCallFrame const&) noexcept;
 struct NamedHandler { std::string_view name; HleHandler handler; };
 constexpr NamedHandler GlHandlers[] = {
 #define GL_FUNCTION(name) {#name, &Call_##name},
 #include "GuestGlFunctions.inc"
 #undef GL_FUNCTION
+    {"glShaderBinary", &Call_glShaderBinary},
 };
 
 template<auto Function> std::uint64_t ForwardEgl(HleDispatcher& dispatcher,
@@ -120,6 +126,86 @@ std::uint64_t Call_eglSwapBuffers(HleDispatcher& d, GuestCallFrame const& f) noe
         d.GraphicsLog("EGL: eglSwapBuffers falhou");
     }
     return result;
+}
+
+std::uint64_t Call_glShaderBinary(HleDispatcher& d,
+                                  GuestCallFrame const& f) noexcept {
+    auto* graphics = d.Graphics();
+    if (!graphics || !graphics->Ready()) return OrbisEnosys;
+    auto binaryFunction = GetProcAddress(graphics->GlesModule(), "glShaderBinary");
+    if (!binaryFunction) return OrbisEnosys;
+
+    const auto count = static_cast<std::int32_t>(f.gpr[0]);
+    const auto length = static_cast<std::int32_t>(f.gpr[4]);
+    if (count <= 0 || count > 256 || length <= 0 ||
+        length > 16 * 1024 * 1024)
+        return Forwarder<decltype(&::glShaderBinary)>::Call(
+            d, f, binaryFunction, "glShaderBinary");
+
+    auto const* shaderIds = static_cast<GLuint const*>(
+        d.GuestReadable(f, f.gpr[1],
+                        static_cast<std::size_t>(count) * sizeof(GLuint)));
+    auto const* binary = static_cast<std::uint8_t const*>(
+        d.GuestReadable(f, f.gpr[3], static_cast<std::size_t>(length)));
+    if (!shaderIds || !binary)
+        return 0;
+
+    std::string_view source;
+    if (!DecodePigletShaderSource(binary, static_cast<std::size_t>(length),
+                                  source))
+        return Forwarder<decltype(&::glShaderBinary)>::Call(
+            d, f, binaryFunction, "glShaderBinary");
+
+    auto sourceFunction = GetProcAddress(graphics->GlesModule(), "glShaderSource");
+    auto compileFunction = GetProcAddress(graphics->GlesModule(), "glCompileShader");
+    auto statusFunction = GetProcAddress(graphics->GlesModule(), "glGetShaderiv");
+    if (!sourceFunction || !compileFunction || !statusFunction) {
+        d.GraphicsLog("Piglet: ANGLE não expõe as funções para compilar o GLSL extraído.");
+        return 0;
+    }
+
+    auto setSource = reinterpret_cast<decltype(&::glShaderSource)>(sourceFunction);
+    auto compile = reinterpret_cast<decltype(&::glCompileShader)>(compileFunction);
+    auto getShader = reinterpret_cast<decltype(&::glGetShaderiv)>(statusFunction);
+    const GLchar* sourceText = source.data();
+    const GLint sourceLength = static_cast<GLint>(source.size());
+    static std::atomic_uint32_t translated{};
+    const auto ordinal = translated.fetch_add(1, std::memory_order_relaxed) + 1;
+    for (std::int32_t i = 0; i < count; ++i) {
+        const auto shader = shaderIds[i];
+        if (!shader) continue;
+        setSource(shader, 1, &sourceText, &sourceLength);
+        compile(shader);
+        GLint compiled{};
+        getShader(shader, GL_COMPILE_STATUS, &compiled);
+
+        if (ordinal <= 8) {
+            char message[192]{};
+            std::snprintf(message, sizeof(message),
+                          "Piglet: binário convertido para GLSL; format=0x%llx, "
+                          "bytes=%d, GLSL=%d, compile=%s",
+                          static_cast<unsigned long long>(f.gpr[2]), length,
+                          sourceLength, compiled ? "aprovado" : "falhou");
+            d.GraphicsLog(message);
+        }
+        if (!compiled && ordinal <= 3) {
+            std::array<GLchar, 512> info{};
+            GLsizei written{};
+            auto getInfo = reinterpret_cast<decltype(&::glGetShaderInfoLog)>(
+                GetProcAddress(graphics->GlesModule(), "glGetShaderInfoLog"));
+            if (getInfo) {
+                getInfo(shader, static_cast<GLsizei>(info.size()), &written,
+                        info.data());
+                if (written > 0) {
+                    d.GraphicsLog("Piglet: erro do compilador ANGLE:");
+                    d.GraphicsLog(std::string_view(
+                        info.data(), (std::min)(static_cast<std::size_t>(written),
+                                                info.size() - 1)));
+                }
+            }
+        }
+    }
+    return 0;
 }
 
 std::uint64_t Call_sceKernelLoadStartModule(HleDispatcher& d, GuestCallFrame const& f) noexcept {

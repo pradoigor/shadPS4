@@ -196,6 +196,8 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
                                   fault - gGuestHostBase < gGuestImageSize
                               ? gGuestVirtualBase + (fault - gGuestHostBase)
                               : 0;
+  const auto instructionDomain = guestRip ? "guest_image" : "host_runtime";
+  const auto faultDomain = guestFault ? "guest_image" : "outside_guest_image";
   int length = std::snprintf(
       payload, sizeof(payload),
       "{\"stage\":\"guest_exception\",\"exception_code\":%lu,"
@@ -215,7 +217,8 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
       "\"stack_words\":[%llu,%llu,%llu,%llu,%llu,%llu,%llu,%llu],"
       "\"exception_parameters\":%lu,\"access_kind\":%llu,"
       "\"fault_address\":%llu,\"guest_virtual_rip\":%llu,"
-      "\"guest_virtual_fault\":%llu,\"fault_domain\":\"%s\","
+      "\"guest_virtual_fault\":%llu,\"instruction_domain\":\"%s\","
+      "\"fault_domain\":\"%s\",\"fault_address_in_guest_image\":%s,"
       "\"timestamp\":%llu}",
       static_cast<unsigned long>(record->ExceptionCode),
       gSessionId, gBuildCommit,
@@ -264,7 +267,9 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
       static_cast<unsigned long long>(fault),
       static_cast<unsigned long long>(guestRip),
       static_cast<unsigned long long>(guestFault),
-      guestRip ? "guest_image" : "host_runtime",
+      instructionDomain,
+      faultDomain,
+      guestFault ? "true" : "false",
       static_cast<unsigned long long>(UnixSeconds()));
   if (length > 0) {
     if (length >= static_cast<int>(sizeof(payload))) {
