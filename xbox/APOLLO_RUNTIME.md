@@ -1,4 +1,4 @@
-# Apollo no runtime UWP — versão 0.76
+# Apollo no runtime UWP — versão 0.78
 
 ## Resultado do teste 0.71
 
@@ -133,6 +133,21 @@ atualização.
 O teste no Xbox precisa confirmar se o Apollo agora chega e permanece no menu.
 As funções online, gerenciamento de saves e execução de jogos continuam fora
 do que esse marco comprova.
+
+## Resultado do teste 0.77 e correção 0.78
+
+A sessão `1790215832-10339218-6036` mostrou uma regressão introduzida na 0.77:
+na chamada HLE 27, `sceSysmoduleLoadModuleInternal(0x80000010)` recebeu
+`0x8002004E`; em seguida o homebrew chamou `_exit(-1)`, sem apresentar um
+quadro. Na sessão 0.76, a mesma chamada retornou zero e a execução avançou até
+os quadros do Apollo. O resultado negativo de carregamento do módulo não é um
+caminho tolerado nessa inicialização.
+
+A versão 0.78 restaura o retorno zero anterior para a carga interna de módulos.
+O tratamento de rede offline permanece na consulta `sceNetCtlGetInfo` e na
+abertura POSIX de escrita de `/data/apollo/cache/ver.check`; o relatório de
+exceção ampliado da 0.77 também permanece. O Xbox ainda precisa confirmar se a
+falha de abertura evita a leitura inválida posterior ao primeiro quadro.
 
 ## O que falta confirmar
 

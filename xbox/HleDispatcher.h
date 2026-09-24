@@ -109,7 +109,6 @@ private:
     static std::uint64_t KernelGetEuid(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelSchedYield(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelThreadSelf(HleDispatcher&, GuestCallFrame const&) noexcept;
-    static std::uint64_t SysmoduleLoadInternal(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t EglGetError(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t EglQueryApi(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t GlGetError(HleDispatcher&, GuestCallFrame const&) noexcept;

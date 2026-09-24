@@ -172,7 +172,6 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sched_yield") use(&KernelSchedYield);
     if (name == "_exit") use(&GenericSuccess);
     if (name == "pthread_self") use(&KernelThreadSelf);
-    if (name == "sceSysmoduleLoadModuleInternal") use(&SysmoduleLoadInternal);
     if (name == "sceNetCtlInit") use(&NetCtlInit);
     if (name == "sceNetCtlTerm") use(&NetCtlTerm);
     if (name == "sceNetCtlGetInfo") use(&NetCtlGetInfo);
@@ -268,6 +267,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "_nanosleep") use(&KernelNanosleep);
     if (name == "setuid" || name == "madvise" || name == "fchmod" ||
         name == "sceSysmoduleLoadModule" ||
+        name == "sceSysmoduleLoadModuleInternal" ||
         name == "sceSysmoduleUnloadModuleInternal" ||
         name == "sceCommonDialogInitialize" ||
         name == "sceSystemServiceParamGetString" ||
@@ -637,19 +637,6 @@ std::uint64_t HleDispatcher::GlGetError(HleDispatcher&, GuestCallFrame const&) n
 }
 
 std::uint64_t HleDispatcher::NetCtlInit(HleDispatcher&, GuestCallFrame const&) noexcept {
-    return 0;
-}
-
-std::uint64_t HleDispatcher::SysmoduleLoadInternal(
-    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
-    constexpr std::uint64_t InternalNet = 0x80000010ull;
-    constexpr std::uint64_t InternalNetCtl = 0x80000011ull;
-    const auto module = static_cast<std::uint32_t>(frame.gpr[0]);
-    if (module == InternalNet || module == InternalNetCtl) {
-        dispatcher.GraphicsLog(
-            "HLE: módulo de rede PS4 indisponível; retorno ENOSYS");
-        return OrbisEnosys;
-    }
     return 0;
 }
 
