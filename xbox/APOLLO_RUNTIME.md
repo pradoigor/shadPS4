@@ -1,4 +1,4 @@
-# Apollo no runtime UWP — versão 0.75
+# Apollo no runtime UWP — versão 0.76
 
 ## Resultado do teste 0.71
 
@@ -82,6 +82,34 @@ isso é uma pista, mas ainda não prova que a chamada causou a exceção.
   descritores de terminal e `ENOTTY` para arquivos comuns.
 - Registra as dimensões em pixels da superfície EGL e os primeiros viewports
   convidados para comparar a resolução lógica com a área real de apresentação.
+
+## Resultado do teste 0.75
+
+A sessão `1790211450-5956984-6644` confirma compilação dos três shaders Piglet,
+512 chamadas de desenho e 256 apresentações de buffer. O log também mostra a
+causa objetiva do enquadramento: Apollo pediu viewport de `1920x1080`, mas a
+superfície EGL do Xbox tinha `960x540` pixels. Como o viewport não era adaptado,
+o desenho ocupava apenas uma parte da área real e parecia descentralizado.
+
+O trace tem 18.418 chamadas HLE completas; a última chamada registrada,
+`clock_gettime`, retornou normalmente. Depois disso, o EBOOT sofreu uma leitura
+inválida (`0xC0000005`) no endereço `0x1E93CE` relativo à imagem convidada. Os
+bytes da instrução começam por `mov rax,[rdi]`; `rdi` apontava para fora da imagem
+e para uma página `PAGE_NOACCESS`. Isso mantém a origem do ponteiro inválido em
+aberto: os arquivos não identificam uma chamada HLE específica como causa.
+
+## Alterações da versão 0.76
+
+- Adapta ao tamanho da superfície EGL um viewport convidado de tela inteira
+  somente quando ele excede a superfície e mantém praticamente a mesma
+  proporção. Viewports menores, subáreas e conversões de proporção não são
+  alterados.
+- Registra o viewport solicitado e o efetivamente aplicado para verificar o
+  enquadramento no próximo teste.
+
+Essa correção trata o enquadramento observado; ainda é necessário verificar a
+imagem no console. O fechamento por acesso inválido permanece sem correção até
+que haja evidência suficiente para apontar a origem do ponteiro.
 
 ## O que falta confirmar
 

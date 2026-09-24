@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -212,20 +214,47 @@ std::uint64_t Call_glShaderBinary(HleDispatcher& d,
 
 std::uint64_t Call_glViewport(HleDispatcher& d,
                               GuestCallFrame const& f) noexcept {
-    const auto result = ForwardGl<&::glViewport>(d, f, "glViewport");
+    auto* graphics = d.Graphics();
+    const auto surfaceWidth = graphics ? graphics->SurfaceWidth() : 0;
+    const auto surfaceHeight = graphics ? graphics->SurfaceHeight() : 0;
+    const auto x = static_cast<std::int32_t>(f.gpr[0]);
+    const auto y = static_cast<std::int32_t>(f.gpr[1]);
+    const auto width = static_cast<std::int32_t>(f.gpr[2]);
+    const auto height = static_cast<std::int32_t>(f.gpr[3]);
+
+    // Apollo creates its display at 1920x1080 while Xbox UWP can expose the
+    // SwapChainPanel to EGL at 960x540. A full-screen viewport with the same
+    // aspect ratio can safely map to the actual default-framebuffer size;
+    // leave sub-viewports and aspect-ratio conversions untouched.
+    auto adjusted = f;
+    const bool fullScreenViewport = x == 0 && y == 0 && width > surfaceWidth &&
+                                    height > surfaceHeight && surfaceWidth > 0 &&
+                                    surfaceHeight > 0 && width > 0 && height > 0;
+    if (fullScreenViewport) {
+        const auto guestAspect = static_cast<double>(width) / height;
+        const auto surfaceAspect = static_cast<double>(surfaceWidth) / surfaceHeight;
+        if (std::abs(guestAspect - surfaceAspect) <= surfaceAspect * 0.01) {
+            adjusted.gpr[2] = static_cast<std::uint32_t>(surfaceWidth);
+            adjusted.gpr[3] = static_cast<std::uint32_t>(surfaceHeight);
+        }
+    }
+
+    const auto appliedX = static_cast<std::int32_t>(adjusted.gpr[0]);
+    const auto appliedY = static_cast<std::int32_t>(adjusted.gpr[1]);
+    const auto appliedWidth = static_cast<std::int32_t>(adjusted.gpr[2]);
+    const auto appliedHeight = static_cast<std::int32_t>(adjusted.gpr[3]);
+    const auto result = ForwardGl<&::glViewport>(d, adjusted, "glViewport");
     static std::atomic_uint32_t logged{};
     if (logged.fetch_add(1, std::memory_order_relaxed) < 4) {
-        char message[192]{};
-        auto* graphics = d.Graphics();
+        char message[256]{};
         std::snprintf(message, sizeof(message),
-                      "GL: viewport convidado=(%lld,%lld,%lld,%lld); "
-                      "superfície EGL=%dx%d px",
-                      static_cast<long long>(f.gpr[0]),
-                      static_cast<long long>(f.gpr[1]),
-                      static_cast<long long>(f.gpr[2]),
-                      static_cast<long long>(f.gpr[3]),
-                      graphics ? graphics->SurfaceWidth() : 0,
-                      graphics ? graphics->SurfaceHeight() : 0);
+                      "GL: viewport guest=(%d,%d,%d,%d); EGL=%dx%d px; "
+                      "aplicado=(%d,%d,%d,%d)%s",
+                      x, y, width, height, surfaceWidth, surfaceHeight,
+                      appliedX, appliedY, appliedWidth, appliedHeight,
+                      width != appliedWidth || height != appliedHeight
+                          ? " [ajustado para tela inteira]"
+                          : "");
         d.GraphicsLog(message);
     }
     return result;
