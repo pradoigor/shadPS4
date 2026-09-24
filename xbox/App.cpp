@@ -311,6 +311,15 @@ struct App : ApplicationT<App> {
         if (index >= libraryItems.size() || libraryItems[index].installed) return;
         selectedPendingIndex = static_cast<int>(index);
         RefreshPendingSelection();
+        for (std::uint32_t position = 0; position < pendingItems.Items().Size(); ++position) {
+            auto card = pendingItems.Items().GetAt(position).try_as<Button>();
+            if (!card) continue;
+            const bool selected = position < pendingIndices.size() && pendingIndices[position] == index;
+            card.BorderThickness(selected ? Thickness{3, 3, 3, 3} : Thickness{1, 1, 1, 1});
+            card.BorderBrush(Media::SolidColorBrush(selected ?
+                Windows::UI::ColorHelper::FromArgb(255, 38, 220, 214) :
+                Windows::UI::ColorHelper::FromArgb(255, 33, 41, 56)));
+        }
     }
     void FocusPending(int position) {
         if (position < 0 || position >= static_cast<int>(pendingItems.Items().Size())) return;
@@ -765,7 +774,15 @@ struct App : ApplicationT<App> {
                 card.BorderBrush(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 33, 41, 56)));
                 card.Background(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 14, 18, 27)));
                 card.Content(tile); card.Tag(box_value(static_cast<int64_t>(index)));
-                card.Click([this, index](auto const&, auto const&) { SelectPending(index); });
+                card.Click([this, index](auto const&, auto const&) {
+                    SelectPending(index);
+                    auto action = Find<Button>(L"ExtractContent");
+                    if (!action.IsEnabled()) action = Find<Button>(L"ValidateContent");
+                    if (action.IsEnabled()) {
+                        libraryFocusIndex = -1;
+                        action.Focus(FocusState::Programmatic);
+                    }
+                });
                 const auto focusPosition = static_cast<int>(pendingIndices.size() - 1);
                 card.GotFocus([this, focusPosition, index](auto const&, auto const&) {
                     libraryFocusIndex = focusPosition;

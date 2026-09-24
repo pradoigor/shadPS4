@@ -164,71 +164,36 @@ std::uint32_t TrapGuestSyscalls(std::vector<std::uint8_t>& image,
   return trapped;
 }
 
-std::string BridgeStoreLoaderCallback(
-    std::vector<std::uint8_t>& image, std::uint64_t virtualBase,
-    std::uint64_t entry,
-    std::vector<PendingRelativeRelocation> const& relocations) {
-  // The Store 1.10 loader calls its statically linked jbc_run_as_root just
-  // after resolving VerifyRSA. Its PS4 kernel credential walk is inapplicable
-  // to an AppContainer; the callback itself uses our guest filesystem HLE.
-  // This adapter is deliberately tied to the measured loader image and
-  // verified direct callsite. It changes only guest code in the private copy.
-  constexpr std::uint64_t StoreEntry = 1062328;
-  constexpr std::uint64_t ReturnAfterRunAsRoot = 1062909;
+std::string BridgeStoreRootCallback(std::vector<std::uint8_t>& image,
+                                    std::uint64_t virtualBase,
+                                    std::uint64_t entry) {
+  // Store-R2's loader calls jbc_run_as_root(loader_rooted, nullptr, CWD_ROOT).
+  // The PS4 credential walk cannot run in a UWP AppContainer. Call only the
+  // loader's user-space callback, with its original null argument. These
+  // signatures come from the exact SELF extracted from Store-R2.pkg.
   constexpr std::size_t StoreImageBytes = 1418536;
-  if (entry != StoreEntry || image.size() != StoreImageBytes ||
-      ReturnAfterRunAsRoot < virtualBase + 6)
-    return "Imagem do loader diferente; callback original mantido.";
-  const auto after = static_cast<std::size_t>(ReturnAfterRunAsRoot - virtualBase);
-  std::int64_t target = -1;
-  std::string form;
-  if (image[after - 5] == 0xe8) {
-    std::int32_t relative{};
-    std::memcpy(&relative, image.data() + after - 4, sizeof(relative));
-    target = static_cast<std::int64_t>(ReturnAfterRunAsRoot) + relative;
-    form = "direct";
-  } else if (image[after - 6] == 0xff && image[after - 5] == 0x15) {
-    std::int32_t relative{};
-    std::memcpy(&relative, image.data() + after - 4, sizeof(relative));
-    const auto slot = static_cast<std::int64_t>(ReturnAfterRunAsRoot) + relative;
-    for (auto const& relocation : relocations) {
-      if (relocation.target == static_cast<std::uint64_t>(slot)) {
-        target = relocation.addend;
-        break;
-      }
-    }
-    form = "indirect";
-  } else if (image[after - 3] == 0x41 && image[after - 2] == 0xff &&
-             image[after - 1] == 0xd6 &&
-             image[after - 6] == 0x4c && image[after - 5] == 0x89 &&
-             image[after - 4] == 0xe2) {
-    // The measured Store 1.10 image calls the statically linked function
-    // through R14. At the trapped syscall R14 was image base + 7184; only
-    // accept that exact image/callsite pair, rather than guessing registers.
-    target = 7184;
-    form = "register-r14";
-  }
-  if (form.empty()) {
-    char bytes[25]{};
-    constexpr char digits[] = "0123456789abcdef";
-    for (std::size_t i = 0; i < 12; ++i) {
-      const auto byte = image[after - 12 + i];
-      bytes[i * 2] = digits[byte >> 4];
-      bytes[i * 2 + 1] = digits[byte & 15];
-    }
-    return std::string("Chamada do loader não reconhecida; bytes anteriores: ") + bytes;
-  }
-  if (target < 4096 || target >= 7586 || target < static_cast<std::int64_t>(virtualBase))
-    return "Destino " + form + " do callback fora da região esperada: " +
-           std::to_string(target);
-  const auto offset = static_cast<std::size_t>(target - virtualBase);
-  if (offset + 8 > image.size()) return "Destino do callback fora da imagem.";
-  // SysV: RDI=function, RSI=argument. Tail-jump to the callback, passing the
-  // argument in RDI and preserving the original caller's return address.
-  constexpr std::uint8_t callbackBridge[8] = {
-      0x48, 0x89, 0xf8, 0x48, 0x89, 0xf7, 0xff, 0xe0};
-  std::memcpy(image.data() + offset, callbackBridge, sizeof(callbackBridge));
-  return "Callback " + form + " do loader 1.10 encaminhado ao sandbox convidado.";
+  constexpr std::uint64_t StoreEntry = 0x1035b8;
+  constexpr std::size_t Call = 0x1d9d;
+  constexpr std::size_t RootRoutine = 0x5330;
+  constexpr std::size_t Callback = 0x10a0;
+  constexpr std::uint8_t callBytes[] = {0xe8, 0x8e, 0x35, 0x00, 0x00};
+  constexpr std::uint8_t routineBytes[] = {0x55, 0x48, 0x89, 0xe5,
+                                           0x48, 0x81, 0xec, 0xd0};
+  constexpr std::uint8_t callbackBytes[] = {0x55, 0x48, 0x89, 0xe5,
+                                            0x48, 0x81, 0xec, 0xf0};
+  if (virtualBase != 0 || entry != StoreEntry || image.size() != StoreImageBytes)
+    return "SELF da Store diferente; callback original mantido.";
+  if (std::memcmp(image.data() + Call, callBytes, sizeof(callBytes)) != 0 ||
+      std::memcmp(image.data() + RootRoutine, routineBytes, sizeof(routineBytes)) != 0 ||
+      std::memcmp(image.data() + Callback, callbackBytes, sizeof(callbackBytes)) != 0)
+    return "Assinatura de chamada, rotina ou callback da Store diferente; sem adaptação.";
+  constexpr std::uint8_t bridge[] = {
+      0x48, 0x89, 0xf8, // mov rax, rdi: callback
+      0x48, 0x89, 0xf7, // mov rdi, rsi: argumento
+      0xff, 0xe0        // jmp rax; preserva retorno ao caller
+  };
+  std::memcpy(image.data() + RootRoutine, bridge, sizeof(bridge));
+  return "Rotina PS4 de credenciais substituída pelo callback do loader Store-R2, sem privilégio de host.";
 }
 
 int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
@@ -646,9 +611,8 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
   if (std::filesystem::is_regular_file(
           executable_.parent_path() / L"Media" / L"rsa.prx", storePathError) &&
       !storePathError) {
-    Record("store_loader_callback", BridgeStoreLoaderCallback(
-        load_.private_image, load_.min_virtual_address, load_.entry,
-        load_.pending_relative_relocations));
+    Record("store_loader_callback", BridgeStoreRootCallback(
+        load_.private_image, load_.min_virtual_address, load_.entry));
     const auto syscalls = TrapGuestSyscalls(load_.private_image,
                                            load_.min_virtual_address,
                                            load_.guest_segments);
