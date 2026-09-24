@@ -256,6 +256,7 @@ private:
         std::vector<DirectoryEntry> directoryEntries;
         std::size_t directoryIndex{};
         bool directory{};
+        bool nullDevice{};
         bool readable{true};
         bool writable{};
     };

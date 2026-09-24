@@ -74,6 +74,13 @@ static_assert(sizeof(OrbisStat) == 120);
 static_assert(offsetof(OrbisStat, size) == 72);
 static_assert(sizeof(OrbisDirentHeader) == 8);
 
+void PopulateNullStat(OrbisStat& output) noexcept {
+    output = {};
+    output.mode = 0020000 | 0666; // Character device, readable and writable.
+    output.links = 1;
+    output.blockSize = 512;
+}
+
 bool PopulateStat(std::filesystem::path const& path, OrbisStat& output) noexcept {
     try {
         std::error_code error;
@@ -1668,6 +1675,15 @@ std::uint64_t HleDispatcher::KernelOpen(HleDispatcher& dispatcher,
         if (access == 0x3u) return OrbisEinval;
         const bool readable = access != 0x1u;
         const bool writable = access != 0x0u;
+        if (guestPath == "/dev/null") {
+            GuestFile file;
+            file.nullDevice = true;
+            file.readable = readable;
+            file.writable = writable;
+            const auto descriptor = dispatcher.nextFileDescriptor_++;
+            dispatcher.files_.emplace(descriptor, std::move(file));
+            return static_cast<std::uint64_t>(descriptor);
+        }
         std::filesystem::path hostPath;
         if (!dispatcher.ResolveGuestPath(guestPath, writable, hostPath)) {
             dispatcher.GraphicsLog("HLE open: caminho guest não resolvido: " + guestPath);
@@ -1744,7 +1760,7 @@ std::uint64_t HleDispatcher::KernelClose(HleDispatcher& dispatcher,
     const auto descriptor = static_cast<std::int32_t>(frame.gpr[0]);
     auto found = dispatcher.files_.find(descriptor);
     if (found == dispatcher.files_.end()) return OrbisEbadf;
-    found->second.stream.close();
+    if (found->second.stream.is_open()) found->second.stream.close();
     dispatcher.files_.erase(found);
     return 0;
 }
@@ -1763,6 +1779,7 @@ std::uint64_t HleDispatcher::KernelRead(HleDispatcher& dispatcher,
         return OrbisEbadf;
     auto* output = WritablePointer(dispatcher, frame, frame.gpr[1], size);
     if (size != 0 && !output) return OrbisEfault;
+    if (found->second.nullDevice) return 0;
     found->second.stream.read(static_cast<char*>(output), static_cast<std::streamsize>(size));
     return static_cast<std::uint64_t>(found->second.stream.gcount());
 }
@@ -1823,6 +1840,7 @@ std::uint64_t HleDispatcher::KernelReadv(HleDispatcher& dispatcher,
             total += length;
         }
 
+        if (file->second.nullDevice) return 0;
         std::size_t transferred{};
         for (auto const& [output, length] : parts) {
             if (length == 0) continue;
@@ -1856,6 +1874,7 @@ std::uint64_t HleDispatcher::KernelWrite(HleDispatcher& dispatcher,
     if (found == dispatcher.files_.end() || found->second.directory ||
         !found->second.writable)
         return OrbisEbadf;
+    if (found->second.nullDevice) return frame.gpr[2];
     found->second.stream.write(static_cast<char const*>(input),
                                static_cast<std::streamsize>(size));
     return found->second.stream ? frame.gpr[2] : OrbisEbadf;
@@ -1904,7 +1923,7 @@ std::uint64_t HleDispatcher::KernelWritev(HleDispatcher& dispatcher,
         for (auto const& [input, length] : parts) {
             if (length == 0) continue;
             if (console) dispatcher.AppendConsole(input, length);
-            else {
+            else if (!file->second.nullDevice) {
                 file->second.stream.write(static_cast<char const*>(input),
                                           static_cast<std::streamsize>(length));
                 if (!file->second.stream) return OrbisEbadf;
@@ -1922,6 +1941,7 @@ std::uint64_t HleDispatcher::KernelLseek(HleDispatcher& dispatcher,
     constexpr std::uint64_t OrbisEinval = 0x80020016ull;
     auto found = dispatcher.files_.find(static_cast<std::int32_t>(frame.gpr[0]));
     if (found == dispatcher.files_.end()) return OrbisEbadf;
+    if (found->second.nullDevice) return 0;
     if (found->second.directory) {
         if (frame.gpr[2] != 0 || frame.gpr[1] != 0) return OrbisEinval;
         found->second.directoryIndex = 0;
@@ -1947,6 +1967,7 @@ std::uint64_t HleDispatcher::KernelFsync(HleDispatcher& dispatcher,
     constexpr std::uint64_t OrbisEbadf = 0x80020009ull;
     auto found = dispatcher.files_.find(static_cast<std::int32_t>(frame.gpr[0]));
     if (found == dispatcher.files_.end()) return OrbisEbadf;
+    if (found->second.nullDevice) return 0;
     if (found->second.directory) return 0;
     found->second.stream.flush();
     return found->second.stream ? 0 : OrbisEbadf;
@@ -1957,6 +1978,7 @@ std::uint64_t HleDispatcher::FileAccess(HleDispatcher& dispatcher,
     try {
         std::string guestPath;
         if (!dispatcher.ReadGuestString(frame.gpr[0], guestPath)) return UINT64_MAX;
+        if (guestPath == "/dev/null") return 0;
         std::filesystem::path hostPath;
         const bool write = (frame.gpr[1] & 0x2u) != 0;
         if (!dispatcher.ResolveGuestPath(guestPath, write, hostPath)) return UINT64_MAX;
@@ -2054,15 +2076,18 @@ std::uint64_t HleDispatcher::FileStat(HleDispatcher& dispatcher,
     try {
         std::string guestPath;
         if (!dispatcher.ReadGuestString(frame.gpr[0], guestPath)) return UINT64_MAX;
-        std::filesystem::path hostPath;
-        if (!dispatcher.ResolveGuestPath(guestPath, false, hostPath)) return UINT64_MAX;
         auto* output = dispatcher.memory_
                            ? static_cast<OrbisStat*>(dispatcher.memory_->TranslateWritable(
                                  frame.gpr[1], sizeof(OrbisStat)))
                            : nullptr;
         if (!output) return UINT64_MAX;
         OrbisStat value{};
-        if (!PopulateStat(hostPath, value)) return UINT64_MAX;
+        if (guestPath == "/dev/null") PopulateNullStat(value);
+        else {
+            std::filesystem::path hostPath;
+            if (!dispatcher.ResolveGuestPath(guestPath, false, hostPath) ||
+                !PopulateStat(hostPath, value)) return UINT64_MAX;
+        }
         std::memcpy(output, &value, sizeof(value));
         return 0;
     } catch (...) {
@@ -2080,9 +2105,12 @@ std::uint64_t HleDispatcher::FileFstat(HleDispatcher& dispatcher,
                                  frame.gpr[1], sizeof(OrbisStat)))
                            : nullptr;
         if (!output) return UINT64_MAX;
-        found->second.stream.flush();
         OrbisStat value{};
-        if (!PopulateStat(found->second.path, value)) return UINT64_MAX;
+        if (found->second.nullDevice) PopulateNullStat(value);
+        else {
+            found->second.stream.flush();
+            if (!PopulateStat(found->second.path, value)) return UINT64_MAX;
+        }
         std::memcpy(output, &value, sizeof(value));
         return 0;
     } catch (...) {
