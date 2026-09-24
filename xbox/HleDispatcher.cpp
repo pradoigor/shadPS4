@@ -622,30 +622,42 @@ std::uint64_t HleDispatcher::KernelDlsym(HleDispatcher& dispatcher,
                                          GuestCallFrame const& frame) noexcept {
     constexpr std::uint64_t OrbisEinval = 0x80020016ull;
     constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
-    if (frame.gpr[0] != 65) return OrbisEnosys;
+    if (frame.gpr[0] != 65 && frame.gpr[0] != 66) return OrbisEnosys;
     std::string symbol;
     if (!dispatcher.ReadGuestString(frame.gpr[1], symbol, 128)) return OrbisEfault;
-    if (symbol != "VerifyRSA") return OrbisEnosys;
+    const bool rsa = frame.gpr[0] == 65 && symbol == "VerifyRSA";
+    const bool guestJailbreak = frame.gpr[0] == 66 && symbol == "jailbreak_me";
+    if (!rsa && !guestJailbreak) return OrbisEnosys;
     auto* output = static_cast<std::uint64_t*>(
         WritablePointer(dispatcher, frame, frame.gpr[2], sizeof(std::uint64_t)));
     if (!output) return OrbisEfault;
+    const auto encoded = rsa ? "xs4.store.VerifyRSA" : "xs4.store.jailbreak_me";
     void* address = nullptr;
     for (auto const& entry : dispatcher.entries_) {
-        if (entry.encoded == "xs4.store.VerifyRSA") {
+        if (entry.encoded == encoded) {
             address = entry.address;
             break;
         }
     }
     if (!address) {
         auto slot = static_cast<std::uint64_t>(dispatcher.entries_.size());
-        dispatcher.entries_.push_back(Entry{"xs4.store.VerifyRSA", "", "VerifyRSA",
-                                            true, &StoreVerifyRsa, nullptr});
+        dispatcher.entries_.push_back(Entry{encoded, "", symbol,
+                                            true, rsa ? &StoreVerifyRsa : &StoreGuestJailbreak,
+                                            nullptr});
         address = dispatcher.thunks_.Create(&dispatcher, slot, &Dispatch);
         dispatcher.entries_.back().address = address;
     }
     if (!address) return OrbisEinval;
     *output = reinterpret_cast<std::uint64_t>(address);
-    dispatcher.GraphicsLog("HLE module: VerifyRSA resolvido com validação RSA/SHA-256");
+    dispatcher.GraphicsLog(rsa
+        ? "HLE module: VerifyRSA resolvido com validação RSA/SHA-256"
+        : "HLE module: jailbreak_me resolvido como contexto PS4 virtual; sem privilégios no Xbox");
+    return 0;
+}
+
+std::uint64_t HleDispatcher::StoreGuestJailbreak(HleDispatcher& dispatcher,
+                                                  GuestCallFrame const&) noexcept {
+    dispatcher.GraphicsLog("HLE module: jailbreak_me concluído no processo PS4 virtual; acesso host permanece isolado");
     return 0;
 }
 

@@ -410,6 +410,16 @@ std::uint64_t Call_sceKernelLoadStartModule(HleDispatcher& d, GuestCallFrame con
         }
         d.GraphicsLog("HLE module: RSA da Store ausente em " + path);
     }
+    if (base == "jb.prx" || base == "jb.sprx") {
+        std::filesystem::path host;
+        std::error_code error;
+        if (d.GuestFilePath(path, false, host) &&
+            std::filesystem::is_regular_file(host, error) && !error) {
+            d.GraphicsLog("HLE module: jb.prx da Store disponível; privilégios restritos ao processo convidado");
+            return 66;
+        }
+        d.GraphicsLog("HLE module: jb.prx da Store ausente em " + path);
+    }
     return OrbisEnoent;
 }
 std::uint64_t Call_scePigletSetConfigurationVSH(HleDispatcher& d, GuestCallFrame const& f) noexcept {
