@@ -23,7 +23,7 @@ class PackageValidationTests(unittest.TestCase):
         self.files = {
             'AppxManifest.xml': b'''<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10">
               <Identity Name="PradoIgor.ShadPS4Xbox.Diagnostics" ProcessorArchitecture="x64" Publisher="CN=PradoIgor.ShadPS4Xbox"/>
-              <Capabilities><Capability Name="codeGeneration"/></Capabilities></Package>''',
+              <Capabilities><Capability Name="codeGeneration"/><Capability Name="internetClient"/></Capabilities></Package>''',
             'AppxSignature.p7x': b'fixture-only-not-a-real-signature',
             'MainPage.xaml': b'<Grid/>', 'ShadPS4Xbox.exe': bytes(exe),
         }
@@ -78,7 +78,7 @@ class PackageValidationTests(unittest.TestCase):
             validate(*self.write())
 
     def test_rejects_added_capabilities(self):
-        self.files['AppxManifest.xml'] = self.files['AppxManifest.xml'].replace(b'</Capabilities>', b'<Capability Name="internetClient"/></Capabilities>')
+        self.files['AppxManifest.xml'] = self.files['AppxManifest.xml'].replace(b'</Capabilities>', b'<Capability Name="privateNetworkClientServer"/></Capabilities>')
         with self.assertRaisesRegex(ValueError, 'capabilities'):
             validate(*self.write())
 

@@ -34,7 +34,7 @@ def validate(package, info_path):
         if identity.attrib['Publisher'] != 'CN=PradoIgor.ShadPS4Xbox':
             raise ValueError('Unexpected publisher')
         capabilities = {x.attrib['Name'] for x in manifest.findall('p:Capabilities/*', NS)}
-        if capabilities != {'codeGeneration'}:
+        if capabilities != {'codeGeneration', 'internetClient'}:
             raise ValueError(f'Unexpected capabilities: {capabilities}')
         exe = appx.read('ShadPS4Xbox.exe')
         offset = struct.unpack_from('<I', exe, 0x3c)[0]
