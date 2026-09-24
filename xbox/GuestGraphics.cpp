@@ -400,6 +400,16 @@ std::uint64_t Call_sceKernelLoadStartModule(HleDispatcher& d, GuestCallFrame con
     auto const base = std::filesystem::path(path).filename().string();
     if (base == "libScePigletv2VSH.sprx" || base == "libScePigletv2VSH.prx") return 63;
     if (base == "libSceShaccVSH.sprx" || base == "libSceShaccVSH.prx") return 64;
+    if (base == "rsa.prx" || base == "rsa.sprx") {
+        std::filesystem::path host;
+        std::error_code error;
+        if (d.GuestFilePath(path, false, host) &&
+            std::filesystem::is_regular_file(host, error) && !error) {
+            d.GraphicsLog("HLE module: RSA da Store disponível em " + path);
+            return 65;
+        }
+        d.GraphicsLog("HLE module: RSA da Store ausente em " + path);
+    }
     return OrbisEnoent;
 }
 std::uint64_t Call_scePigletSetConfigurationVSH(HleDispatcher& d, GuestCallFrame const& f) noexcept {

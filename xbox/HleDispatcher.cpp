@@ -8,12 +8,15 @@
 #include "core/aerolib/aerolib.h"
 
 #include <windows.h>
+#include <bcrypt.h>
 
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -301,6 +304,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "pthread_rwlock_wrlock") use(&PthreadRwlockWriteLock);
     if (name == "pthread_rwlock_unlock") use(&PthreadRwlockUnlock);
     if (name == "__error") use(&KernelErrorPointer);
+    if (name == "sceKernelDlsym") use(&KernelDlsym);
     if (name == "sysconf") use(&KernelSysconf);
     if (name == "sceKernelGetFsSandboxRandomWord") use(&KernelSandboxWord);
     if (name == "_nanosleep") use(&KernelNanosleep);
@@ -578,6 +582,133 @@ std::uint64_t HleDispatcher::Unimplemented(HleDispatcher&, GuestCallFrame const&
 std::uint64_t HleDispatcher::KernelErrorPointer(HleDispatcher&,
                                                  GuestCallFrame const&) noexcept {
     return reinterpret_cast<std::uint64_t>(&GuestPosixErrno);
+}
+
+std::uint64_t HleDispatcher::KernelDlsym(HleDispatcher& dispatcher,
+                                         GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEinval = 0x80020016ull;
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    if (frame.gpr[0] != 65) return OrbisEnosys;
+    std::string symbol;
+    if (!dispatcher.ReadGuestString(frame.gpr[1], symbol, 128)) return OrbisEfault;
+    if (symbol != "VerifyRSA") return OrbisEnosys;
+    auto* output = static_cast<std::uint64_t*>(
+        WritablePointer(dispatcher, frame, frame.gpr[2], sizeof(std::uint64_t)));
+    if (!output) return OrbisEfault;
+    void* address = nullptr;
+    for (auto const& entry : dispatcher.entries_) {
+        if (entry.encoded == "xs4.store.VerifyRSA") {
+            address = entry.address;
+            break;
+        }
+    }
+    if (!address) {
+        auto slot = static_cast<std::uint64_t>(dispatcher.entries_.size());
+        dispatcher.entries_.push_back(Entry{"xs4.store.VerifyRSA", "", "VerifyRSA",
+                                            true, &StoreVerifyRsa, nullptr});
+        address = dispatcher.thunks_.Create(&dispatcher, slot, &Dispatch);
+        dispatcher.entries_.back().address = address;
+    }
+    if (!address) return OrbisEinval;
+    *output = reinterpret_cast<std::uint64_t>(address);
+    dispatcher.GraphicsLog("HLE module: VerifyRSA resolvido com validação RSA/SHA-256");
+    return 0;
+}
+
+std::uint64_t HleDispatcher::StoreVerifyRsa(HleDispatcher& dispatcher,
+                                            GuestCallFrame const& frame) noexcept {
+    std::string guestFile, guestKey;
+    if (!dispatcher.ReadGuestString(frame.gpr[0], guestFile, 1024) ||
+        !dispatcher.ReadGuestString(frame.gpr[1], guestKey, 1024)) return UINT64_MAX;
+    std::filesystem::path file, keyFile;
+    if (!dispatcher.ResolveGuestPath(guestFile, false, file) ||
+        !dispatcher.ResolveGuestPath(guestKey, false, keyFile)) return UINT64_MAX;
+    try {
+        auto decodeHex = [](std::string_view input) -> std::vector<std::uint8_t> {
+            std::vector<std::uint8_t> result;
+            int high = -1;
+            for (auto ch : input) {
+                int digit = ch >= '0' && ch <= '9' ? ch - '0' :
+                            ch >= 'a' && ch <= 'f' ? ch - 'a' + 10 :
+                            ch >= 'A' && ch <= 'F' ? ch - 'A' + 10 : -1;
+                if (digit < 0) continue;
+                if (high < 0) high = digit;
+                else { result.push_back(static_cast<std::uint8_t>((high << 4) | digit)); high = -1; }
+            }
+            if (high >= 0) result.clear();
+            return result;
+        };
+        std::ifstream publicKey(keyFile, std::ios::binary);
+        std::string modulusLine, exponentLine;
+        if (!std::getline(publicKey, modulusLine) || !std::getline(publicKey, exponentLine))
+            return UINT64_MAX;
+        auto equalN = modulusLine.find('=');
+        auto equalE = exponentLine.find('=');
+        if (equalN == std::string::npos || equalE == std::string::npos) return UINT64_MAX;
+        auto modulus = decodeHex(std::string_view(modulusLine).substr(equalN + 1));
+        auto exponent = decodeHex(std::string_view(exponentLine).substr(equalE + 1));
+        if (modulus.size() < 128 || modulus.size() > 512 ||
+            exponent.empty() || exponent.size() > 8) return UINT64_MAX;
+        std::ifstream signatureFile(std::filesystem::path(file.wstring() + L".sig"),
+                                    std::ios::binary);
+        std::string signatureText((std::istreambuf_iterator<char>(signatureFile)), {});
+        if (signatureText.size() > 2048) return UINT64_MAX;
+        auto signature = decodeHex(signatureText);
+        if (signature.size() != modulus.size()) return UINT64_MAX;
+
+        BCRYPT_ALG_HANDLE rsaAlgorithm{}, shaAlgorithm{};
+        BCRYPT_KEY_HANDLE rsaKey{};
+        BCRYPT_HASH_HANDLE shaHash{};
+        auto cleanup = [&] {
+            if (shaHash) BCryptDestroyHash(shaHash);
+            if (rsaKey) BCryptDestroyKey(rsaKey);
+            if (shaAlgorithm) BCryptCloseAlgorithmProvider(shaAlgorithm, 0);
+            if (rsaAlgorithm) BCryptCloseAlgorithmProvider(rsaAlgorithm, 0);
+        };
+        bool valid = false;
+        do {
+            if (BCryptOpenAlgorithmProvider(&rsaAlgorithm, BCRYPT_RSA_ALGORITHM, nullptr, 0) < 0 ||
+                BCryptOpenAlgorithmProvider(&shaAlgorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) < 0)
+                break;
+            BCRYPT_RSAKEY_BLOB header{BCRYPT_RSAPUBLIC_MAGIC,
+                static_cast<ULONG>(modulus.size() * 8), static_cast<ULONG>(exponent.size()),
+                static_cast<ULONG>(modulus.size()), 0, 0};
+            std::vector<std::uint8_t> blob(sizeof(header));
+            std::memcpy(blob.data(), &header, sizeof(header));
+            blob.insert(blob.end(), exponent.begin(), exponent.end());
+            blob.insert(blob.end(), modulus.begin(), modulus.end());
+            if (BCryptImportKeyPair(rsaAlgorithm, nullptr, BCRYPT_RSAPUBLIC_BLOB,
+                    &rsaKey, blob.data(), static_cast<ULONG>(blob.size()), 0) < 0 ||
+                BCryptCreateHash(shaAlgorithm, &shaHash, nullptr, 0, nullptr, 0, 0) < 0)
+                break;
+            std::ifstream input(file, std::ios::binary);
+            if (!input) break;
+            std::array<std::uint8_t, 65536> chunk{};
+            bool hashOk = true;
+            while (input) {
+                input.read(reinterpret_cast<char*>(chunk.data()), chunk.size());
+                auto count = input.gcount();
+                if (count > 0 && BCryptHashData(shaHash, chunk.data(),
+                        static_cast<ULONG>(count), 0) < 0) {
+                    hashOk = false;
+                    break;
+                }
+            }
+            if (!hashOk || input.bad()) break;
+            std::array<std::uint8_t, 32> digest{};
+            if (BCryptFinishHash(shaHash, digest.data(), digest.size(), 0) < 0) break;
+            BCRYPT_PKCS1_PADDING_INFO padding{BCRYPT_SHA256_ALGORITHM};
+            valid = BCryptVerifySignature(rsaKey, &padding, digest.data(), digest.size(),
+                signature.data(), static_cast<ULONG>(signature.size()), BCRYPT_PAD_PKCS1) >= 0;
+        } while (false);
+        cleanup();
+        dispatcher.GraphicsLog(valid ? "HLE Store RSA: assinatura válida" :
+                                       "HLE Store RSA: assinatura ausente ou inválida");
+        return valid ? 0 : UINT64_MAX;
+    } catch (...) {
+        dispatcher.GraphicsLog("HLE Store RSA: erro ao verificar assinatura");
+        return UINT64_MAX;
+    }
 }
 
 std::uint64_t HleDispatcher::GenericSuccess(HleDispatcher&,

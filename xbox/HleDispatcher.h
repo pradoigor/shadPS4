@@ -107,6 +107,8 @@ private:
                                        std::size_t bytes) noexcept;
     static std::uint64_t Unimplemented(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelErrorPointer(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelDlsym(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t StoreVerifyRsa(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t GenericSuccess(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t GenericHandle(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelSysconf(HleDispatcher&, GuestCallFrame const&) noexcept;
