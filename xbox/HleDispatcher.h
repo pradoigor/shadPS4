@@ -142,6 +142,7 @@ private:
     static std::uint64_t MspaceUsableSize(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelMmap(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelReserveVirtualRange(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelMapNamedSystemFlexibleMemory(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MsgDialogInitialize(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MsgDialogTerminate(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MsgDialogOpen(HleDispatcher&, GuestCallFrame const&) noexcept;

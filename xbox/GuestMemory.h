@@ -37,6 +37,9 @@ public:
   bool ReserveVirtualRange(std::uint64_t bytes, std::uint64_t requestedAddress,
                            bool fixed, std::uint64_t alignment,
                            std::uint64_t &guestAddress) noexcept;
+  bool MapLazySystem(std::uint64_t address, std::uint64_t bytes,
+                     std::uint64_t prot) noexcept;
+  bool CommitLazyPage(std::uint64_t address) noexcept;
   bool Unmap(std::uint64_t guestAddress, std::size_t bytes) noexcept;
   // Applies only non-executable page protection to an isolated PF_W range.
   // The UWP image mapping and all code/read-only ranges remain unchanged.
@@ -83,6 +86,9 @@ private:
   std::vector<AnonymousRange> anonymous_;
   struct ReservedRange { std::uint64_t address{}, size{}; void* host{}; };
   std::vector<ReservedRange> reserved_;
+  struct LazyRange { std::uint64_t address{}, size{}; std::uint32_t protection{}; };
+  std::vector<LazyRange> lazy_;
+  std::size_t lazyCommittedBytes_{};
 };
 
 } // namespace Lab

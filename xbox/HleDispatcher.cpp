@@ -221,6 +221,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sceLibcMspaceMallocUsableSize") use(&MspaceUsableSize);
     if (name == "sceKernelMmap") use(&KernelMmap);
     if (name == "sceKernelReserveVirtualRange") use(&KernelReserveVirtualRange);
+    if (name == "sceKernelMapNamedSystemFlexibleMemory") use(&KernelMapNamedSystemFlexibleMemory);
     if (name == "munmap") use(&MemoryMunmap);
     if (name == "sceKernelMunmap") use(&KernelMunmap);
     if (name == "clock_gettime") use(&ClockGetTime);
@@ -521,6 +522,15 @@ void* HleDispatcher::WritablePointer(HleDispatcher& dispatcher,
     if (dispatcher.memory_) {
         if (auto* translated = dispatcher.memory_->TranslateWritable(address, bytes))
             return translated;
+        if (bytes && bytes <= 65536 && address <= UINT64_MAX - bytes) {
+            auto page = address & ~0x3fffull;
+            const auto end = (address + bytes - 1) & ~0x3fffull;
+            while (page <= end) {
+                if (!dispatcher.memory_->CommitLazyPage(page)) break;
+                if (page > UINT64_MAX - 0x4000ull) break;
+                page += 0x4000ull;
+            }
+        }
     }
     // Guest code runs directly on a native worker stack. OpenOrbis places
     // short-lived pthread attributes, TLS keys and other ABI structures there,
@@ -987,6 +997,24 @@ std::uint64_t HleDispatcher::KernelReserveVirtualRange(
         (frame.gpr[2] & 0x10ull) != 0, frame.gpr[3], address))
         return OrbisEnomem;
     std::memcpy(output, &address, sizeof(address));
+    return 0;
+}
+
+std::uint64_t HleDispatcher::KernelMapNamedSystemFlexibleMemory(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEnomem = 0x8002000Cull;
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    constexpr std::uint64_t OrbisEinval = 0x80020016ull;
+    if (!dispatcher.memory_ || frame.gpr[1] == 0 || (frame.gpr[1] & 0x3fffull) ||
+        (frame.gpr[2] & ~0x3ull) || frame.gpr[2] == 0 ||
+        (frame.gpr[3] & ~0x10ull)) return OrbisEinval;
+    auto* output = WritablePointer(dispatcher, frame, frame.gpr[0], sizeof(std::uint64_t));
+    if (!output || !ReadablePointer(dispatcher, frame, frame.gpr[4], 1)) return OrbisEfault;
+    std::uint64_t address{};
+    std::memcpy(&address, output, sizeof(address));
+    if (!(frame.gpr[3] & 0x10ull) || !address ||
+        !dispatcher.memory_->MapLazySystem(address, frame.gpr[1], frame.gpr[2]))
+        return OrbisEnomem;
     return 0;
 }
 

@@ -226,6 +226,9 @@ bool GuestMemory::MapAnonymous(std::size_t bytes, std::uint64_t prot,
     for (auto const &range : anonymous_)
       if (Overlaps(candidate, size, range.address, range.size))
         return true;
+    for (auto const &range : lazy_)
+      if (Overlaps(candidate, size, range.address, range.size))
+        return true;
     return false;
   };
   if (fixed && occupied(address)) {
@@ -290,6 +293,51 @@ bool GuestMemory::ReserveVirtualRange(std::uint64_t bytes,
   return true;
 }
 
+bool GuestMemory::MapLazySystem(std::uint64_t address, std::uint64_t bytes,
+                               std::uint64_t prot) noexcept {
+  if (!base_ || !address || !bytes || bytes % GuestPage ||
+      address % GuestPage || address > UINT64_MAX - bytes ||
+      (prot & ~0x3ull) || prot == 0) return false;
+  bool reserved = false;
+  for (auto const& range : reserved_) {
+    if (address >= range.address && address - range.address <= range.size &&
+        bytes <= range.size - (address - range.address)) {
+      reserved = true;
+      break;
+    }
+  }
+  if (!reserved) return false;
+  for (auto const& range : anonymous_)
+    if (Overlaps(address, bytes, range.address, range.size)) return false;
+  for (auto const& range : lazy_)
+    if (Overlaps(address, bytes, range.address, range.size)) return false;
+  try { lazy_.push_back(LazyRange{address, bytes, ProtectionFor(prot)}); }
+  catch (...) { return false; }
+  return true;
+}
+
+bool GuestMemory::CommitLazyPage(std::uint64_t address) noexcept {
+  constexpr std::size_t MaxLazyCommit = 512ull * 1024 * 1024;
+  for (auto const& range : lazy_) {
+    if (address < range.address || address - range.address >= range.size) continue;
+    const auto page = address & ~(GuestPage - 1);
+    MEMORY_BASIC_INFORMATION info{};
+    using Query = SIZE_T(WINAPI*)(LPCVOID, PMEMORY_BASIC_INFORMATION, SIZE_T);
+    auto module = GetModuleHandleW(L"kernelbase.dll");
+    auto query = module ? reinterpret_cast<Query>(GetProcAddress(module, "VirtualQuery")) : nullptr;
+    if (!query || !query(reinterpret_cast<void const*>(page), &info, sizeof(info))) return false;
+    if (info.State == MEM_COMMIT)
+      return info.Protect == range.protection;
+    if (info.State != MEM_RESERVE || lazyCommittedBytes_ > MaxLazyCommit - GuestPage)
+      return false;
+    if (!VirtualAllocFromApp(reinterpret_cast<void*>(page), GuestPage,
+                             MEM_COMMIT, range.protection)) return false;
+    lazyCommittedBytes_ += GuestPage;
+    return true;
+  }
+  return false;
+}
+
 bool GuestMemory::Unmap(std::uint64_t guestAddress,
                         std::size_t bytes) noexcept {
   if (!base_ || guestAddress == 0 || bytes == 0)
@@ -317,6 +365,10 @@ bool GuestMemory::Unmap(std::uint64_t guestAddress,
             return range.insideReservation && range.address >= guestAddress &&
                    range.address - guestAddress < size;
           }), anonymous_.end());
+      lazy_.erase(std::remove_if(lazy_.begin(), lazy_.end(),
+          [=](auto const& range) {
+            return range.address >= guestAddress && range.address - guestAddress < size;
+          }), lazy_.end());
       reserved_.erase(iterator);
       return true;
     }

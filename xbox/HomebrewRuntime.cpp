@@ -28,6 +28,7 @@ std::uint64_t gGuestVirtualBase{};
 std::uint64_t gGuestImageSize{};
 std::atomic_bool gGuestCrashRecorded{};
 std::atomic<std::uint32_t> gGuestThreadId{};
+std::atomic<GuestMemory*> gLazyMemory{};
 std::uint32_t gGuestTlsSlot{UINT32_MAX};
 std::uint64_t gExpectedTcb{};
 std::uint64_t UnixSeconds() noexcept;
@@ -360,6 +361,14 @@ LONG CALLBACK RecordGuestVectoredException(EXCEPTION_POINTERS *exception) noexce
     return EXCEPTION_CONTINUE_SEARCH;
   if (GetCurrentThreadId() != gGuestThreadId.load())
     return EXCEPTION_CONTINUE_SEARCH;
+  if (exception->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
+      exception->ExceptionRecord->NumberParameters > 1 &&
+      exception->ExceptionRecord->ExceptionInformation[0] != 8) {
+    auto* memory = gLazyMemory.load(std::memory_order_relaxed);
+    if (memory && memory->CommitLazyPage(
+          exception->ExceptionRecord->ExceptionInformation[1]))
+      return EXCEPTION_CONTINUE_EXECUTION;
+  }
   switch (exception->ExceptionRecord->ExceptionCode) {
   case EXCEPTION_ACCESS_VIOLATION:
   case EXCEPTION_ARRAY_BOUNDS_EXCEEDED:
@@ -620,6 +629,7 @@ void HomebrewRuntime::RunEntry() noexcept {
   auto *vectoredHandler = addVectoredHandler
       ? addVectoredHandler(1, &RecordGuestVectoredException)
       : nullptr;
+  gLazyMemory.store(memory_.get(), std::memory_order_relaxed);
   try {
     bool crashed = false;
     bool exited = false;
@@ -638,6 +648,7 @@ void HomebrewRuntime::RunEntry() noexcept {
   } catch (...) {
     Record("host_exception", "Exceção desconhecida durante a execução.");
   }
+  gLazyMemory.store(nullptr, std::memory_order_relaxed);
   if (vectoredHandler && removeVectoredHandler)
     removeVectoredHandler(vectoredHandler);
   running_.store(false);
