@@ -17,6 +17,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <malloc.h>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -165,7 +166,12 @@ bool IsCommittedGuestProcessRange(std::uint64_t address, std::size_t bytes,
 HleDispatcher::~HleDispatcher() {
     SetPaused(false);
     threads_.clear();
-    for (auto const& allocation : guestAllocations_) std::free(allocation.first);
+    for (auto const& allocation : guestAllocations_) {
+        if (guestAlignedAllocations_.contains(allocation.first))
+            _aligned_free(allocation.first);
+        else
+            std::free(allocation.first);
+    }
 }
 
 void HleDispatcher::SetPaused(bool paused) noexcept {
@@ -225,6 +231,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "strlen") use(&MemoryStrlen);
     if (name == "mmap" || name == "mmap_np" || name == "__wrap_mmap") use(&MemoryMmap);
     if (name == "sceLibcMspaceMalloc") use(&MspaceMalloc);
+    if (name == "sceLibcMspacePosixMemalign") use(&MspacePosixMemalign);
     if (name == "sceLibcMspaceCreate") use(&MspaceCreate);
     if (name == "sceLibcMspaceDestroy") use(&MspaceDestroy);
     if (name == "sceLibcMspaceMallocStatsFast") use(&MspaceMallocStatsFast);
@@ -279,6 +286,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "ftruncate") use(&FileFtruncate);
     if (name == "getdents") use(&FileGetdents);
     if (name == "pthread_mutexattr_init") use(&PthreadMutexAttrInit);
+    if (name == "pthread_mutexattr_destroy") use(&PthreadMutexAttrDestroy);
     if (name == "pthread_mutexattr_settype") use(&PthreadMutexAttrSetType);
     if (name == "pthread_mutex_init") use(&PthreadMutexInit);
     if (name == "pthread_mutex_destroy") use(&PthreadMutexDestroy);
@@ -1010,12 +1018,14 @@ std::uint64_t HleDispatcher::MemoryStrlen(HleDispatcher& dispatcher,
 }
 
 std::uint64_t HleDispatcher::AllocateFromMspace(GuestMspace& space,
-                                                 std::uint64_t requested) noexcept {
+                                                 std::uint64_t requested,
+                                                 std::uint64_t alignment) noexcept {
     if (requested > MaxGuestHeapAllocation || requested > UINT64_MAX - 15) return 0;
+    if (alignment < 16 || (alignment & (alignment - 1)) != 0) return 0;
     const auto bytes = ((std::max<std::uint64_t>)(requested, 1) + 15) & ~15ull;
     if (bytes > MaxGuestHeapBytes - space.inUse) return 0;
     for (auto it = space.freeBlocks.begin(); it != space.freeBlocks.end(); ++it) {
-        if (it->size < bytes) continue;
+        if (it->size < bytes || (it->address & (alignment - 1)) != 0) continue;
         const auto address = it->address;
         try { space.allocations.emplace(address, bytes); } catch (...) { return 0; }
         it->address += bytes;
@@ -1025,10 +1035,15 @@ std::uint64_t HleDispatcher::AllocateFromMspace(GuestMspace& space,
         space.peakInUse = (std::max)(space.peakInUse, space.inUse);
         return address;
     }
-    if (space.next > space.capacity || bytes > space.capacity - space.next) return 0;
-    const auto address = space.base + space.next;
+    if (space.next > space.capacity || space.base > UINT64_MAX - space.next) return 0;
+    const auto current = space.base + space.next;
+    if (current > UINT64_MAX - (alignment - 1)) return 0;
+    const auto address = (current + alignment - 1) & ~(alignment - 1);
+    const auto padding = address - current;
+    if (padding > space.capacity - space.next ||
+        bytes > space.capacity - space.next - padding) return 0;
     try { space.allocations.emplace(address, bytes); } catch (...) { return 0; }
-    space.next += bytes;
+    space.next += padding + bytes;
     space.inUse += bytes;
     space.peakInUse = (std::max)(space.peakInUse, space.inUse);
     return address;
@@ -1097,6 +1112,44 @@ std::uint64_t HleDispatcher::MspaceMalloc(HleDispatcher& dispatcher,
     catch (...) { std::free(allocation); return 0; }
     dispatcher.guestAllocationBytes_ += bytes;
     return reinterpret_cast<std::uint64_t>(allocation);
+}
+
+std::uint64_t HleDispatcher::MspacePosixMemalign(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    const auto alignment = frame.gpr[2];
+    if (alignment < sizeof(void*) || alignment > MaxGuestHeapAllocation ||
+        (alignment & (alignment - 1)) != 0) return 22;
+    auto* output = static_cast<std::uint64_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[1], sizeof(std::uint64_t)));
+    if (!output) return 22;
+    const auto bytes = (std::max<std::uint64_t>)(frame.gpr[3], 1);
+    if (bytes > MaxGuestHeapAllocation) return 12;
+    std::scoped_lock lock(dispatcher.allocationsMutex_);
+    if (frame.gpr[0] != 0) {
+        auto found = dispatcher.guestMspaces_.find(frame.gpr[0]);
+        if (found == dispatcher.guestMspaces_.end()) return 22;
+        const auto address = AllocateFromMspace(found->second, bytes,
+                                                (std::max<std::uint64_t>)(alignment, 16));
+        if (!address) return 12;
+        *output = address;
+        return 0;
+    }
+    if (bytes > MaxGuestHeapBytes - dispatcher.guestAllocationBytes_) return 12;
+    auto* allocation = _aligned_malloc(static_cast<std::size_t>(bytes),
+                                        static_cast<std::size_t>(alignment));
+    if (!allocation) return 12;
+    try {
+        dispatcher.guestAllocations_.emplace(allocation, static_cast<std::size_t>(bytes));
+        dispatcher.guestAlignedAllocations_.emplace(allocation,
+                                                    static_cast<std::size_t>(alignment));
+    } catch (...) {
+        dispatcher.guestAllocations_.erase(allocation);
+        _aligned_free(allocation);
+        return 12;
+    }
+    dispatcher.guestAllocationBytes_ += static_cast<std::size_t>(bytes);
+    *output = reinterpret_cast<std::uint64_t>(allocation);
+    return 0;
 }
 
 std::uint64_t HleDispatcher::MspaceCalloc(HleDispatcher& dispatcher,
@@ -1171,14 +1224,23 @@ std::uint64_t HleDispatcher::MspaceRealloc(HleDispatcher& dispatcher,
     if (!frame.gpr[2]) {
         dispatcher.guestAllocationBytes_ -= found->second;
         dispatcher.guestAllocations_.erase(found);
-        std::free(old);
+        if (dispatcher.guestAlignedAllocations_.erase(old)) _aligned_free(old);
+        else std::free(old);
         return 0;
     }
     const auto bytes = static_cast<std::size_t>(frame.gpr[2]);
     if (bytes > MaxGuestHeapBytes - (dispatcher.guestAllocationBytes_ - found->second)) return 0;
     const auto oldBytes = found->second;
-    auto* resized = std::realloc(old, bytes);
+    auto aligned = dispatcher.guestAlignedAllocations_.find(old);
+    auto* resized = aligned == dispatcher.guestAlignedAllocations_.end()
+                        ? std::realloc(old, bytes)
+                        : _aligned_realloc(old, bytes, aligned->second);
     if (!resized) return 0;
+    if (aligned != dispatcher.guestAlignedAllocations_.end()) {
+        auto alignedNode = dispatcher.guestAlignedAllocations_.extract(aligned);
+        alignedNode.key() = resized;
+        dispatcher.guestAlignedAllocations_.insert(std::move(alignedNode));
+    }
     auto node = dispatcher.guestAllocations_.extract(found);
     node.key() = resized;
     node.mapped() = bytes;
@@ -1208,7 +1270,8 @@ std::uint64_t HleDispatcher::MspaceFree(HleDispatcher& dispatcher,
     if (found == dispatcher.guestAllocations_.end()) return 0;
     dispatcher.guestAllocationBytes_ -= found->second;
     dispatcher.guestAllocations_.erase(found);
-    std::free(allocation);
+    if (dispatcher.guestAlignedAllocations_.erase(allocation)) _aligned_free(allocation);
+    else std::free(allocation);
     return 0;
 }
 
@@ -2188,6 +2251,17 @@ std::uint64_t HleDispatcher::PthreadMutexAttrInit(
     } catch (...) {
         return 12;
     }
+}
+
+std::uint64_t HleDispatcher::PthreadMutexAttrDestroy(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto* slot = static_cast<std::uint64_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[0], sizeof(std::uint64_t)));
+    if (!slot) return 22;
+    std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+    if (dispatcher.mutexAttributes_.erase(frame.gpr[0]) == 0) return 22;
+    *slot = 0;
+    return 0;
 }
 
 std::uint64_t HleDispatcher::PthreadMutexAttrSetType(

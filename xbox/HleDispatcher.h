@@ -138,6 +138,7 @@ private:
     static std::uint64_t MemoryStrlen(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MemoryMmap(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MspaceMalloc(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t MspacePosixMemalign(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MspaceCreate(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MspaceDestroy(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MspaceMallocStatsFast(HleDispatcher&, GuestCallFrame const&) noexcept;
@@ -194,6 +195,7 @@ private:
     static std::uint64_t FileFtruncate(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t FileGetdents(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t PthreadMutexAttrInit(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadMutexAttrDestroy(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t PthreadMutexAttrSetType(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t PthreadMutexInit(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t PthreadMutexDestroy(HleDispatcher&, GuestCallFrame const&) noexcept;
@@ -236,6 +238,7 @@ private:
     GuestMemory* memory_{};
     std::mutex allocationsMutex_;
     std::unordered_map<void*, std::size_t> guestAllocations_;
+    std::unordered_map<void*, std::size_t> guestAlignedAllocations_;
     std::size_t guestAllocationBytes_{};
     struct GuestMspace {
         struct FreeBlock { std::uint64_t address{}, size{}; };
@@ -244,7 +247,8 @@ private:
         std::vector<FreeBlock> freeBlocks;
     };
     std::unordered_map<std::uint64_t, GuestMspace> guestMspaces_;
-    static std::uint64_t AllocateFromMspace(GuestMspace&, std::uint64_t) noexcept;
+    static std::uint64_t AllocateFromMspace(GuestMspace&, std::uint64_t,
+                                            std::uint64_t alignment = 16) noexcept;
     std::unordered_map<std::uint32_t, std::vector<std::uint8_t>> registry_;
     struct GuestFile {
         struct DirectoryEntry {
