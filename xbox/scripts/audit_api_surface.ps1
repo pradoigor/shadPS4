@@ -37,8 +37,18 @@ foreach ($entry in $probes.GetEnumerator()) {
 </Project>
 "@
   Set-Content "$directory\$name.vcxproj" $xml
-  & $msbuild "$directory\$name.vcxproj" /t:Build /p:Configuration=Release /p:Platform=x64 /verbosity:minimal *> "$out\$name.log"
-  $passed = ($LASTEXITCODE -eq 0) -and (Test-Path "$directory\$name\$name.exe")
+  $probeLog = "$out\$name.log"
+  $arguments = @("$directory\$name.vcxproj", '/t:Build',
+    '/p:Configuration=Release', '/p:Platform=x64', '/verbosity:minimal')
+  $process = Start-Process -FilePath $msbuild -ArgumentList $arguments -PassThru `
+    -RedirectStandardOutput $probeLog -RedirectStandardError "$out\$name.error.log"
+  $finished = $process.WaitForExit(60000)
+  if (!$finished) {
+    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    Add-Content $probeLog 'API audit probe timed out after 60 seconds.'
+  }
+  $passed = $finished -and ($process.ExitCode -eq 0) -and
+    (Test-Path "$directory\$name\$name.exe")
   $results += @{api=$name; compiles_and_links=$passed; log="api-surface/$name.log"; runtime_tested=$false}
   if ($name -eq 'baseline' -and !$passed) {
     $results | ConvertTo-Json -Depth 5 | Set-Content "$project\artifacts\api-surface.json"
