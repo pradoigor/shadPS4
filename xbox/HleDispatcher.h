@@ -266,6 +266,7 @@ private:
     std::filesystem::path tracePath_;
     std::filesystem::path traceHistoryPath_;
     std::filesystem::path traceArchivePath_;
+    std::size_t traceArchiveBytes_{};
     std::filesystem::path consolePath_;
     std::mutex consoleMutex_;
     std::size_t consoleBytes_{};

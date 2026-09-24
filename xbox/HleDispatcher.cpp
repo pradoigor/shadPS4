@@ -398,6 +398,7 @@ void HleDispatcher::ConfigureTrace(std::filesystem::path path,
         ? std::filesystem::path{}
         : tracePath_.parent_path() / ("homebrew-console-" + sessionId + ".log");
     consoleBytes_ = 0;
+    traceArchiveBytes_ = 0;
     std::error_code ignored;
     std::filesystem::remove(tracePath_, ignored);
     std::filesystem::remove(traceHistoryPath_, ignored);
@@ -494,11 +495,29 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
                 history << '\n';
                 history.flush();
                 if (!self->traceArchivePath_.empty()) {
+                    constexpr std::size_t ArchiveLimit = 4 * 1024 * 1024;
+                    if (self->traceArchiveBytes_ >= ArchiveLimit) {
+                        std::error_code ignored;
+                        auto previous = self->traceArchivePath_;
+                        previous += L".previous";
+                        std::filesystem::remove(previous, ignored);
+                        std::filesystem::rename(self->traceArchivePath_, previous, ignored);
+                        if (ignored) {
+                            std::ofstream reset(self->traceArchivePath_,
+                                                std::ios::binary | std::ios::trunc);
+                        }
+                        self->traceArchiveBytes_ = 0;
+                    }
                     std::ofstream archive(self->traceArchivePath_,
                                          std::ios::binary | std::ios::app);
                     write(archive);
                     archive << '\n';
                     archive.flush();
+                    if (archive) {
+                        auto position = archive.tellp();
+                        if (position >= 0)
+                            self->traceArchiveBytes_ = static_cast<std::size_t>(position);
+                    }
                 }
             }
         } catch (...) {
