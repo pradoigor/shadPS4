@@ -28,9 +28,9 @@
       </Grid.RowDefinitions>
 
       <Grid x:Name="HomeView">
-        <Grid.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#081720" Offset="0"/><GradientStop Color="#0D2C39" Offset="1"/></LinearGradientBrush></Grid.Background>
-        <Image x:Name="HomeBackdrop" Opacity="0.30" Stretch="UniformToFill" Visibility="Collapsed"/>
-        <Rectangle><Rectangle.Fill><LinearGradientBrush StartPoint="0,0" EndPoint="1,0"><GradientStop Color="#F006141C" Offset="0"/><GradientStop Color="#CC06141C" Offset="0.52"/><GradientStop Color="#A006141C" Offset="1"/></LinearGradientBrush></Rectangle.Fill></Rectangle>
+        <Grid.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#092456" Offset="0"/><GradientStop Color="#07509B" Offset="0.58"/><GradientStop Color="#071E55" Offset="1"/></LinearGradientBrush></Grid.Background>
+        <Image x:Name="HomeBackdrop" Opacity="0.38" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+        <Rectangle><Rectangle.Fill><LinearGradientBrush StartPoint="0,0" EndPoint="1,0"><GradientStop Color="#D9071D46" Offset="0"/><GradientStop Color="#89072054" Offset="0.55"/><GradientStop Color="#9005183C" Offset="1"/></LinearGradientBrush></Rectangle.Fill></Rectangle>
         <Grid Margin="72,34,72,22">
         <Grid.RowDefinitions>
           <RowDefinition Height="140"/>
@@ -42,7 +42,7 @@
         <Grid Grid.Row="0">
           <Grid.RowDefinitions><RowDefinition Height="76"/><RowDefinition Height="62"/></Grid.RowDefinitions>
           <StackPanel Grid.Row="0" Orientation="Horizontal" VerticalAlignment="Center" Spacing="14">
-            <TextBlock Text="XS4" FontSize="54" FontWeight="Bold" CharacterSpacing="95" Foreground="#F5FBFF"/>
+            <Image Source="ms-appx:///Assets/XS4-Mark.png" Width="88" Height="72" Stretch="Uniform" AutomationProperties.Name="XS4"/>
           </StackPanel>
           <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center" Spacing="10">
             <Button x:Name="GamesTab" Content="Games" Padding="20,10" FontSize="26" Background="#19606A" BorderBrush="#26DCD6"/>
@@ -51,7 +51,7 @@
           <StackPanel Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="10">
             <Button x:Name="ResumeContent" Content="▶  Retomar" Visibility="Collapsed" Background="#19606A" BorderBrush="#26DCD6"/>
             <Button x:Name="EndContent" Content="■  Encerrar" Visibility="Collapsed"/>
-            <Button x:Name="OpenFilters" Content="☷  Filtros" AutomationProperties.Name="Abrir filtros"/>
+            <Button x:Name="OpenFilters" Content="☷  Filtros" Width="144" Height="64" Padding="0" AutomationProperties.Name="Abrir filtros"/>
             <Button x:Name="OpenLibrary" Width="64" Height="64" Padding="0" Content="↓" FontSize="33" AutomationProperties.Name="Abrir biblioteca e importar"/>
             <Button x:Name="OpenSettings" Width="64" Height="64" Padding="0" Content="⚙" FontSize="30" AutomationProperties.Name="Configurações"/>
           </StackPanel>
@@ -93,10 +93,10 @@
           </Border>
           <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center" Spacing="25">
             <TextBlock Text="Direcional  Navegar" FontSize="15" Foreground="#C9E2E8"/>
-            <TextBlock Text="A  Selecionar" FontSize="15" Foreground="#C9E2E8"/>
-            <TextBlock Text="B  Voltar" FontSize="15" Foreground="#C9E2E8"/>
-            <TextBlock Text="Y  Favorito" FontSize="15" Foreground="#C9E2E8"/>
-            <TextBlock Text="Menu + View  Início" FontSize="15" Foreground="#6DE8E0"/>
+            <StackPanel Orientation="Horizontal" Spacing="5"><TextBlock Text="A" FontSize="15" Foreground="#70D568"/><TextBlock Text="Selecionar" FontSize="15" Foreground="#C9E2E8"/></StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="5"><TextBlock Text="B" FontSize="15" Foreground="#F36868"/><TextBlock Text="Voltar" FontSize="15" Foreground="#C9E2E8"/></StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="5"><TextBlock Text="Y" FontSize="15" Foreground="#F5D45C"/><TextBlock Text="Favorito" FontSize="15" Foreground="#C9E2E8"/></StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="5"><TextBlock Text="Menu + View" FontSize="15" Foreground="#70D568"/><TextBlock Text="Início" FontSize="15" Foreground="#C9E2E8"/></StackPanel>
           </StackPanel>
         </Grid>
         </Grid>
@@ -164,7 +164,7 @@
             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
             <StackPanel VerticalAlignment="Center" Spacing="4">
               <TextBlock x:Name="SelectedContentTitle" Text="Selecione um arquivo" FontSize="21"/>
-              <TextBlock x:Name="SelectedContentDetails" Text="Os PKGs só são extraídos; importar ou instalar nunca inicia o conteúdo." FontSize="13" Foreground="#AFCBD2" TextWrapping="Wrap" MaxWidth="900"/>
+              <TextBlock x:Name="SelectedContentDetails" Text="" FontSize="13" Foreground="#AFCBD2" TextWrapping="Wrap" MaxWidth="900"/>
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Spacing="10">
               <Button x:Name="ValidateContent" Content="Validar ELF / SELF" IsEnabled="False" Padding="16,11"/>
@@ -191,7 +191,7 @@
           <StackPanel Spacing="18" Margin="0,14,0,10">
             <Border Background="#0D2630" BorderBrush="#33535D" BorderThickness="1" CornerRadius="12" Padding="24">
               <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <StackPanel Spacing="7"><TextBlock Text="XS4" FontSize="24"/><TextBlock Text="Versão instalada" FontSize="14" Foreground="#AFCBD2"/><TextBlock x:Name="CurrentVersion" Text="0.84.0.0" FontSize="20" Foreground="#F2FBFC"/></StackPanel>
+                <StackPanel Spacing="7"><TextBlock Text="XS4" FontSize="24"/><TextBlock Text="Versão instalada" FontSize="14" Foreground="#AFCBD2"/><TextBlock x:Name="CurrentVersion" Text="0.85.0.0" FontSize="20" Foreground="#F2FBFC"/></StackPanel>
                 <Border Grid.Column="1" Width="72" Height="72" CornerRadius="18" Background="#11313B" VerticalAlignment="Center"><Image Width="64" Height="64" Source="ms-appx:///Assets/XS4-Mark.png" Stretch="Uniform"/></Border>
               </Grid>
             </Border>
@@ -238,6 +238,19 @@
           <Button x:Name="GuestDialogCancel" Content="B  Cancelar"/>
           <Button x:Name="GuestDialogAccept" Content="A  Continuar" Background="#19606A" BorderBrush="#26DCD6"/>
         </StackPanel>
+      </StackPanel>
+    </Border>
+  </Grid>
+
+  <Grid x:Name="ShortcutOverlay" Visibility="Collapsed" Background="#DC04122C">
+    <Border Width="600" Padding="36" Background="#112D64" BorderBrush="#61B6F8" BorderThickness="1" CornerRadius="18" HorizontalAlignment="Center" VerticalAlignment="Center">
+      <StackPanel Spacing="15">
+        <TextBlock Text="Atalhos do XS4" FontSize="30" FontWeight="SemiBold" Margin="0,0,0,8"/>
+        <Button x:Name="ShortcutExport" Content="Exportar relatório" HorizontalAlignment="Stretch" Height="58"/>
+        <Button x:Name="ShortcutResume" Content="Retomar aplicativo / game" HorizontalAlignment="Stretch" Height="58"/>
+        <Button x:Name="ShortcutEnd" Content="Encerrar aplicativo / game" HorizontalAlignment="Stretch" Height="58"/>
+        <Button x:Name="ShortcutExit" Content="Sair do XS4" HorizontalAlignment="Stretch" Height="58"/>
+        <Button x:Name="ShortcutClose" Content="Voltar" HorizontalAlignment="Right"/>
       </StackPanel>
     </Border>
   </Grid>

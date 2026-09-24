@@ -108,6 +108,7 @@ struct App : ApplicationT<App> {
     bool homebrewCompletionShown{};
     bool guestViewShown{};
     bool guestPaused{}, pauseComboHeld{};
+    bool shortcutsPausedGuest{};
     std::uint64_t guestDialogGeneration{};
     bool importing{}, listing{};
     Windows::System::Display::DisplayRequest displayRequest{nullptr};
@@ -231,7 +232,9 @@ struct App : ApplicationT<App> {
         Find<TextBlock>(L"HomeSubtitle").Text(category == HomeCategory::Games ?
             L"Escolha um título para iniciar" : L"Aplicativos e ferramentas instalados");
         PopulateHome();
-        FocusHome(homeVisibleIndices.empty() ? HomeFocusArea::EmptyAction : HomeFocusArea::Titles, 0);
+        Window::Current().Dispatcher().RunAsync(Core::CoreDispatcherPriority::Low, [this]() {
+            FocusHome(homeVisibleIndices.empty() ? HomeFocusArea::EmptyAction : HomeFocusArea::Titles, 0);
+        });
     }
     void SetHomeFilter(HomeFilter filter) {
         homeFocusedIndex = -1;
@@ -281,7 +284,7 @@ struct App : ApplicationT<App> {
         if (!valid) {
             selectedLoaderPath.clear();
             Find<TextBlock>(L"SelectedContentTitle").Text(L"Selecione um arquivo");
-            Find<TextBlock>(L"SelectedContentDetails").Text(L"Os PKGs só são extraídos; importar ou instalar nunca inicia o conteúdo.");
+            Find<TextBlock>(L"SelectedContentDetails").Text(L"");
             install.IsEnabled(false); validate.IsEnabled(false);
             return;
         }
@@ -365,9 +368,10 @@ struct App : ApplicationT<App> {
             artwork.Children().Append(favoriteBadge);
             tile.Children().Append(artwork);
 
-            Button card; card.Width(264); card.Height(264); card.Padding({8, 8, 8, 8}); card.Margin({0, 0, 20, 0});
-            card.BorderThickness({2, 2, 2, 2}); card.BorderBrush(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 53, 83, 94)));
-            card.Background(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 10, 31, 40)));
+            Button card; card.Width(264); card.Height(264); card.Padding({0, 0, 0, 0}); card.Margin({0, 0, 20, 0});
+            card.BorderThickness({0, 0, 0, 0});
+            card.Background(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(0, 0, 0, 0)));
+            card.Opacity(0.84);
             card.HorizontalContentAlignment(HorizontalAlignment::Center); card.VerticalContentAlignment(VerticalAlignment::Center);
             card.Content(tile); card.Tag(box_value(static_cast<int64_t>(index)));
             Windows::UI::Xaml::Automation::AutomationProperties::SetName(card, hstring(item.name));
@@ -379,14 +383,12 @@ struct App : ApplicationT<App> {
                 UpdateHomeBackdrop(index);
                 Find<TextBlock>(L"HomeSubtitle").Text(libraryItems[index].name);
                 if (auto tile = homeButtons.find(index); tile != homeButtons.end()) {
-                    tile->second.BorderBrush(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 38, 220, 214)));
-                    tile->second.BorderThickness({3, 3, 3, 3});
+                    tile->second.Opacity(1);
                 }
             });
             card.LostFocus([this, index](auto const&, auto const&) {
                 if (auto tile = homeButtons.find(index); tile != homeButtons.end()) {
-                    tile->second.BorderBrush(Media::SolidColorBrush(Windows::UI::ColorHelper::FromArgb(255, 53, 83, 94)));
-                    tile->second.BorderThickness({2, 2, 2, 2});
+                    tile->second.Opacity(0.84);
                 }
             });
             card.Click([this, index](auto const&, auto const&) { LaunchInstalled(index); });
@@ -972,7 +974,38 @@ struct App : ApplicationT<App> {
         if (homebrew) homebrew->CompleteMessageDialog(canceled);
         Find<Grid>(L"GuestDialogOverlay").Visibility(Visibility::Collapsed);
     }
+    void OpenShortcuts() {
+        if (Find<Grid>(L"ShortcutOverlay").Visibility() == Visibility::Visible) return;
+        shortcutsPausedGuest = homebrew && homebrew->running() && !guestPaused;
+        if (shortcutsPausedGuest) {
+            if (homebrew->SetPaused(true)) guestPaused = true;
+            else shortcutsPausedGuest = false;
+        }
+        const bool available = homebrew && homebrew->running();
+        Find<Button>(L"ShortcutResume").IsEnabled(available);
+        Find<Button>(L"ShortcutEnd").IsEnabled(available);
+        Find<Grid>(L"ShortcutOverlay").Visibility(Visibility::Visible);
+        Find<Button>(L"ShortcutExport").Focus(FocusState::Programmatic);
+    }
+    void CloseShortcuts() {
+        Find<Grid>(L"ShortcutOverlay").Visibility(Visibility::Collapsed);
+        if (shortcutsPausedGuest && homebrew && homebrew->running()) {
+            guestPaused = false;
+            homebrew->SetPaused(false);
+        }
+        shortcutsPausedGuest = false;
+    }
     void OnGamepadKey(Core::CoreWindow const&, Core::KeyEventArgs const& args) {
+        if (Find<Grid>(L"ShortcutOverlay").Visibility() == Visibility::Visible) {
+            if (args.VirtualKey() == Sys::VirtualKey::GamepadB ||
+                args.VirtualKey() == Sys::VirtualKey::GamepadView) {
+                CloseShortcuts(); args.Handled(true);
+            }
+            return;
+        }
+        if (args.VirtualKey() == Sys::VirtualKey::GamepadView) {
+            OpenShortcuts(); args.Handled(true); return;
+        }
         // The guest polls the physical pad directly. Do not also navigate XS4
         // when B/Menu are pressed inside a running title.
         if (homebrew && homebrew->running() && !guestPaused) {
@@ -1131,6 +1164,21 @@ struct App : ApplicationT<App> {
             Find<Button>(L"EndContent").Click([this](auto const&, auto const&) { EndContent(); });
             Find<Button>(L"GuestDialogAccept").Click([this](auto const&, auto const&) { DismissGuestDialog(false); });
             Find<Button>(L"GuestDialogCancel").Click([this](auto const&, auto const&) { DismissGuestDialog(true); });
+            Find<Button>(L"ShortcutExport").Click([this](auto const&, auto const&) { ExportReport(); });
+            Find<Button>(L"ShortcutResume").Click([this](auto const&, auto const&) {
+                Find<Grid>(L"ShortcutOverlay").Visibility(Visibility::Collapsed);
+                shortcutsPausedGuest = false;
+                ResumeContent();
+            });
+            Find<Button>(L"ShortcutEnd").Click([this](auto const&, auto const&) {
+                Find<Grid>(L"ShortcutOverlay").Visibility(Visibility::Collapsed);
+                shortcutsPausedGuest = false;
+                EndContent();
+            });
+            Find<Button>(L"ShortcutExit").Click([](auto const&, auto const&) {
+                Application::Current().Exit();
+            });
+            Find<Button>(L"ShortcutClose").Click([this](auto const&, auto const&) { CloseShortcuts(); });
             Find<Button>(L"OpenLibrary").Click([this](auto const&, auto const&) { ShowPage(Page::Library); });
             Find<Button>(L"EmptyImport").Click([this](auto const&, auto const&) { ShowPage(Page::Library); SelectContent(); });
             Find<Button>(L"PendingEmptyImport").Click([this](auto const&, auto const&) { SelectContent(); });
@@ -1187,6 +1235,14 @@ struct App : ApplicationT<App> {
                     }
                 } catch (...) {}
                 if (shortcutDown && !pauseComboHeld && homebrew && homebrew->running()) {
+                    if (Find<Grid>(L"ShortcutOverlay").Visibility() == Visibility::Visible) {
+                        Find<Grid>(L"ShortcutOverlay").Visibility(Visibility::Collapsed);
+                        if (shortcutsPausedGuest) {
+                            guestPaused = false;
+                            homebrew->SetPaused(false);
+                        }
+                        shortcutsPausedGuest = false;
+                    }
                     if (guestPaused) ResumeContent();
                     else PauseContent();
                 }

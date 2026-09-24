@@ -192,7 +192,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "getpid") use(&KernelGetPid);
     if (name == "geteuid") use(&KernelGetEuid);
     if (name == "sched_yield") use(&KernelSchedYield);
-    if (name == "_exit") use(&GenericSuccess);
+    if (name == "_exit" || name == "exit") use(&GenericSuccess);
     if (name == "pthread_self") use(&KernelThreadSelf);
     if (name == "sceNetCtlInit") use(&NetCtlInit);
     if (name == "sceNetCtlTerm") use(&NetCtlTerm);
@@ -503,7 +503,7 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
     writeTrace("enter", 0, false);
     const auto result = entry.handler ? entry.handler(*self, *frame) : OrbisEnosys;
     writeTrace("return", result, true);
-    if (entry.nid == "6Z83sYWFlA8") {
+    if (entry.nid == "6Z83sYWFlA8" || entry.name == "exit") {
         if (auto* slot = WritablePointer(*self, *frame, frame->guest_stack,
                                          sizeof(std::uint64_t))) {
             const auto target = reinterpret_cast<std::uint64_t>(
