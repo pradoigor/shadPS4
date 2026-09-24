@@ -124,7 +124,7 @@ struct App : ApplicationT<App> {
         return std::wstring(item.installed ? L"installed:" : L"pending:") +
             std::filesystem::path(item.path).filename().wstring();
     }
-    struct SfoInfo { std::wstring title, category; };
+    struct SfoInfo { std::wstring title, category, titleId; };
     static SfoInfo ReadSfo(std::filesystem::path const& path) {
         SfoInfo info;
         std::error_code error;
@@ -162,7 +162,7 @@ struct App : ApplicationT<App> {
             while (keyEnd < dataTable && bytes[static_cast<size_t>(keyEnd)] != 0) ++keyEnd;
             if (keyEnd == dataTable) continue;
             std::string key(reinterpret_cast<const char*>(bytes.data() + keyAt), static_cast<size_t>(keyEnd - keyAt));
-            if (key != "TITLE" && key != "CATEGORY") continue;
+            if (key != "TITLE" && key != "CATEGORY" && key != "TITLE_ID") continue;
             auto valueEnd = valueAt;
             const auto limit = valueAt + length;
             while (valueEnd < limit && bytes[static_cast<size_t>(valueEnd)] != 0) ++valueEnd;
@@ -171,7 +171,8 @@ struct App : ApplicationT<App> {
                 std::string value(reinterpret_cast<const char*>(bytes.data() + valueAt), static_cast<size_t>(valueEnd - valueAt));
                 auto wide = std::wstring(to_hstring(value));
                 if (key == "TITLE") info.title = std::move(wide);
-                else info.category = std::move(wide);
+                else if (key == "CATEGORY") info.category = std::move(wide);
+                else info.titleId = std::move(wide);
             } catch (...) {}
         }
         return info;
@@ -454,7 +455,8 @@ struct App : ApplicationT<App> {
     void LaunchInstalled(size_t index) {
         if (index >= libraryItems.size() || !libraryItems[index].installed) return;
         auto const& item = libraryItems[index];
-        const auto eboot = std::filesystem::path(item.path) / L"eboot.bin";
+        const auto folder = std::filesystem::path(item.path);
+        auto eboot = folder / L"eboot.bin";
         if (!std::filesystem::is_regular_file(eboot)) {
             SetNotice(L"Este conteúdo está incompleto: não encontramos eboot.bin.");
             return;
@@ -464,6 +466,14 @@ struct App : ApplicationT<App> {
                                     L"Um título já está em execução.");
             return;
         }
+        // Store-R2 ships the application SELF alongside a CDN-only loader.
+        // Launch the supplied local payload when present, without claiming
+        // that update, CDN, or online catalog support is already available.
+        const auto metadata = ReadSfo(folder / L"sce_sys" / L"param.sfo");
+        const auto bundledStore = folder / L"homebrew.elf";
+        if (metadata.titleId == L"NPXS39041" &&
+            std::filesystem::is_regular_file(bundledStore))
+            eboot = bundledStore;
         selectedLoaderPath = eboot.wstring();
         RememberLaunch(item);
         StartHomebrew();

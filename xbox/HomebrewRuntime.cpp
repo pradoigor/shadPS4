@@ -568,7 +568,9 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
   gExpectedTcb = 0;
   gGuestThreadId.store(0);
   patchedFsReads_ = 0;
-  Record("loading", "Carregando o eboot.bin real.");
+  const auto executableName = executable_.filename().u8string();
+  Record("loading", "Carregando executável real: " +
+      std::string(executableName.begin(), executableName.end()));
   load_ = LoadControlled(executable_);
   if (!load_.validated || !load_.mapped || load_.private_image.empty())
     throw std::runtime_error("O ELF/SELF não produziu uma imagem executável válida.");
@@ -634,7 +636,8 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
   if (!memory_->IsExecutable(entry))
     throw std::runtime_error("O ponto de entrada não pertence a um segmento executável.");
 
-  guestPath_ = "/app0/eboot.bin";
+  guestPath_ = executable_.filename() == L"homebrew.elf"
+      ? "/app0/homebrew.elf" : "/app0/eboot.bin";
   params_ = {};
   params_.argc = 1;
   params_.argv[0] = guestPath_.c_str();
