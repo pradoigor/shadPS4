@@ -164,6 +164,36 @@ std::uint32_t TrapGuestSyscalls(std::vector<std::uint8_t>& image,
   return trapped;
 }
 
+bool BridgeStoreLoaderCallback(std::vector<std::uint8_t>& image,
+                               std::uint64_t virtualBase,
+                               std::uint64_t entry) {
+  // The Store 1.10 loader calls its statically linked jbc_run_as_root just
+  // after resolving VerifyRSA. Its PS4 kernel credential walk is inapplicable
+  // to an AppContainer; the callback itself uses our guest filesystem HLE.
+  // This adapter is deliberately tied to the measured loader image and
+  // verified direct callsite. It changes only guest code in the private copy.
+  constexpr std::uint64_t StoreEntry = 1062328;
+  constexpr std::uint64_t ReturnAfterRunAsRoot = 1062909;
+  constexpr std::size_t StoreImageBytes = 1418536;
+  if (entry != StoreEntry || image.size() != StoreImageBytes ||
+      ReturnAfterRunAsRoot < virtualBase + 5) return false;
+  const auto call = static_cast<std::size_t>(ReturnAfterRunAsRoot - 5 - virtualBase);
+  if (call + 5 > image.size() || image[call] != 0xe8) return false;
+  std::int32_t relative{};
+  std::memcpy(&relative, image.data() + call + 1, sizeof(relative));
+  const auto target = static_cast<std::int64_t>(ReturnAfterRunAsRoot) + relative;
+  if (target < 4096 || target >= 7586 || target < static_cast<std::int64_t>(virtualBase))
+    return false;
+  const auto offset = static_cast<std::size_t>(target - virtualBase);
+  if (offset + 8 > image.size()) return false;
+  // SysV: RDI=function, RSI=argument. Tail-jump to the callback, passing the
+  // argument in RDI and preserving the original caller's return address.
+  constexpr std::uint8_t callbackBridge[8] = {
+      0x48, 0x89, 0xf8, 0x48, 0x89, 0xf7, 0xff, 0xe0};
+  std::memcpy(image.data() + offset, callbackBridge, sizeof(callbackBridge));
+  return true;
+}
+
 int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
   if (!exception || !exception->ExceptionRecord || !exception->ContextRecord ||
       gCrashStateFile.empty())
@@ -579,6 +609,11 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
   if (std::filesystem::is_regular_file(
           executable_.parent_path() / L"Media" / L"rsa.prx", storePathError) &&
       !storePathError) {
+    const auto callbackBridged = BridgeStoreLoaderCallback(
+        load_.private_image, load_.min_virtual_address, load_.entry);
+    Record("store_loader_callback", callbackBridged
+        ? "Callback do loader 1.10 encaminhado ao sandbox convidado sem privilégio PS4."
+        : "Assinatura do loader desconhecida; callback original mantido.");
     const auto syscalls = TrapGuestSyscalls(load_.private_image,
                                            load_.min_virtual_address,
                                            load_.guest_segments);
