@@ -760,17 +760,13 @@ std::uint64_t HleDispatcher::KernelDebugOutText(HleDispatcher& dispatcher,
                                                 GuestCallFrame const& frame) noexcept {
     constexpr std::size_t MaxText = 4096;
     constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
-    if (!dispatcher.memory_) return OrbisEfault;
     std::string text;
-    text.reserve(MaxText);
-    for (std::size_t index = 0; index < MaxText; ++index) {
-        auto* byte = static_cast<char*>(dispatcher.memory_->Translate(frame.gpr[0] + index, 1));
-        if (!byte) return OrbisEfault;
-        if (*byte == '\0') break;
-        text.push_back(*byte);
-    }
+    // The first argument is an unused channel pointer; the text is the
+    // second argument in both the PS4 ABI and shadPS4's desktop handler.
+    if (!dispatcher.ReadGuestString(frame.gpr[1], text, MaxText)) return OrbisEfault;
     OutputDebugStringA(text.c_str());
-    return static_cast<std::uint64_t>(text.size());
+    dispatcher.GraphicsLog(text);
+    return 0;
 }
 
 std::uint64_t HleDispatcher::KernelMprotect(HleDispatcher& dispatcher,
@@ -1463,6 +1459,10 @@ bool HleDispatcher::ReadGuestString(std::uint64_t address, std::string& value,
     for (std::size_t index = 0; index < limit; ++index) {
         if (address > UINT64_MAX - index) return false;
         auto* byte = static_cast<char*>(memory_->Translate(address + index, 1));
+        // Guest code also builds paths and debug messages on its native worker
+        // stack. Keep the fallback bounded to committed, readable private pages.
+        if (!byte && IsCommittedGuestProcessRange(address + index, 1, false))
+            byte = reinterpret_cast<char*>(address + index);
         if (!byte) return false;
         if (*byte == '\0') return true;
         value.push_back(*byte);
@@ -1519,7 +1519,12 @@ std::uint64_t HleDispatcher::KernelOpen(HleDispatcher& dispatcher,
         const bool readable = access != 0x1u;
         const bool writable = access != 0x0u;
         std::filesystem::path hostPath;
-        if (!dispatcher.ResolveGuestPath(guestPath, writable, hostPath)) return OrbisEacces;
+        if (!dispatcher.ResolveGuestPath(guestPath, writable, hostPath)) {
+            dispatcher.GraphicsLog("HLE open: caminho guest não resolvido: " + guestPath);
+            return OrbisEacces;
+        }
+        if (!writable && !std::filesystem::exists(hostPath))
+            dispatcher.GraphicsLog("HLE open: arquivo ausente: " + guestPath);
         if (writable) std::filesystem::create_directories(hostPath.parent_path());
         std::ios::openmode mode = std::ios::binary;
         if ((flags & 0x3u) == 0) mode |= std::ios::in;
