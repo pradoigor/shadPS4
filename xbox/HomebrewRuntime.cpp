@@ -164,9 +164,10 @@ std::uint32_t TrapGuestSyscalls(std::vector<std::uint8_t>& image,
   return trapped;
 }
 
-bool BridgeStoreLoaderCallback(std::vector<std::uint8_t>& image,
-                               std::uint64_t virtualBase,
-                               std::uint64_t entry) {
+std::string BridgeStoreLoaderCallback(
+    std::vector<std::uint8_t>& image, std::uint64_t virtualBase,
+    std::uint64_t entry,
+    std::vector<PendingRelativeRelocation> const& relocations) {
   // The Store 1.10 loader calls its statically linked jbc_run_as_root just
   // after resolving VerifyRSA. Its PS4 kernel credential walk is inapplicable
   // to an AppContainer; the callback itself uses our guest filesystem HLE.
@@ -176,22 +177,49 @@ bool BridgeStoreLoaderCallback(std::vector<std::uint8_t>& image,
   constexpr std::uint64_t ReturnAfterRunAsRoot = 1062909;
   constexpr std::size_t StoreImageBytes = 1418536;
   if (entry != StoreEntry || image.size() != StoreImageBytes ||
-      ReturnAfterRunAsRoot < virtualBase + 5) return false;
-  const auto call = static_cast<std::size_t>(ReturnAfterRunAsRoot - 5 - virtualBase);
-  if (call + 5 > image.size() || image[call] != 0xe8) return false;
-  std::int32_t relative{};
-  std::memcpy(&relative, image.data() + call + 1, sizeof(relative));
-  const auto target = static_cast<std::int64_t>(ReturnAfterRunAsRoot) + relative;
+      ReturnAfterRunAsRoot < virtualBase + 6)
+    return "Imagem do loader diferente; callback original mantido.";
+  const auto after = static_cast<std::size_t>(ReturnAfterRunAsRoot - virtualBase);
+  std::int64_t target = -1;
+  std::string form;
+  if (image[after - 5] == 0xe8) {
+    std::int32_t relative{};
+    std::memcpy(&relative, image.data() + after - 4, sizeof(relative));
+    target = static_cast<std::int64_t>(ReturnAfterRunAsRoot) + relative;
+    form = "direct";
+  } else if (image[after - 6] == 0xff && image[after - 5] == 0x15) {
+    std::int32_t relative{};
+    std::memcpy(&relative, image.data() + after - 4, sizeof(relative));
+    const auto slot = static_cast<std::int64_t>(ReturnAfterRunAsRoot) + relative;
+    for (auto const& relocation : relocations) {
+      if (relocation.target == static_cast<std::uint64_t>(slot)) {
+        target = relocation.addend;
+        break;
+      }
+    }
+    form = "indirect";
+  }
+  if (form.empty()) {
+    char bytes[25]{};
+    constexpr char digits[] = "0123456789abcdef";
+    for (std::size_t i = 0; i < 12; ++i) {
+      const auto byte = image[after - 12 + i];
+      bytes[i * 2] = digits[byte >> 4];
+      bytes[i * 2 + 1] = digits[byte & 15];
+    }
+    return std::string("Chamada do loader não reconhecida; bytes anteriores: ") + bytes;
+  }
   if (target < 4096 || target >= 7586 || target < static_cast<std::int64_t>(virtualBase))
-    return false;
+    return "Destino " + form + " do callback fora da região esperada: " +
+           std::to_string(target);
   const auto offset = static_cast<std::size_t>(target - virtualBase);
-  if (offset + 8 > image.size()) return false;
+  if (offset + 8 > image.size()) return "Destino do callback fora da imagem.";
   // SysV: RDI=function, RSI=argument. Tail-jump to the callback, passing the
   // argument in RDI and preserving the original caller's return address.
   constexpr std::uint8_t callbackBridge[8] = {
       0x48, 0x89, 0xf8, 0x48, 0x89, 0xf7, 0xff, 0xe0};
   std::memcpy(image.data() + offset, callbackBridge, sizeof(callbackBridge));
-  return true;
+  return "Callback " + form + " do loader 1.10 encaminhado ao sandbox convidado.";
 }
 
 int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
@@ -609,11 +637,9 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
   if (std::filesystem::is_regular_file(
           executable_.parent_path() / L"Media" / L"rsa.prx", storePathError) &&
       !storePathError) {
-    const auto callbackBridged = BridgeStoreLoaderCallback(
-        load_.private_image, load_.min_virtual_address, load_.entry);
-    Record("store_loader_callback", callbackBridged
-        ? "Callback do loader 1.10 encaminhado ao sandbox convidado sem privilégio PS4."
-        : "Assinatura do loader desconhecida; callback original mantido.");
+    Record("store_loader_callback", BridgeStoreLoaderCallback(
+        load_.private_image, load_.min_virtual_address, load_.entry,
+        load_.pending_relative_relocations));
     const auto syscalls = TrapGuestSyscalls(load_.private_image,
                                            load_.min_virtual_address,
                                            load_.guest_segments);
