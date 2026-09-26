@@ -80,6 +80,7 @@ public:
     void* GraphicsAddress(std::string_view name);
     void ConfigureFileSystem(std::filesystem::path appRoot,
                              std::filesystem::path dataRoot);
+    void ConfigureGuestTls(std::uint32_t slot) noexcept { guestTlsSlot_ = slot; }
     void ConfigureTrace(std::filesystem::path path, std::string const& sessionId = {});
     void SetPaused(bool paused) noexcept;
 
@@ -187,6 +188,7 @@ private:
     static std::uint64_t RegMgrSetStr(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t RegMgrSetInt(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelOpen(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PosixFcntl(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t PosixOpen(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelClose(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelRead(HleDispatcher&, GuestCallFrame const&) noexcept;
@@ -275,6 +277,8 @@ private:
         bool nullDevice{};
         bool readable{true};
         bool writable{};
+        std::uint32_t openFlags{};
+        std::uint32_t descriptorFlags{};
     };
     std::filesystem::path appRoot_;
     std::filesystem::path dataRoot_;
@@ -282,6 +286,7 @@ private:
     std::unordered_set<std::string> hostsResolved_;
     std::unordered_map<std::int32_t, GuestFile> files_;
     std::int32_t nextFileDescriptor_{3};
+    std::uint32_t guestTlsSlot_{UINT32_MAX};
     std::mutex socketsMutex_;
     std::unordered_map<std::int32_t, std::uintptr_t> sockets_;
     std::int32_t nextSocketDescriptor_{256};

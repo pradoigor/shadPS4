@@ -6,6 +6,7 @@
 #include "GuestFreeType.h"
 #include "GuestDevices.h"
 #include "GuestPaths.h"
+#include "core/platform_memory.h"
 
 #include "core/aerolib/aerolib.h"
 
@@ -373,6 +374,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sceKernelLseek") use(&KernelLseek);
     if (name == "sceKernelFsync") use(&KernelFsync);
     if (name == "_open") use(&PosixOpen);
+    if (name == "_fcntl" || name == "fcntl") use(&PosixFcntl);
     if (name == "close") use(&KernelClose);
     if (name == "read" || name == "_read") use(&KernelRead);
     if (name == "_readv" || name == "readv" || name == "sceKernelReadv")
@@ -2219,6 +2221,7 @@ std::uint64_t HleDispatcher::KernelOpen(HleDispatcher& dispatcher,
             file.nullDevice = true;
             file.readable = readable;
             file.writable = writable;
+            file.openFlags = flags;
             const auto descriptor = dispatcher.nextFileDescriptor_++;
             dispatcher.files_.emplace(descriptor, std::move(file));
             return static_cast<std::uint64_t>(descriptor);
@@ -2245,6 +2248,7 @@ std::uint64_t HleDispatcher::KernelOpen(HleDispatcher& dispatcher,
         file.path = hostPath;
         file.readable = readable;
         file.writable = writable;
+        file.openFlags = flags;
         file.directory = std::filesystem::is_directory(hostPath);
         if ((flags & 0x20000u) != 0 && !file.directory) return OrbisEinval;
         if (file.directory) {
@@ -2291,6 +2295,27 @@ std::uint64_t HleDispatcher::PosixOpen(HleDispatcher& dispatcher,
         return UINT64_MAX;
     }
     return KernelOpen(dispatcher, frame);
+}
+
+std::uint64_t HleDispatcher::PosixFcntl(HleDispatcher& dispatcher,
+                                        GuestCallFrame const& frame) noexcept {
+    const auto descriptor = static_cast<std::int32_t>(frame.gpr[0]);
+    const auto command = static_cast<std::int32_t>(frame.gpr[1]);
+    auto file = dispatcher.files_.find(descriptor);
+    if (file == dispatcher.files_.end()) {
+        GuestPosixErrno = 9; // EBADF
+        return UINT64_MAX;
+    }
+    switch (command) {
+    case 1: return file->second.descriptorFlags; // F_GETFD
+    case 2: // F_SETFD (FD_CLOEXEC)
+        file->second.descriptorFlags = static_cast<std::uint32_t>(frame.gpr[2]) & 1u;
+        return 0;
+    case 3: return file->second.openFlags; // F_GETFL
+    default:
+        GuestPosixErrno = 22; // EINVAL; unsupported commands remain explicit
+        return UINT64_MAX;
+    }
 }
 
 std::uint64_t HleDispatcher::KernelClose(HleDispatcher& dispatcher,
@@ -3103,11 +3128,23 @@ std::uint64_t HleDispatcher::PthreadAttrSetStackSize(
     return 0;
 }
 
+// Keep SEH outside the lambda with C++ objects that require unwinding.
+static std::uint64_t InvokeGuestWorkerProtected(void* entry, std::uint64_t argument,
+                                                 bool* crashed) {
+    __try {
+        return InvokeGuestSysv1(entry, argument);
+    } __except (GetExceptionCode() == 0xE06D7363u
+                    ? EXCEPTION_CONTINUE_SEARCH : EXCEPTION_EXECUTE_HANDLER) {
+        *crashed = true;
+        return UINT64_MAX;
+    }
+}
+
 std::uint64_t HleDispatcher::PthreadCreate(
     HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
     auto* output = static_cast<std::uint64_t*>(WritablePointer(
         dispatcher, frame, frame.gpr[0], sizeof(std::uint64_t)));
-    if (!output || !dispatcher.memory_ ||
+    if (!output || !dispatcher.memory_ || dispatcher.guestTlsSlot_ >= 64 ||
         !dispatcher.memory_->IsExecutable(frame.gpr[2]))
         return 22;
     try {
@@ -3127,13 +3164,41 @@ std::uint64_t HleDispatcher::PthreadCreate(
         }
         auto* entry = reinterpret_cast<void*>(frame.gpr[2]);
         const auto argument = frame.gpr[3];
-        thread->native = std::thread([thread, entry, argument, identifier] {
+        auto* owner = &dispatcher;
+        const auto tlsSlot = dispatcher.guestTlsSlot_;
+        thread->native = std::thread([thread, entry, argument, identifier, tlsSlot, owner] {
             CurrentGuestThreadId = identifier;
             std::uint64_t result = UINT64_MAX;
-            try {
-                result = InvokeGuestSysv1(entry, argument);
-            } catch (...) {
+            auto* tlsPage = tlsSlot < 64
+                ? Core::PlatformMemory::Allocate(GetCurrentProcess(), nullptr, 4096,
+                                                  MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE)
+                : nullptr;
+            std::array<std::uint64_t, 4> dtv{1, 1, 0, 0};
+            auto* tcb = tlsPage ? static_cast<std::uint8_t*>(tlsPage) + 64 : nullptr;
+            if (tcb) {
+                std::memcpy(tcb, &tcb, sizeof(tcb));
+                auto* dtvPointer = dtv.data();
+                std::memcpy(tcb + 8, &dtvPointer, sizeof(dtvPointer));
+                std::memcpy(tcb + 16, &tcb, sizeof(tcb));
+                const auto nativeId = static_cast<std::uint32_t>(GetCurrentThreadId());
+                std::memcpy(tcb + 56, &nativeId, sizeof(nativeId));
             }
+            try {
+                if (!tcb || !TlsSetValue(tlsSlot, tcb)) {
+                    owner->GraphicsLog("Guest pthread: falha ao instalar TLS/TCB");
+                } else {
+                    owner->GraphicsLog("Guest pthread: TLS/TCB pronto; iniciando função");
+                    bool crashed = false;
+                    result = InvokeGuestWorkerProtected(entry, argument, &crashed);
+                    if (crashed) owner->GraphicsLog("Guest pthread: exceção de hardware no worker");
+                    else owner->GraphicsLog("Guest pthread: função concluída");
+                }
+            } catch (...) {
+                owner->GraphicsLog("Guest pthread: exceção C++ no worker");
+            }
+            if (tcb) TlsSetValue(tlsSlot, nullptr);
+            if (tlsPage)
+                Core::PlatformMemory::Free(GetCurrentProcess(), tlsPage, 0, MEM_RELEASE);
             {
                 std::scoped_lock lock(thread->state);
                 thread->result = result;

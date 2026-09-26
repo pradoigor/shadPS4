@@ -416,7 +416,8 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
 LONG CALLBACK RecordGuestVectoredException(EXCEPTION_POINTERS *exception) noexcept {
   if (!exception || !exception->ExceptionRecord || !exception->ContextRecord)
     return EXCEPTION_CONTINUE_SEARCH;
-  if (GetCurrentThreadId() != gGuestThreadId.load())
+  if (GetCurrentThreadId() != gGuestThreadId.load() &&
+      (gGuestTlsSlot >= 64 || TlsGetValue(gGuestTlsSlot) == nullptr))
     return EXCEPTION_CONTINUE_SEARCH;
   if (exception->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
       exception->ExceptionRecord->NumberParameters > 1 &&
@@ -604,6 +605,7 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
   tlsSlot_ = TlsAlloc();
   if (tlsSlot_ == TLS_OUT_OF_INDEXES)
     throw std::runtime_error("Não foi possível reservar o slot TLS convidado.");
+  dispatcher_->ConfigureGuestTls(tlsSlot_);
   patchedFsReads_ = PatchFsTcbReads(load_.private_image,
                                     load_.min_virtual_address,
                                     load_.guest_segments, tlsSlot_);
