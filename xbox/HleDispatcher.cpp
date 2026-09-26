@@ -11,6 +11,7 @@
 
 #include <windows.h>
 #include <bcrypt.h>
+#include <winrt/Windows.System.h>
 
 #include <algorithm>
 #include <chrono>
@@ -40,6 +41,25 @@ bool EnsureWinsock() noexcept {
         WinsockReady = WSAStartup(MAKEWORD(2, 2), &data) == 0;
     });
     return WinsockReady;
+}
+
+bool IsDnsName(std::string_view name) noexcept {
+    if (name.empty() || name.size() > 253 || name.find('.') == name.npos) return false;
+    std::size_t label = 0;
+    for (std::size_t index = 0; index < name.size(); ++index) {
+        const char c = name[index];
+        if (c == '.') {
+            if (label == 0 || label > 63 || name[index - 1] == '-') return false;
+            label = 0;
+        } else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                   (c >= '0' && c <= '9') || c == '-') {
+            if (label == 0 && c == '-') return false;
+            ++label;
+        } else {
+            return false;
+        }
+    }
+    return label > 0 && label <= 63 && name.front() != '-' && name.back() != '-';
 }
 
 std::int32_t PosixSocketError(int error) noexcept {
@@ -291,6 +311,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sceNetCtlInit") use(&NetCtlInit);
     if (name == "sceNetCtlTerm") use(&NetCtlTerm);
     if (name == "sceNetCtlGetInfo") use(&NetCtlGetInfo);
+    if (name == "sceKernelAvailableFlexibleMemorySize") use(&KernelAvailableFlexibleMemorySize);
     if (name == "inet_pton") use(&InetPton);
     if (name == "select") use(&PosixSelect);
     if (name == "raise") use(&SignalRaise);
@@ -490,11 +511,11 @@ void HleDispatcher::ConfigureFileSystem(std::filesystem::path appRoot,
     const auto etcRoot = dataRoot_ / L"system" / L"etc";
     std::filesystem::create_directories(etcRoot);
     const auto hostsPath = etcRoot / L"hosts";
-    if (!std::filesystem::exists(hostsPath)) {
-        std::ofstream hosts(hostsPath, std::ios::binary | std::ios::trunc);
-        if (!hosts) throw std::runtime_error("Falha ao criar /etc/hosts virtual.");
-        hosts << "127.0.0.1 localhost\n::1 localhost\n";
-    }
+    std::scoped_lock hostsLock(hostsMutex_);
+    hostsResolved_.clear();
+    std::ofstream hosts(hostsPath, std::ios::binary | std::ios::trunc);
+    if (!hosts) throw std::runtime_error("Falha ao criar /etc/hosts virtual.");
+    hosts << "127.0.0.1 localhost\n::1 localhost\n";
 }
 
 void HleDispatcher::ConfigureTrace(std::filesystem::path path,
@@ -1013,7 +1034,62 @@ std::uint64_t HleDispatcher::InetPton(HleDispatcher& dispatcher,
     const auto result = InetPtonA(family, address.c_str(), parsed);
     if (result == 1) std::memcpy(output, parsed, bytes);
     if (result == -1) GuestPosixErrno = 22; // EINVAL
+    // Some PS4 libc builds resolve hostnames from /etc/hosts without calling
+    // an imported getaddrinfo. Preserve inet_pton's numeric-only result while
+    // populating that virtual file through the UWP host resolver. This bridge
+    // applies to any valid DNS name and does not embed a title or server IP.
+    if (result == 0 && family == AF_INET && IsDnsName(address) && EnsureWinsock()) {
+        try {
+            std::scoped_lock lock(dispatcher.hostsMutex_);
+            if (dispatcher.hostsResolved_.insert(address).second) {
+                ADDRINFOA hints{};
+                hints.ai_family = AF_INET;
+                hints.ai_socktype = SOCK_STREAM;
+                ADDRINFOA* records{};
+                const int dnsResult = GetAddrInfoA(address.c_str(), nullptr, &hints, &records);
+                if (dnsResult == 0 && records) {
+                    char numeric[INET_ADDRSTRLEN]{};
+                    const auto* socketAddress = reinterpret_cast<sockaddr_in const*>(records->ai_addr);
+                    if (InetNtopA(AF_INET, const_cast<IN_ADDR*>(&socketAddress->sin_addr),
+                                  numeric, sizeof(numeric))) {
+                        std::ofstream hosts(dispatcher.dataRoot_ / L"system" / L"etc" / L"hosts",
+                                            std::ios::binary | std::ios::app);
+                        if (hosts) {
+                            hosts << numeric << ' ' << address << '\n';
+                            hosts.flush();
+                            if (hosts) dispatcher.GraphicsLog("DNS virtual: " + address + " -> " + numeric);
+                        }
+                    }
+                } else {
+                    dispatcher.GraphicsLog("DNS virtual: falha ao resolver " + address +
+                                           " (código " + std::to_string(dnsResult) + ")");
+                }
+                if (records) FreeAddrInfoA(records);
+            }
+        } catch (...) {
+            dispatcher.GraphicsLog("DNS virtual: falha ao atualizar /etc/hosts");
+        }
+    }
     return static_cast<std::uint64_t>(static_cast<std::int64_t>(result));
+}
+
+std::uint64_t HleDispatcher::KernelAvailableFlexibleMemorySize(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    constexpr std::uint64_t OrbisEnomem = 0x8002000Cull;
+    auto* output = WritablePointer(dispatcher, frame, frame.gpr[0], sizeof(std::uint64_t));
+    if (!output) return OrbisEfault;
+    try {
+        const auto limit = winrt::Windows::System::MemoryManager::AppMemoryUsageLimit();
+        const auto used = winrt::Windows::System::MemoryManager::AppMemoryUsage();
+        const std::uint64_t available = limit > used ? limit - used : 0;
+        std::memcpy(output, &available, sizeof(available));
+        dispatcher.GraphicsLog("Memória flexível virtual: disponível=" +
+                               std::to_string(available) + " bytes");
+        return available ? 0 : OrbisEnomem;
+    } catch (...) {
+        return OrbisEnomem;
+    }
 }
 
 std::uint64_t HleDispatcher::PosixSelect(HleDispatcher& dispatcher,

@@ -19,6 +19,7 @@
 #include <string_view>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace Lab {
@@ -129,6 +130,7 @@ private:
     static std::uint64_t NetCtlTerm(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t NetCtlGetInfo(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t InetPton(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelAvailableFlexibleMemorySize(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t PosixSelect(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t SignalRaise(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t NetSocket(HleDispatcher&, GuestCallFrame const&) noexcept;
@@ -276,6 +278,8 @@ private:
     };
     std::filesystem::path appRoot_;
     std::filesystem::path dataRoot_;
+    std::mutex hostsMutex_;
+    std::unordered_set<std::string> hostsResolved_;
     std::unordered_map<std::int32_t, GuestFile> files_;
     std::int32_t nextFileDescriptor_{3};
     std::mutex socketsMutex_;
