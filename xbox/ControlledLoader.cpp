@@ -470,6 +470,8 @@ ControlledLoadResult LoadElf(Reader &reader, elf_header const &header,
     return true;
   };
   std::set<std::string> seenSymbolNames;
+  constexpr std::size_t MaxPendingImports = 4096;
+  constexpr std::size_t MaxPendingSymbolRelocations = 65536;
   std::set<std::string> seenHleMappings;
   std::set<std::string> seenUnmappedSymbols;
   auto applyRelativeRelocations = [&](std::uint64_t offset,
@@ -509,12 +511,16 @@ ControlledLoadResult LoadElf(Reader &reader, elf_header const &header,
         std::string symbolName;
         if (symbolHasValidName(relocation.GetSymbol(), &symbolName)) {
           ++result.symbol_relocations_valid;
-          if (seenSymbolNames.insert(symbolName).second &&
-              result.pending_symbol_names.size() < 512)
+          if (seenSymbolNames.insert(symbolName).second) {
+            Require(result.pending_symbol_names.size() < MaxPendingImports,
+                    "ELF excede o limite de imports HLE.");
             result.pending_symbol_names.push_back(symbolName);
-          if (result.pending_symbol_relocations.size() < 4096)
-            result.pending_symbol_relocations.push_back(PendingSymbolRelocation{
-                relocation.rel_offset, relocation.rel_addend, symbolName});
+          }
+          Require(result.pending_symbol_relocations.size() <
+                      MaxPendingSymbolRelocations,
+                  "ELF excede o limite de relocações HLE.");
+          result.pending_symbol_relocations.push_back(PendingSymbolRelocation{
+              relocation.rel_offset, relocation.rel_addend, symbolName});
           // PS4 dynamic symbols carry the encoded NID followed by
           // the import library and module IDs (for example
           // "nid#E#E"). The upstream AeroLib table can identify

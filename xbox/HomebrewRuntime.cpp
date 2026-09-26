@@ -572,7 +572,12 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
   const auto executableName = executable_.filename().u8string();
   Record("loading", "Carregando executável real: " +
       std::string(executableName.begin(), executableName.end()));
-  load_ = LoadControlled(executable_);
+  try {
+    load_ = LoadControlled(executable_);
+  } catch (std::exception const &error) {
+    Record("startup_failed", error.what());
+    throw;
+  }
   if (!load_.validated || !load_.mapped || load_.private_image.empty())
     throw std::runtime_error("O ELF/SELF não produziu uma imagem executável válida.");
   if (load_.unsupported_relocations != 0 ||
@@ -586,13 +591,23 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
                                     executable_.parent_path() / L"RuntimeData");
   dispatcher_->ConfigureTrace(stateRoot / L"homebrew-last-hle.json", sessionId_);
   const auto bindings = dispatcher_->Bind(load_.pending_symbol_names);
+  Record("imports_bound", "imports=" +
+      std::to_string(load_.pending_symbol_names.size()) +
+      "; relocations=" +
+      std::to_string(load_.pending_symbol_relocations.size()) +
+      "; executable_addresses=" +
+      std::to_string(bindings.executable_addresses));
   if (bindings.executable_addresses != load_.pending_symbol_names.size())
     throw std::runtime_error("Nem todos os imports receberam thunk HLE.");
 
   for (auto const &relocation : load_.pending_symbol_relocations) {
     auto *address = dispatcher_->AddressFor(relocation.symbol);
-    if (!address || relocation.target < load_.min_virtual_address)
+    if (!address || relocation.target < load_.min_virtual_address) {
+      Record("startup_failed", "Import HLE sem endereço executável: " +
+          relocation.symbol + "; target=" +
+          std::to_string(relocation.target));
       throw std::runtime_error("Import HLE sem endereço executável.");
+    }
     const auto offset = relocation.target - load_.min_virtual_address;
     if (offset > load_.private_image.size() ||
         sizeof(std::uint64_t) > load_.private_image.size() - offset)
