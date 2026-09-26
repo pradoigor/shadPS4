@@ -336,6 +336,14 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "memcpy") use(&MemoryMemcpy);
     if (name == "memmove") use(&MemoryMemmove);
     if (name == "memset") use(&MemoryMemset);
+    if (name == "memalign") use(&LibcMemalign);
+    if (name == "malloc") use(&LibcMalloc);
+    if (name == "free") use(&LibcFree);
+    if (name == "__cxa_guard_acquire") use(&CxaGuardAcquire);
+    if (name == "__cxa_guard_release") use(&CxaGuardRelease);
+    if (name == "__cxa_guard_abort") use(&CxaGuardAbort);
+    if (name == "__cxa_atexit" || name == "atexit" || name == "_init_env")
+        use(&GenericSuccess);
     if (name == "memcmp") use(&MemoryMemcmp);
     if (name == "strlen") use(&MemoryStrlen);
     if (name == "mmap" || name == "mmap_np" || name == "__wrap_mmap") use(&MemoryMmap);
@@ -395,14 +403,15 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "_fstat") use(&FileFstat);
     if (name == "ftruncate") use(&FileFtruncate);
     if (name == "getdents") use(&FileGetdents);
-    if (name == "pthread_mutexattr_init") use(&PthreadMutexAttrInit);
-    if (name == "pthread_mutexattr_destroy") use(&PthreadMutexAttrDestroy);
-    if (name == "pthread_mutexattr_settype") use(&PthreadMutexAttrSetType);
-    if (name == "pthread_mutex_init") use(&PthreadMutexInit);
-    if (name == "pthread_mutex_destroy") use(&PthreadMutexDestroy);
-    if (name == "pthread_mutex_lock") use(&PthreadMutexLock);
-    if (name == "pthread_mutex_trylock") use(&PthreadMutexTryLock);
-    if (name == "pthread_mutex_unlock") use(&PthreadMutexUnlock);
+    if (name == "pthread_mutexattr_init" || name == "scePthreadMutexattrInit") use(&PthreadMutexAttrInit);
+    if (name == "pthread_mutexattr_destroy" || name == "scePthreadMutexattrDestroy") use(&PthreadMutexAttrDestroy);
+    if (name == "pthread_mutexattr_settype" || name == "scePthreadMutexattrSettype") use(&PthreadMutexAttrSetType);
+    if (name == "scePthreadMutexattrSetprotocol") use(&GenericSuccess);
+    if (name == "pthread_mutex_init" || name == "scePthreadMutexInit") use(&PthreadMutexInit);
+    if (name == "pthread_mutex_destroy" || name == "scePthreadMutexDestroy") use(&PthreadMutexDestroy);
+    if (name == "pthread_mutex_lock" || name == "scePthreadMutexLock") use(&PthreadMutexLock);
+    if (name == "pthread_mutex_trylock" || name == "scePthreadMutexTrylock") use(&PthreadMutexTryLock);
+    if (name == "pthread_mutex_unlock" || name == "scePthreadMutexUnlock") use(&PthreadMutexUnlock);
     if (name == "pthread_cond_init") use(&PthreadCondInit);
     if (name == "pthread_cond_destroy") use(&PthreadCondDestroy);
     if (name == "pthread_cond_wait") use(&PthreadCondWait);
@@ -1608,6 +1617,87 @@ std::uint64_t HleDispatcher::MspacePosixMemalign(
     }
     dispatcher.guestAllocationBytes_ += static_cast<std::size_t>(bytes);
     *output = reinterpret_cast<std::uint64_t>(allocation);
+    return 0;
+}
+
+std::uint64_t HleDispatcher::LibcMemalign(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    const auto alignment = frame.gpr[0];
+    const auto bytes = (std::max<std::uint64_t>)(frame.gpr[1], 1);
+    if (alignment < sizeof(void*) || alignment > MaxGuestHeapAllocation ||
+        (alignment & (alignment - 1)) != 0 || bytes > MaxGuestHeapAllocation)
+        return 0;
+    std::scoped_lock lock(dispatcher.allocationsMutex_);
+    if (bytes > MaxGuestHeapBytes - dispatcher.guestAllocationBytes_) return 0;
+    auto* allocation = _aligned_malloc(static_cast<std::size_t>(bytes),
+                                        static_cast<std::size_t>(alignment));
+    if (!allocation) return 0;
+    try {
+        dispatcher.guestAllocations_.emplace(allocation, static_cast<std::size_t>(bytes));
+        dispatcher.guestAlignedAllocations_.emplace(allocation,
+                                                    static_cast<std::size_t>(alignment));
+    } catch (...) {
+        dispatcher.guestAllocations_.erase(allocation);
+        _aligned_free(allocation);
+        return 0;
+    }
+    dispatcher.guestAllocationBytes_ += static_cast<std::size_t>(bytes);
+    return reinterpret_cast<std::uint64_t>(allocation);
+}
+
+std::uint64_t HleDispatcher::LibcMalloc(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto adjusted = frame;
+    adjusted.gpr[1] = frame.gpr[0];
+    adjusted.gpr[0] = 0;
+    return MspaceMalloc(dispatcher, adjusted);
+}
+
+std::uint64_t HleDispatcher::LibcFree(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto adjusted = frame;
+    adjusted.gpr[1] = frame.gpr[0];
+    adjusted.gpr[0] = 0;
+    return MspaceFree(dispatcher, adjusted);
+}
+
+std::uint64_t HleDispatcher::CxaGuardAcquire(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto* guard = static_cast<std::uint8_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[0], sizeof(std::uint64_t)));
+    if (!guard) return 0;
+    std::unique_lock lock(dispatcher.synchronizationStateMutex_);
+    dispatcher.cxaGuardChanged_.wait(lock, [&] {
+        return guard[0] != 0 ||
+            !dispatcher.cxaGuardsInitializing_.contains(frame.gpr[0]);
+    });
+    if (guard[0] != 0) return 0;
+    try { dispatcher.cxaGuardsInitializing_.insert(frame.gpr[0]); }
+    catch (...) { return 0; }
+    return 1;
+}
+
+std::uint64_t HleDispatcher::CxaGuardRelease(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto* guard = static_cast<std::uint8_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[0], sizeof(std::uint64_t)));
+    if (!guard) return 22;
+    {
+        std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        guard[0] = 1;
+        dispatcher.cxaGuardsInitializing_.erase(frame.gpr[0]);
+    }
+    dispatcher.cxaGuardChanged_.notify_all();
+    return 0;
+}
+
+std::uint64_t HleDispatcher::CxaGuardAbort(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    {
+        std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        dispatcher.cxaGuardsInitializing_.erase(frame.gpr[0]);
+    }
+    dispatcher.cxaGuardChanged_.notify_all();
     return 0;
 }
 

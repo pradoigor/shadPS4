@@ -152,6 +152,12 @@ private:
     static std::uint64_t MemoryMmap(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MspaceMalloc(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MspacePosixMemalign(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t LibcMemalign(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t LibcMalloc(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t LibcFree(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t CxaGuardAcquire(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t CxaGuardRelease(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t CxaGuardAbort(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MspaceCreate(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MspaceDestroy(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MspaceMallocStatsFast(HleDispatcher&, GuestCallFrame const&) noexcept;
@@ -363,6 +369,8 @@ private:
         std::uint32_t value{};
     };
     std::mutex synchronizationStateMutex_;
+    std::condition_variable cxaGuardChanged_;
+    std::unordered_set<std::uint64_t> cxaGuardsInitializing_;
     std::unordered_map<std::uint64_t, std::uint32_t> mutexAttributes_;
     std::unordered_map<std::uint64_t, std::shared_ptr<GuestMutex>> mutexes_;
     std::unordered_map<std::uint64_t, std::shared_ptr<GuestCondition>> conditions_;
