@@ -419,7 +419,8 @@ ControlledLoadResult LoadElf(Reader &reader, elf_header const &header,
     std::copy(bytes.begin(), bytes.end(), mapped.begin() + target);
   }
   auto symbolHasValidName = [&](std::uint32_t symbolIndex,
-                                std::string *outputName) {
+                                std::string *outputName,
+                                elf_symbol *outputSymbol) {
     if (!dynlibData || dynamicTables.symbol_entry_size != sizeof(elf_symbol) ||
         dynamicTables.symbol_table_size == 0 ||
         dynamicTables.string_table_size == 0 ||
@@ -467,6 +468,8 @@ ControlledLoadResult LoadElf(Reader &reader, elf_header const &header,
       return false;
     if (outputName)
       outputName->assign(name.begin(), terminator);
+    if (outputSymbol)
+      *outputSymbol = symbol;
     return true;
   };
   std::set<std::string> seenSymbolNames;
@@ -509,12 +512,23 @@ ControlledLoadResult LoadElf(Reader &reader, elf_header const &header,
                  relocation.GetType() == R_X86_64_JUMP_SLOT) {
         ++result.symbol_relocations_pending;
         std::string symbolName;
-        if (symbolHasValidName(relocation.GetSymbol(), &symbolName)) {
+        elf_symbol importedSymbol{};
+        if (symbolHasValidName(relocation.GetSymbol(), &symbolName,
+                               &importedSymbol)) {
           ++result.symbol_relocations_valid;
           if (seenSymbolNames.insert(symbolName).second) {
             Require(result.pending_symbol_names.size() < MaxPendingImports,
                     "ELF excede o limite de imports HLE.");
             result.pending_symbol_names.push_back(symbolName);
+            // Some PS4 homebrew marks exported data STT_NOTYPE. The known
+            // Garlic heap size NID is data even with that incomplete tag.
+            if (importedSymbol.GetType() == STT_OBJECT ||
+                symbolName.starts_with("sP4FleNgG68#")) {
+              Require(importedSymbol.st_size <= 1ull * 1024 * 1024,
+                      "Símbolo de dados importado excede 1 MiB.");
+              result.pending_data_symbols.push_back(PendingDataSymbol{
+                  symbolName, (std::max<std::uint64_t>)(importedSymbol.st_size, 8)});
+            }
           }
           Require(result.pending_symbol_relocations.size() <
                       MaxPendingSymbolRelocations,
@@ -695,6 +709,7 @@ ControlledLoadResult LoadSelf(Reader &reader, self_header const &header) {
   result.private_image = std::move(inner.private_image);
   result.relocation_dry_run_checksum = inner.relocation_dry_run_checksum;
   result.pending_symbol_names = std::move(inner.pending_symbol_names);
+  result.pending_data_symbols = std::move(inner.pending_data_symbols);
   result.hle_symbol_mappings = std::move(inner.hle_symbol_mappings);
   result.hle_unmapped_symbols = std::move(inner.hle_unmapped_symbols);
   result.import_library_ids = std::move(inner.import_library_ids);

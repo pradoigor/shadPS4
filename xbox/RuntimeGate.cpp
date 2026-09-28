@@ -48,9 +48,10 @@ RuntimeGateResult EvaluateRuntimeGate(ControlledLoadResult const &load) {
 
   // The ABI thunk is now exercised on the console. Binding still happens in
   // a short-lived table and is deliberately not written into guest memory.
-  if (load.hle_addresses_created < load.pending_symbol_names.size())
+  if (load.hle_addresses_created + load.hle_data_addresses_created <
+      load.pending_symbol_names.size())
     Add(unique, result.blockers,
-        L"Nem todos os imports receberam um endereço HLE executável.");
+        L"Nem todos os imports receberam um endereço HLE compatível com seu tipo.");
   if (load.hle_handlers_unimplemented != 0)
     Add(unique, result.blockers,
         L"Há imports HLE com thunk ENOSYS; os handlers ainda precisam ser "

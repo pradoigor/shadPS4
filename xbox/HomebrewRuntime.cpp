@@ -264,12 +264,12 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
                               : 0;
   const auto imageOffset = rip >= gGuestHostBase ? rip - gGuestHostBase : 0;
   const auto faultBaseDelta = fault >= gGuestHostBase ? fault - gGuestHostBase : 0;
-  const char *faultThunkSymbol = "";
+  const char *faultBindingSymbol = "";
   for (std::size_t index = 0;
        index < gThunkDiagnosticCount.load(std::memory_order_acquire); ++index) {
     if (gThunkDiagnostics[index].address ==
         reinterpret_cast<std::uint64_t>(faultMemory.BaseAddress)) {
-      faultThunkSymbol = gThunkDiagnostics[index].symbol;
+      faultBindingSymbol = gThunkDiagnostics[index].symbol;
       break;
     }
   }
@@ -345,7 +345,7 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
       "\"guest_virtual_rip\":%llu,"
       "\"guest_virtual_fault\":%llu,\"instruction_domain\":\"%s\","
       "\"fault_domain\":\"%s\",\"fault_address_in_guest_image\":%s,"
-      "\"fault_hle_thunk_symbol\":\"%s\","
+      "\"fault_hle_binding_symbol\":\"%s\","
       "\"timestamp\":%llu}",
       static_cast<unsigned long>(record->ExceptionCode),
       gSessionId, gBuildCommit,
@@ -413,7 +413,7 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
       instructionDomain,
       faultDomain,
       guestFault ? "true" : "false",
-      faultThunkSymbol,
+      faultBindingSymbol,
       static_cast<unsigned long long>(UnixSeconds()));
   if (length > 0) {
     if (length >= static_cast<int>(sizeof(payload))) {
@@ -607,7 +607,8 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
   dispatcher_->ConfigureFileSystem(executable_.parent_path(),
                                     executable_.parent_path() / L"RuntimeData");
   dispatcher_->ConfigureTrace(stateRoot / L"homebrew-last-hle.json", sessionId_);
-  const auto bindings = dispatcher_->Bind(load_.pending_symbol_names);
+  const auto bindings = dispatcher_->Bind(load_.pending_symbol_names,
+                                           load_.pending_data_symbols);
   gThunkDiagnosticCount.store(0, std::memory_order_release);
   for (auto const &symbol : load_.pending_symbol_names) {
     const auto count = gThunkDiagnosticCount.load(std::memory_order_relaxed);
@@ -624,9 +625,11 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
       "; relocations=" +
       std::to_string(load_.pending_symbol_relocations.size()) +
       "; executable_addresses=" +
-      std::to_string(bindings.executable_addresses));
-  if (bindings.executable_addresses != load_.pending_symbol_names.size())
-    throw std::runtime_error("Nem todos os imports receberam thunk HLE.");
+      std::to_string(bindings.executable_addresses) +
+      "; data_addresses=" + std::to_string(bindings.data_addresses));
+  if (bindings.executable_addresses + bindings.data_addresses !=
+      load_.pending_symbol_names.size())
+    throw std::runtime_error("Nem todos os imports receberam endereço HLE.");
 
   for (auto const &relocation : load_.pending_symbol_relocations) {
     auto *address = dispatcher_->AddressFor(relocation.symbol);
@@ -634,7 +637,7 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
       Record("startup_failed", "Import HLE sem endereço executável: " +
           relocation.symbol + "; target=" +
           std::to_string(relocation.target));
-      throw std::runtime_error("Import HLE sem endereço executável.");
+      throw std::runtime_error("Import HLE sem endereço.");
     }
     const auto offset = relocation.target - load_.min_virtual_address;
     if (offset > load_.private_image.size() ||

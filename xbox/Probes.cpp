@@ -30,8 +30,10 @@ void RunProbe(Test &test, std::wstring const &executablePath,
   const auto executable = std::filesystem::path(executablePath);
   hleDispatcher.ConfigureFileSystem(executable.parent_path(),
                                     executable.parent_path() / L"RuntimeData");
-  const auto hleBindings = hleDispatcher.Bind(result.pending_symbol_names);
+  const auto hleBindings = hleDispatcher.Bind(result.pending_symbol_names,
+                                              result.pending_data_symbols);
   result.hle_addresses_created = hleBindings.executable_addresses;
+  result.hle_data_addresses_created = hleBindings.data_addresses;
   result.hle_handlers_implemented = hleBindings.implemented_handlers;
   result.hle_handlers_unimplemented = hleBindings.unimplemented_handlers;
   for (auto const &relocation : result.pending_symbol_relocations) {
@@ -523,6 +525,9 @@ void RunProbe(Test &test, std::wstring const &executablePath,
   test.measurements.Insert(L"hle_addresses_created",
                            JsonValue::CreateNumberValue(static_cast<double>(
                                result.hle_addresses_created)));
+  test.measurements.Insert(L"hle_data_addresses_created",
+                           JsonValue::CreateNumberValue(static_cast<double>(
+                               result.hle_data_addresses_created)));
   test.measurements.Insert(L"hle_handlers_implemented",
                            JsonValue::CreateNumberValue(static_cast<double>(
                                result.hle_handlers_implemented)));

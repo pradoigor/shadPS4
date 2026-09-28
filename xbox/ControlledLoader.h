@@ -14,6 +14,11 @@ struct PendingSymbolRelocation {
   std::string symbol;
 };
 
+struct PendingDataSymbol {
+  std::string symbol;
+  std::uint64_t size{};
+};
+
 struct PendingRelativeRelocation {
   std::uint64_t target{};
   std::int64_t addend{};
@@ -66,6 +71,7 @@ struct ControlledLoadResult {
   std::uint64_t hle_symbols_known{};
   std::uint64_t hle_symbols_unknown{};
   std::uint64_t hle_addresses_created{};
+  std::uint64_t hle_data_addresses_created{};
   std::uint64_t hle_handlers_implemented{};
   std::uint64_t hle_handlers_unimplemented{};
   std::uint64_t hle_relocations_applied{};
@@ -90,6 +96,7 @@ struct ControlledLoadResult {
   std::uint64_t hle_pointer_probe_guest_address{};
   std::uint64_t relocation_dry_run_checksum{};
   std::vector<std::string> pending_symbol_names;
+  std::vector<PendingDataSymbol> pending_data_symbols;
   std::vector<std::string> hle_symbol_mappings;
   std::vector<std::string> hle_unmapped_symbols;
   std::vector<std::string> import_library_ids;

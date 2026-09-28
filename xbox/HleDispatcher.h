@@ -32,11 +32,13 @@ struct HleResolution {
     std::string nid;
     bool implemented{};
     void* address{};
+    bool data{};
 };
 
 struct HleBindingSummary {
     std::size_t requested{};
     std::size_t executable_addresses{};
+    std::size_t data_addresses{};
     std::size_t implemented_handlers{};
     std::size_t unimplemented_handlers{};
 };
@@ -63,7 +65,8 @@ public:
     // Returns a thunk for an import. Unimplemented imports receive a safe
     // ENOSYS-style return value and are still reported as unavailable.
     HleResolution Resolve(std::string_view encodedSymbol);
-    HleBindingSummary Bind(std::vector<std::string> const& encodedSymbols);
+    HleBindingSummary Bind(std::vector<std::string> const& encodedSymbols,
+                          std::vector<PendingDataSymbol> const& dataSymbols = {});
     void* AddressFor(std::string_view encodedSymbol) const noexcept;
     void AttachGuestMemory(GuestMemory* memory) noexcept { memory_ = memory; }
     void AttachGraphics(AngleVideo* graphics) noexcept { graphics_ = graphics; }
@@ -260,6 +263,8 @@ private:
 
     SysvThunkArena thunks_;
     std::vector<Entry> entries_;
+    std::unordered_map<std::string, std::size_t> dataSymbolSizes_;
+    std::vector<std::unique_ptr<std::uint8_t[]>> dataStorage_;
     GuestMemory* memory_{};
     std::mutex allocationsMutex_;
     std::unordered_map<void*, std::size_t> guestAllocations_;

@@ -296,6 +296,14 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     const auto* known = Core::AeroLib::FindByNid(nid.c_str());
     const auto name = known ? std::string(known->name) : std::string{};
 
+    if (auto data = dataSymbolSizes_.find(encoded); data != dataSymbolSizes_.end()) {
+        auto storage = std::make_unique<std::uint8_t[]>(data->second);
+        auto* address = storage.get();
+        dataStorage_.push_back(std::move(storage));
+        entries_.push_back(Entry{encoded, nid, name, false, nullptr, address});
+        return HleResolution{encoded, nid, false, address, true};
+    }
+
     auto handler = &Unimplemented;
     bool implemented = false;
     auto use = [&](HleHandler value) { handler = value; implemented = true; };
@@ -466,12 +474,25 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     return HleResolution{encoded, nid, entries_.back().implemented, entries_.back().address};
 }
 
-HleBindingSummary HleDispatcher::Bind(std::vector<std::string> const& encodedSymbols) {
+HleBindingSummary HleDispatcher::Bind(
+    std::vector<std::string> const& encodedSymbols,
+    std::vector<PendingDataSymbol> const& dataSymbols) {
+    dataSymbolSizes_.clear();
+    std::size_t dataBytes = 0;
+    for (auto const& data : dataSymbols) {
+        if (data.symbol.empty() || data.size == 0 || data.size > 1ull * 1024 * 1024 ||
+            dataBytes > 64ull * 1024 * 1024 - data.size)
+            throw std::runtime_error("Import de dados HLE excede o limite seguro.");
+        dataBytes += static_cast<std::size_t>(data.size);
+        dataSymbolSizes_.emplace(data.symbol, static_cast<std::size_t>(data.size));
+    }
     HleBindingSummary summary;
     summary.requested = encodedSymbols.size();
     for (auto const& encoded : encodedSymbols) {
         const auto resolution = Resolve(encoded);
-        if (resolution.address) ++summary.executable_addresses;
+        if (resolution.address && resolution.data) ++summary.data_addresses;
+        else if (resolution.address) ++summary.executable_addresses;
+        if (resolution.data) continue;
         if (resolution.implemented) ++summary.implemented_handlers;
         else ++summary.unimplemented_handlers;
     }
