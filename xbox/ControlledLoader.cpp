@@ -743,6 +743,8 @@ ControlledLoadResult LoadSelf(Reader &reader, self_header const &header) {
   result.inner_entry = inner.entry;
   result.inner_mapped_bytes = inner.mapped_bytes;
   result.inner_checksum = inner.checksum;
+  result.dynamic_module = inner.dynamic_module;
+  result.module_init = inner.module_init;
   result.min_virtual_address = inner.min_virtual_address;
   result.max_virtual_address = inner.max_virtual_address;
   result.dynamic_segments = inner.dynamic_segments;
@@ -768,6 +770,7 @@ ControlledLoadResult LoadSelf(Reader &reader, self_header const &header) {
   result.pending_relative_relocations =
       std::move(inner.pending_relative_relocations);
   result.guest_segments = std::move(inner.guest_segments);
+  result.exported_symbols = std::move(inner.exported_symbols);
   result.private_image = std::move(inner.private_image);
   result.relocation_dry_run_checksum = inner.relocation_dry_run_checksum;
   result.pending_symbol_names = std::move(inner.pending_symbol_names);

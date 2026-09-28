@@ -335,7 +335,16 @@ std::uint64_t HleDispatcher::LoadGuestModule(
             load.relocation_targets_outside_segments ||
             load.symbol_relocations_invalid || !load.relocation_data_valid ||
             load.private_image.empty()) {
-            GraphicsLog("PRX: imagem dinâmica inválida ou relocação não suportada: " + path);
+            GraphicsLog("PRX: imagem rejeitada: " + path +
+                        "; validada=" + std::to_string(load.validated) +
+                        "; mapeada=" + std::to_string(load.mapped) +
+                        "; dinâmica=" + std::to_string(load.dynamic_module) +
+                        "; protegida=" + std::to_string(load.protected_segments) +
+                        "; reloc_não_suportadas=" + std::to_string(load.unsupported_relocations) +
+                        "; alvos_fora=" + std::to_string(load.relocation_targets_outside_segments) +
+                        "; símbolos_inválidos=" + std::to_string(load.symbol_relocations_invalid) +
+                        "; dados_reloc_válidos=" + std::to_string(load.relocation_data_valid) +
+                        "; bytes=" + std::to_string(load.private_image.size()));
             return OrbisEnoexec;
         }
         for (auto const& relocation : load.pending_symbol_relocations) {
