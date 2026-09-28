@@ -217,10 +217,13 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
                          ? record->ExceptionInformation[1]
                          : 0;
   const auto rip = static_cast<std::uint64_t>(exception->ContextRecord->Rip);
+  MEMORY_BASIC_INFORMATION instructionMemory{};
+  QueryMemory(reinterpret_cast<void const*>(rip), &instructionMemory);
   char instructionBytes[33]{};
-  if (rip >= gGuestHostBase && rip - gGuestHostBase < gGuestImageSize) {
-    const auto remaining = gGuestImageSize - (rip - gGuestHostBase);
-    const auto count = static_cast<std::size_t>((std::min<std::uint64_t>)(16, remaining));
+  if (Readable(instructionMemory, rip, 1)) {
+    const auto begin = reinterpret_cast<std::uint64_t>(instructionMemory.BaseAddress);
+    const auto remaining = instructionMemory.RegionSize - (rip - begin);
+    const auto count = static_cast<std::size_t>((std::min<std::size_t>)(16, remaining));
     auto const* instruction = reinterpret_cast<std::uint8_t const*>(rip);
     constexpr char digits[] = "0123456789abcdef";
     for (std::size_t index = 0; index < count; ++index) {
@@ -231,10 +234,8 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
   MEMORY_BASIC_INFORMATION tcbMemory{};
   MEMORY_BASIC_INFORMATION stackMemory{};
   MEMORY_BASIC_INFORMATION faultMemory{};
-  MEMORY_BASIC_INFORMATION instructionMemory{};
   QueryMemory(reinterpret_cast<void const*>(exception->ContextRecord->Rcx), &tcbMemory);
   QueryMemory(reinterpret_cast<void const*>(exception->ContextRecord->Rsp), &stackMemory);
-  QueryMemory(reinterpret_cast<void const*>(rip), &instructionMemory);
   if (fault)
     QueryMemory(reinterpret_cast<void const*>(fault), &faultMemory);
   std::uint64_t stackWords[8]{};

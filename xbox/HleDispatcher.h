@@ -312,6 +312,8 @@ private:
     static std::uint64_t PthreadRwlockReadLock(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t PthreadRwlockWriteLock(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t PthreadRwlockUnlock(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadRwlockInit(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadRwlockDestroy(HleDispatcher&, GuestCallFrame const&) noexcept;
 
     bool ReadGuestString(std::uint64_t address, std::string& value,
                          std::size_t limit = 1024) const noexcept;

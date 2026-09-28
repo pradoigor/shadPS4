@@ -662,9 +662,16 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "pthread_getspecific") use(&PthreadGetSpecific);
     if (name == "pthread_setspecific") use(&PthreadSetSpecific);
     if (name == "pthread_once") use(&PthreadOnce);
-    if (name == "pthread_rwlock_rdlock") use(&PthreadRwlockReadLock);
-    if (name == "pthread_rwlock_wrlock") use(&PthreadRwlockWriteLock);
-    if (name == "pthread_rwlock_unlock") use(&PthreadRwlockUnlock);
+    if (name == "pthread_rwlock_init" || name == "scePthreadRwlockInit")
+        use(&PthreadRwlockInit);
+    if (name == "pthread_rwlock_destroy" || name == "scePthreadRwlockDestroy")
+        use(&PthreadRwlockDestroy);
+    if (name == "pthread_rwlock_rdlock" || name == "scePthreadRwlockRdlock")
+        use(&PthreadRwlockReadLock);
+    if (name == "pthread_rwlock_wrlock" || name == "scePthreadRwlockWrlock")
+        use(&PthreadRwlockWriteLock);
+    if (name == "pthread_rwlock_unlock" || name == "scePthreadRwlockUnlock")
+        use(&PthreadRwlockUnlock);
     if (name == "__error") use(&KernelErrorPointer);
     if (name == "sceKernelDlsym") use(&KernelDlsym);
     if (name == "il2cpp_api_register_symbols") use(&Il2CppRegisterSymbols);
@@ -4523,6 +4530,33 @@ std::uint64_t HleDispatcher::PthreadOnce(
     } catch (...) {
         return 12;
     }
+}
+
+std::uint64_t HleDispatcher::PthreadRwlockInit(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto* slot = static_cast<std::uint64_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[0], sizeof(std::uint64_t)));
+    if (!slot || frame.gpr[1] != 0) return 22;
+    try {
+        auto rwlock = std::make_shared<GuestRwlock>();
+        std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        if (dispatcher.rwlocks_.contains(frame.gpr[0])) return 16;
+        dispatcher.rwlocks_.emplace(frame.gpr[0], std::move(rwlock));
+        *slot = frame.gpr[0];
+        return 0;
+    } catch (...) { return 12; }
+}
+
+std::uint64_t HleDispatcher::PthreadRwlockDestroy(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto* slot = static_cast<std::uint64_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[0], sizeof(std::uint64_t)));
+    if (!slot) return 22;
+    if (GuestRwlockOwnerships.contains(frame.gpr[0])) return 16;
+    std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+    if (!dispatcher.rwlocks_.erase(frame.gpr[0])) return 22;
+    *slot = 2;
+    return 0;
 }
 
 std::uint64_t HleDispatcher::PthreadRwlockReadLock(
