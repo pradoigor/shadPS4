@@ -308,7 +308,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "geteuid") use(&KernelGetEuid);
     if (name == "sched_yield") use(&KernelSchedYield);
     if (name == "_exit" || name == "exit") use(&GenericSuccess);
-    if (name == "pthread_self") use(&KernelThreadSelf);
+    if (name == "pthread_self" || name == "scePthreadSelf") use(&KernelThreadSelf);
     if (name == "sceNetCtlInit") use(&NetCtlInit);
     if (name == "sceNetCtlTerm") use(&NetCtlTerm);
     if (name == "sceNetCtlGetInfo") use(&NetCtlGetInfo);
@@ -348,6 +348,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
         use(&GenericSuccess);
     if (name == "memcmp") use(&MemoryMemcmp);
     if (name == "strlen") use(&MemoryStrlen);
+    if (name == "strcmp") use(&MemoryStrcmp);
     if (name == "strstr") use(&MemoryStrstr);
     if (name == "strncpy") use(&MemoryStrncpy);
     if (name == "mmap" || name == "mmap_np" || name == "__wrap_mmap") use(&MemoryMmap);
@@ -1486,6 +1487,28 @@ std::uint64_t HleDispatcher::MemoryStrlen(HleDispatcher& dispatcher,
             dispatcher, frame, frame.gpr[0] + length, 1));
         if (!byte) return OrbisEfault;
         if (*byte == '\0') return length;
+    }
+    return OrbisEfault;
+}
+
+std::uint64_t HleDispatcher::MemoryStrcmp(HleDispatcher& dispatcher,
+                                          GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    constexpr std::size_t MaxString = 1u << 20;
+    if (frame.gpr[0] == 0 || frame.gpr[1] == 0) return OrbisEfault;
+    for (std::size_t index = 0; index < MaxString; ++index) {
+        if (frame.gpr[0] > UINT64_MAX - index ||
+            frame.gpr[1] > UINT64_MAX - index) return OrbisEfault;
+        auto* left = static_cast<unsigned char const*>(ReadablePointer(
+            dispatcher, frame, frame.gpr[0] + index, 1));
+        auto* right = static_cast<unsigned char const*>(ReadablePointer(
+            dispatcher, frame, frame.gpr[1] + index, 1));
+        if (!left || !right) return OrbisEfault;
+        if (*left != *right) {
+            const auto difference = static_cast<std::int64_t>(*left) - *right;
+            return static_cast<std::uint64_t>(difference);
+        }
+        if (*left == 0) return 0;
     }
     return OrbisEfault;
 }

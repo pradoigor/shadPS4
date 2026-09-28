@@ -149,6 +149,7 @@ private:
     static std::uint64_t MemoryMemset(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MemoryMemcmp(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MemoryStrlen(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t MemoryStrcmp(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MemoryStrstr(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MemoryStrncpy(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t MemoryMmap(HleDispatcher&, GuestCallFrame const&) noexcept;

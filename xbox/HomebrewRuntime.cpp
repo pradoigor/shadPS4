@@ -26,6 +26,12 @@ char gBuildCommit[64]{};
 std::uint64_t gGuestHostBase{};
 std::uint64_t gGuestVirtualBase{};
 std::uint64_t gGuestImageSize{};
+struct ThunkDiagnostic {
+  std::uint64_t address{};
+  char symbol[64]{};
+};
+ThunkDiagnostic gThunkDiagnostics[4096]{};
+std::atomic<std::size_t> gThunkDiagnosticCount{};
 std::atomic_bool gGuestCrashRecorded{};
 std::atomic<std::uint32_t> gGuestThreadId{};
 std::atomic<GuestMemory*> gLazyMemory{};
@@ -258,6 +264,15 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
                               : 0;
   const auto imageOffset = rip >= gGuestHostBase ? rip - gGuestHostBase : 0;
   const auto faultBaseDelta = fault >= gGuestHostBase ? fault - gGuestHostBase : 0;
+  const char *faultThunkSymbol = "";
+  for (std::size_t index = 0;
+       index < gThunkDiagnosticCount.load(std::memory_order_acquire); ++index) {
+    if (gThunkDiagnostics[index].address ==
+        reinterpret_cast<std::uint64_t>(faultMemory.BaseAddress)) {
+      faultThunkSymbol = gThunkDiagnostics[index].symbol;
+      break;
+    }
+  }
   const auto instructionDomain = guestRip ? "guest_image" : "host_runtime";
   const auto faultDomain = guestFault ? "guest_image" : "outside_guest_image";
   std::uint64_t guestStackFrames[16]{};
@@ -330,6 +345,7 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
       "\"guest_virtual_rip\":%llu,"
       "\"guest_virtual_fault\":%llu,\"instruction_domain\":\"%s\","
       "\"fault_domain\":\"%s\",\"fault_address_in_guest_image\":%s,"
+      "\"fault_hle_thunk_symbol\":\"%s\","
       "\"timestamp\":%llu}",
       static_cast<unsigned long>(record->ExceptionCode),
       gSessionId, gBuildCommit,
@@ -397,6 +413,7 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
       instructionDomain,
       faultDomain,
       guestFault ? "true" : "false",
+      faultThunkSymbol,
       static_cast<unsigned long long>(UnixSeconds()));
   if (length > 0) {
     if (length >= static_cast<int>(sizeof(payload))) {
@@ -591,6 +608,17 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
                                     executable_.parent_path() / L"RuntimeData");
   dispatcher_->ConfigureTrace(stateRoot / L"homebrew-last-hle.json", sessionId_);
   const auto bindings = dispatcher_->Bind(load_.pending_symbol_names);
+  gThunkDiagnosticCount.store(0, std::memory_order_release);
+  for (auto const &symbol : load_.pending_symbol_names) {
+    const auto count = gThunkDiagnosticCount.load(std::memory_order_relaxed);
+    if (count >= sizeof(gThunkDiagnostics) / sizeof(gThunkDiagnostics[0])) break;
+    auto &diagnostic = gThunkDiagnostics[count];
+    diagnostic.address = reinterpret_cast<std::uint64_t>(
+        dispatcher_->AddressFor(symbol));
+    std::snprintf(diagnostic.symbol, sizeof(diagnostic.symbol), "%s",
+                  symbol.c_str());
+    gThunkDiagnosticCount.store(count + 1, std::memory_order_release);
+  }
   Record("imports_bound", "imports=" +
       std::to_string(load_.pending_symbol_names.size()) +
       "; relocations=" +
