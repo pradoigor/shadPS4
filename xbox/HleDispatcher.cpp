@@ -290,6 +290,16 @@ bool IsCommittedGuestProcessRange(std::uint64_t address, std::size_t bytes,
 
 void HleDispatcher::ConfigureMainExports(ControlledLoadResult const& load,
                                          GuestMemory const& memory) {
+    if (load.tls_image_size && load.tls_virtual_address >= load.min_virtual_address &&
+        load.tls_init_image_size <= load.tls_image_size &&
+        load.tls_virtual_address - load.min_virtual_address <= load.private_image.size() &&
+        load.tls_init_image_size <= load.private_image.size() -
+            (load.tls_virtual_address - load.min_virtual_address)) {
+        mainTls_.size = static_cast<std::size_t>(load.tls_image_size);
+        const auto start = load.private_image.begin() +
+            (load.tls_virtual_address - load.min_virtual_address);
+        mainTls_.initial.assign(start, start + load.tls_init_image_size);
+    }
     for (auto const& symbol : load.exported_symbols)
         guestExports_.emplace(symbol.name,
                               memory.RuntimeAddress(symbol.address));
@@ -358,6 +368,11 @@ std::uint64_t HleDispatcher::LoadGuestModule(
                         "; bytes=" + std::to_string(load.private_image.size()));
             return OrbisEnoexec;
         }
+        const auto moduleId = 2 + guestModules_.size();
+        if (!ApplyTlsModuleRelocations(load, moduleId)) {
+            GraphicsLog("PRX: relocação TLS inválida: " + path);
+            return OrbisEnoexec;
+        }
         for (auto const& relocation : load.pending_symbol_relocations) {
             std::uint64_t target{};
             if (auto it = guestExports_.find(relocation.symbol);
@@ -392,6 +407,18 @@ std::uint64_t HleDispatcher::LoadGuestModule(
                              load.guest_segments, guestTlsSlot_);
         auto module = std::make_unique<GuestModule>();
         module->handle = 1000 + guestModules_.size();
+        if (load.tls_image_size) {
+            if (load.tls_virtual_address < load.min_virtual_address ||
+                load.tls_init_image_size > load.tls_image_size ||
+                load.tls_virtual_address - load.min_virtual_address > load.private_image.size() ||
+                load.tls_init_image_size > load.private_image.size() -
+                    (load.tls_virtual_address - load.min_virtual_address))
+                return OrbisEnoexec;
+            module->tls.size = static_cast<std::size_t>(load.tls_image_size);
+            const auto start = load.private_image.begin() +
+                (load.tls_virtual_address - load.min_virtual_address);
+            module->tls.initial.assign(start, start + load.tls_init_image_size);
+        }
         module->host = host;
         module->memory = std::make_unique<GuestMemory>();
         if (!module->memory->MapValidated(load.private_image,
@@ -542,7 +569,9 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "fclose") use(&LibcFclose);
     if (name == "fseek") use(&LibcFseek);
     if (name == "ftell") use(&LibcFtell);
+    if (name == "fread") use(&LibcFread);
     if (name == "sceFiosInitialize") use(&FiosInitialize);
+    if (name == "__tls_get_addr") use(&TlsGetAddr);
     if (name == "fprintf") use(&LibcFprintf);
     if (name == "vsnprintf") use(&LibcVsnprintf);
     if (name == "sceKernelGetModuleList") use(&KernelGetModuleList);
@@ -912,14 +941,21 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
          entry.name == "unity_mono_set_user_malloc_mutex" ||
          entry.name == "sceFiosInitialize" ||
          entry.name == "sceFiosIOFilterAdd" ||
+         entry.name == "sceFiosIOFilterPsarcDearchiver" ||
          entry.name == "sceFiosArchiveGetMountBufferSizeSync")) {
         for (auto const& [encoded, address] : self->guestExports_) {
             if (encoded == entry.encoded ||
                 (encoded.size() > entry.nid.size() &&
                  encoded.compare(0, entry.nid.size(), entry.nid) == 0 &&
                  encoded[entry.nid.size()] == '#')) {
-                result = InvokeGuestSysv3(reinterpret_cast<void*>(address),
-                                          frame->gpr[0], frame->gpr[1], frame->gpr[2]);
+                try {
+                    result = InvokeGuestSysv6(reinterpret_cast<void*>(address),
+                                              frame->gpr[0], frame->gpr[1], frame->gpr[2],
+                                              frame->gpr[3], frame->gpr[4], frame->gpr[5]);
+                } catch (std::exception const& error) {
+                    self->GraphicsLog(std::string("PRX: chamada falhou: ") + error.what());
+                    result = OrbisEnosys;
+                }
                 break;
             }
         }
@@ -2459,12 +2495,14 @@ std::uint64_t HleDispatcher::LibcFopen(
         const bool write = mode.front() != 'r' || mode.find('+') != std::string::npos;
         if (!dispatcher.ResolveGuestPath(path, write, host)) {
             GuestPosixErrno = 13;
+            dispatcher.GraphicsLog("fopen: caminho não resolvido: " + path);
             return 0;
         }
         std::FILE* stream = nullptr;
         const auto wideMode = std::wstring(mode.begin(), mode.end());
         if (_wfopen_s(&stream, host.c_str(), wideMode.c_str()) != 0 || !stream) {
             GuestPosixErrno = 2;
+            dispatcher.GraphicsLog("fopen: arquivo indisponível: " + path);
             return 0;
         }
         try {
@@ -2526,10 +2564,79 @@ std::uint64_t HleDispatcher::LibcFtell(
     return UINT64_MAX;
 }
 
+std::uint64_t HleDispatcher::LibcFread(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    const auto itemSize = frame.gpr[1];
+    const auto itemCount = frame.gpr[2];
+    if (!itemSize || !itemCount) return 0;
+    if (itemSize > SIZE_MAX / itemCount) {
+        GuestPosixErrno = 75;
+        return 0;
+    }
+    const auto bytes = static_cast<std::size_t>(itemSize * itemCount);
+    auto* destination = WritablePointer(dispatcher, frame, frame.gpr[0], bytes);
+    if (!destination) {
+        GuestPosixErrno = 14;
+        return 0;
+    }
+    auto* stream = reinterpret_cast<std::FILE*>(frame.gpr[3]);
+    std::scoped_lock lock(dispatcher.fileStreamMutex_);
+    if (!dispatcher.guestFileStreams_.contains(stream)) {
+        GuestPosixErrno = 9;
+        return 0;
+    }
+    const auto read = std::fread(destination, static_cast<std::size_t>(itemSize),
+                                 static_cast<std::size_t>(itemCount), stream);
+    if (std::ferror(stream)) GuestPosixErrno = errno;
+    return read;
+}
+
 std::uint64_t HleDispatcher::FiosInitialize(
     HleDispatcher& dispatcher, GuestCallFrame const&) noexcept {
     // The virtual mount tree is prepared by ConfigureFileSystem before entry.
     return dispatcher.dataRoot_.empty() ? OrbisEnosys : 0;
+}
+
+std::uint64_t HleDispatcher::TlsGetAddr(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    struct TlsIndex { std::uint64_t module, offset; };
+    auto* source = ReadablePointer(dispatcher, frame, frame.gpr[0], sizeof(TlsIndex));
+    if (!source) return 0;
+    TlsIndex index{};
+    std::memcpy(&index, source, sizeof(index));
+    if (index.module == 0) {
+        if (dispatcher.memory_ && dispatcher.memory_->Translate(
+                frame.gpr[0], sizeof(TlsIndex))) index.module = 1;
+        for (std::size_t module = 0;
+             index.module == 0 && module < dispatcher.guestModules_.size(); ++module) {
+            if (dispatcher.guestModules_[module]->memory->Translate(
+                    frame.gpr[0], sizeof(TlsIndex))) {
+                index.module = module + 2;
+                break;
+            }
+        }
+    }
+    TlsImage const* image = nullptr;
+    if (index.module == 1) image = &dispatcher.mainTls_;
+    else if (index.module >= 2 && index.module - 2 < dispatcher.guestModules_.size())
+        image = &dispatcher.guestModules_[index.module - 2]->tls;
+    if (!image || image->size == 0 || index.offset >= image->size) {
+        dispatcher.GraphicsLog("TLS: módulo ou deslocamento inválido: " +
+            std::to_string(index.module) + "/" + std::to_string(index.offset));
+        return 0;
+    }
+    try {
+        thread_local std::unordered_map<std::uint64_t, std::vector<std::uint8_t>> blocks;
+        auto [found, inserted] = blocks.try_emplace(index.module);
+        if (inserted) {
+            found->second.resize(image->size);
+            if (!image->initial.empty())
+                std::memcpy(found->second.data(), image->initial.data(), image->initial.size());
+        }
+        return reinterpret_cast<std::uint64_t>(found->second.data() + index.offset);
+    } catch (...) {
+        return 0;
+    }
 }
 
 std::uint64_t HleDispatcher::LibcFprintf(

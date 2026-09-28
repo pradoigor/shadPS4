@@ -99,11 +99,17 @@ public:
     std::size_t unresolvedCount() const noexcept;
 
 private:
+    struct TlsImage {
+        std::vector<std::uint8_t> initial;
+        std::size_t size{};
+    };
+    TlsImage mainTls_;
     struct GuestModule {
         std::uint64_t handle{};
         std::filesystem::path host;
         std::unique_ptr<GuestMemory> memory;
         std::unordered_map<std::string, std::uint64_t> exports;
+        TlsImage tls;
     };
     std::vector<std::unique_ptr<GuestModule>> guestModules_;
     std::unordered_map<std::string, std::uint64_t> guestExports_;
@@ -211,7 +217,9 @@ private:
     static std::uint64_t LibcFclose(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t LibcFseek(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t LibcFtell(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t LibcFread(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t FiosInitialize(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t TlsGetAddr(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t LibcFprintf(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t LibcVsnprintf(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelGetModuleList(HleDispatcher&, GuestCallFrame const&) noexcept;

@@ -62,6 +62,9 @@ struct ControlledLoadResult {
   std::uint64_t inner_checksum{};
   std::uint64_t dynamic_segments{};
   std::uint64_t tls_segments{};
+  std::uint64_t tls_virtual_address{};
+  std::uint64_t tls_init_image_size{};
+  std::uint64_t tls_image_size{};
   std::uint64_t dynamic_entries{};
   std::uint64_t rela_entries{};
   std::uint64_t jmp_rela_entries{};
@@ -114,6 +117,7 @@ struct ControlledLoadResult {
   std::vector<std::string> needed_module_names;
   std::vector<PendingSymbolRelocation> pending_symbol_relocations;
   std::vector<PendingRelativeRelocation> pending_relative_relocations;
+  std::vector<std::uint64_t> pending_tls_module_relocations;
   std::vector<GuestSegmentInfo> guest_segments;
   std::vector<GuestExportSymbol> exported_symbols;
   // Private, non-executable image used only for relocation dry-runs.
@@ -131,6 +135,8 @@ struct ControlledLoadResult {
 // Validates an ELF/SELF and maps only validated PT_LOAD bytes into a private,
 // non-executable buffer. It never transfers control to the input file.
 ControlledLoadResult LoadControlled(std::filesystem::path const &path);
+bool ApplyTlsModuleRelocations(ControlledLoadResult& load,
+                               std::uint64_t moduleId) noexcept;
 
 struct GeneratedExecutionResult {
   bool passed{};

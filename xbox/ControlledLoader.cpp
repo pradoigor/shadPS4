@@ -192,6 +192,12 @@ ControlledLoadResult LoadElf(Reader &reader, elf_header const &header,
     if (program.p_type == PT_TLS) {
       result.has_tls = true;
       ++result.tls_segments;
+      Require(result.tls_segments == 1 && program.p_filesz <= program.p_memsz &&
+                  program.p_memsz <= 1024 * 1024,
+              "Imagem TLS ELF inválida ou grande demais.");
+      result.tls_virtual_address = program.p_vaddr;
+      result.tls_init_image_size = program.p_filesz;
+      result.tls_image_size = program.p_memsz;
     }
     if (program.p_type != PT_DYNAMIC)
       continue;
@@ -544,6 +550,7 @@ ControlledLoadResult LoadElf(Reader &reader, elf_header const &header,
             relocation.rel_offset, relocation.rel_addend});
         ++result.relative_relocations_applied;
       } else if (relocation.GetType() == R_X86_64_DTPMOD64) {
+        result.pending_tls_module_relocations.push_back(relocation.rel_offset);
         ++result.tls_relocations_pending;
       } else if (relocation.GetType() == R_X86_64_64 ||
                  relocation.GetType() == R_X86_64_GLOB_DAT ||
@@ -749,6 +756,9 @@ ControlledLoadResult LoadSelf(Reader &reader, self_header const &header) {
   result.max_virtual_address = inner.max_virtual_address;
   result.dynamic_segments = inner.dynamic_segments;
   result.tls_segments = inner.tls_segments;
+  result.tls_virtual_address = inner.tls_virtual_address;
+  result.tls_init_image_size = inner.tls_init_image_size;
+  result.tls_image_size = inner.tls_image_size;
   result.dynamic_entries = inner.dynamic_entries;
   result.rela_entries = inner.rela_entries;
   result.jmp_rela_entries = inner.jmp_rela_entries;
@@ -769,6 +779,8 @@ ControlledLoadResult LoadSelf(Reader &reader, self_header const &header) {
       std::move(inner.pending_symbol_relocations);
   result.pending_relative_relocations =
       std::move(inner.pending_relative_relocations);
+  result.pending_tls_module_relocations =
+      std::move(inner.pending_tls_module_relocations);
   result.guest_segments = std::move(inner.guest_segments);
   result.exported_symbols = std::move(inner.exported_symbols);
   result.private_image = std::move(inner.private_image);
@@ -825,6 +837,20 @@ ControlledLoadResult LoadControlled(std::filesystem::path const &path) {
     return LoadSelf(reader, header);
   }
   throw std::runtime_error("Arquivo não é ELF ou SELF PS4.");
+}
+
+bool ApplyTlsModuleRelocations(ControlledLoadResult& load,
+                               std::uint64_t moduleId) noexcept {
+  if (moduleId == 0) return false;
+  for (const auto target : load.pending_tls_module_relocations) {
+    if (target < load.min_virtual_address ||
+        load.private_image.size() < sizeof(moduleId) ||
+        target - load.min_virtual_address > load.private_image.size() - sizeof(moduleId))
+      return false;
+    std::memcpy(load.private_image.data() + target - load.min_virtual_address,
+                &moduleId, sizeof(moduleId));
+  }
+  return true;
 }
 
 GeneratedExecutionResult

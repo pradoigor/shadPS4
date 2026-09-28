@@ -575,6 +575,8 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
       load_.relocation_targets_outside_segments != 0 ||
       load_.symbol_relocations_invalid != 0)
     throw std::runtime_error("A imagem contém relocações que este runtime ainda não aceita.");
+  if (!ApplyTlsModuleRelocations(load_, 1))
+    throw std::runtime_error("Relocação TLS do executável fora da imagem.");
 
   dispatcher_ = std::make_unique<HleDispatcher>();
   dispatcher_->AttachGraphics(graphics);
