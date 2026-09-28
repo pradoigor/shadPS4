@@ -402,11 +402,15 @@ std::uint64_t Call_glViewport(HleDispatcher& d,
 }
 
 std::uint64_t Call_sceKernelLoadStartModule(HleDispatcher& d, GuestCallFrame const& f) noexcept {
+    try {
     auto* graphics = d.Graphics();
     if (!graphics || !graphics->Ready()) return OrbisEnosys;
     std::string path;
     if (!d.GuestString(f.gpr[0], path, 512)) return OrbisEnoent;
-    auto const base = std::filesystem::path(path).filename().string();
+    // The guest path may contain bytes that cannot be converted to a host
+    // filesystem path. Module recognition needs only its final component.
+    auto const separator = path.find_last_of("/\\");
+    auto const base = path.substr(separator == std::string::npos ? 0 : separator + 1);
     if (base == "libScePigletv2VSH.sprx" || base == "libScePigletv2VSH.prx") return 63;
     if (base == "libSceShaccVSH.sprx" || base == "libSceShaccVSH.prx") return 64;
     if (base == "rsa.prx" || base == "rsa.sprx") {
@@ -430,6 +434,10 @@ std::uint64_t Call_sceKernelLoadStartModule(HleDispatcher& d, GuestCallFrame con
         d.GraphicsLog("HLE module: jb.prx da Store ausente em " + path);
     }
     return OrbisEnoent;
+    } catch (...) {
+        d.GraphicsLog("HLE module: erro ao analisar caminho do módulo convidado");
+        return OrbisEnoent;
+    }
 }
 std::uint64_t Call_scePigletSetConfigurationVSH(HleDispatcher& d, GuestCallFrame const& f) noexcept {
     return d.Graphics() && d.Graphics()->Ready() &&

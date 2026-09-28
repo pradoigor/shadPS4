@@ -339,6 +339,8 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "memalign") use(&LibcMemalign);
     if (name == "malloc") use(&LibcMalloc);
     if (name == "free") use(&LibcFree);
+    if (name == "snprintf") use(&LibcSnprintf);
+    if (name == "printf") use(&LibcPrintf);
     if (name == "__cxa_guard_acquire") use(&CxaGuardAcquire);
     if (name == "__cxa_guard_release") use(&CxaGuardRelease);
     if (name == "__cxa_guard_abort") use(&CxaGuardAbort);
@@ -1659,6 +1661,130 @@ std::uint64_t HleDispatcher::LibcFree(
     adjusted.gpr[1] = frame.gpr[0];
     adjusted.gpr[0] = 0;
     return MspaceFree(dispatcher, adjusted);
+}
+
+namespace {
+bool FormatGuestText(HleDispatcher& dispatcher, GuestCallFrame const& frame,
+                     std::uint64_t formatAddress, unsigned firstArgument,
+                     std::string& output) noexcept {
+    try {
+        std::string format;
+        if (!dispatcher.GuestString(formatAddress, format, 4096)) return false;
+        unsigned argument = firstArgument;
+        auto nextArgument = [&](std::uint64_t& value) {
+            if (argument < 6) { value = frame.gpr[argument++]; return true; }
+            const auto slot = argument++ - 6;
+            if (slot > 32 || frame.guest_stack > UINT64_MAX - 8 - slot * 8)
+                return false;
+            auto* address = static_cast<std::uint64_t const*>(dispatcher.GuestReadable(
+                frame, frame.guest_stack + 8 + slot * 8, sizeof(value)));
+            if (!address) return false;
+            value = *address;
+            return true;
+        };
+        output.clear();
+        for (std::size_t index = 0; index < format.size();) {
+            if (output.size() > 16384) return false;
+            if (format[index] != '%') { output.push_back(format[index++]); continue; }
+            ++index;
+            if (index < format.size() && format[index] == '%') {
+                output.push_back('%'); ++index; continue;
+            }
+            std::string spec{"%"};
+            while (index < format.size() &&
+                   std::strchr("-+ #0", format[index])) spec.push_back(format[index++]);
+            for (int field = 0; field != 2; ++field) {
+                if (field == 1) {
+                    if (index >= format.size() || format[index] != '.') break;
+                    spec.push_back(format[index++]);
+                }
+                if (index < format.size() && format[index] == '*') {
+                    std::uint64_t width{};
+                    if (!nextArgument(width) || static_cast<std::int64_t>(width) < 0 ||
+                        width > 4096) return false;
+                    spec += std::to_string(width); ++index;
+                } else {
+                    unsigned width{};
+                    while (index < format.size() && format[index] >= '0' &&
+                           format[index] <= '9') {
+                        width = width * 10 + format[index++] - '0';
+                        if (width > 4096) return false;
+                    }
+                    if (width) spec += std::to_string(width);
+                }
+            }
+            while (index < format.size() && std::strchr("hljzt", format[index]))
+                ++index;
+            if (index >= format.size()) return false;
+            const auto conversion = format[index++];
+            std::uint64_t value{};
+            if (!nextArgument(value)) return false;
+            char buffer[8192]{};
+            int count = -1;
+            if (conversion == 's') {
+                std::string source;
+                if (value == 0) source = "(null)";
+                else if (!dispatcher.GuestString(value, source, 4096)) return false;
+                spec.push_back('s');
+                count = std::snprintf(buffer, sizeof(buffer), spec.c_str(), source.c_str());
+            } else if (conversion == 'd' || conversion == 'i') {
+                spec += "ll"; spec.push_back(conversion);
+                count = std::snprintf(buffer, sizeof(buffer), spec.c_str(),
+                                      static_cast<long long>(value));
+            } else if (conversion == 'u' || conversion == 'x' ||
+                       conversion == 'X' || conversion == 'o') {
+                spec += "ll"; spec.push_back(conversion);
+                count = std::snprintf(buffer, sizeof(buffer), spec.c_str(),
+                                      static_cast<unsigned long long>(value));
+            } else if (conversion == 'p') {
+                spec.push_back('p');
+                count = std::snprintf(buffer, sizeof(buffer), spec.c_str(),
+                                      reinterpret_cast<void*>(value));
+            } else if (conversion == 'c') {
+                spec.push_back('c');
+                count = std::snprintf(buffer, sizeof(buffer), spec.c_str(),
+                                      static_cast<int>(value));
+            } else return false;
+            if (count < 0 || count >= static_cast<int>(sizeof(buffer)) ||
+                output.size() + static_cast<std::size_t>(count) > 16384)
+                return false;
+            output.append(buffer, static_cast<std::size_t>(count));
+        }
+        return true;
+    } catch (...) { return false; }
+}
+}
+
+std::uint64_t HleDispatcher::LibcSnprintf(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    std::string output;
+    if (!FormatGuestText(dispatcher, frame, frame.gpr[2], 3, output)) {
+        if (frame.gpr[1] != 0) {
+            if (auto* destination = static_cast<char*>(WritablePointer(
+                    dispatcher, frame, frame.gpr[0], 1))) *destination = '\0';
+        }
+        dispatcher.GraphicsLog("HLE snprintf: formato convidado não suportado");
+        return UINT64_MAX;
+    }
+    if (frame.gpr[1] != 0) {
+        const auto bytes = static_cast<std::size_t>((std::min<std::uint64_t>)(
+            frame.gpr[1] - 1, output.size()));
+        auto* destination = static_cast<char*>(WritablePointer(
+            dispatcher, frame, frame.gpr[0], bytes + 1));
+        if (!destination) return UINT64_MAX;
+        std::memcpy(destination, output.data(), bytes);
+        destination[bytes] = '\0';
+    }
+    return output.size();
+}
+
+std::uint64_t HleDispatcher::LibcPrintf(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    std::string output;
+    if (!FormatGuestText(dispatcher, frame, frame.gpr[0], 1, output))
+        return UINT64_MAX;
+    dispatcher.GraphicsLog(output);
+    return output.size();
 }
 
 std::uint64_t HleDispatcher::CxaGuardAcquire(

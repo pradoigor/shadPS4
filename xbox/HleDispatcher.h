@@ -155,6 +155,8 @@ private:
     static std::uint64_t LibcMemalign(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t LibcMalloc(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t LibcFree(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t LibcSnprintf(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t LibcPrintf(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t CxaGuardAcquire(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t CxaGuardRelease(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t CxaGuardAbort(HleDispatcher&, GuestCallFrame const&) noexcept;
