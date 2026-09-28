@@ -1,19 +1,11 @@
 # Diagnóstico do runtime UWP
 
 Ao iniciar um homebrew, o aplicativo cria uma sessão identificada por horário,
-contador do sistema e processo. Os arquivos ficam em `LocalState`:
-
-- `homebrew-runtime.json`: último estágio ou primeira exceção capturada.
-- `homebrew-session-<id>.jsonl`: estágios persistidos em ordem, inclusive a
-  exceção, sem substituir as sessões anteriores.
-- `homebrew-hle-trace.jsonl`: chamadas HLE da tentativa mais recente.
-- `homebrew-hle-<id>.jsonl`: cópia da sequência HLE associada à sessão.
-- `homebrew-console-<id>.log`: saída dos descritores 0, 1 e 2, limitada a 1 MiB.
-
-O botão **Exportar** inclui esses dados em `homebrew_debug` dentro do
-`report-export-<horário>.json`, incluindo a última chamada HLE e a saída de
-console quando disponíveis. Ele limita a inclusão a 8192 eventos HLE;
-os arquivos originais permanecem disponíveis pelo Device Portal.
+contador do sistema e processo. Um único arquivo
+`LocalState/homebrew-report-<id>.jsonl` reúne os estágios, as chamadas HLE, a
+saída de console (limitada a 1 MiB) e a exceção. Cada linha é um objeto JSON.
+O botão **Exportar** informa o nome desse arquivo para baixar pelo Device Portal.
+Sessões anteriores permanecem disponíveis em seus próprios arquivos.
 
 Uma exceção registrada inclui commit, ID da sessão, código e tipo de acesso,
 endereço da falha, RIP virtual do convidado, bytes da instrução, registradores

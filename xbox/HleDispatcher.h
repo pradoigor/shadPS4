@@ -209,6 +209,9 @@ private:
     static std::uint64_t LibcMallocStatsFast(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t LibcFopen(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t LibcFclose(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t LibcFseek(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t LibcFtell(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t FiosInitialize(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t LibcFprintf(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t LibcVsnprintf(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelGetModuleList(HleDispatcher&, GuestCallFrame const&) noexcept;
@@ -304,6 +307,8 @@ private:
     static std::uint64_t PthreadAttrDestroy(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t PthreadAttrSetDetachState(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t PthreadAttrSetStackSize(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadAttrSetInheritSched(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadEqual(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t PthreadCreate(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t PthreadJoin(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t PthreadDetach(HleDispatcher&, GuestCallFrame const&) noexcept;
@@ -368,10 +373,6 @@ private:
     std::unordered_map<std::int32_t, std::uintptr_t> sockets_;
     std::int32_t nextSocketDescriptor_{256};
     std::filesystem::path tracePath_;
-    std::filesystem::path traceHistoryPath_;
-    std::filesystem::path traceArchivePath_;
-    std::size_t traceArchiveBytes_{};
-    std::filesystem::path consolePath_;
     std::mutex consoleMutex_;
     std::size_t consoleBytes_{};
     void AppendConsole(void const* bytes, std::size_t length) noexcept;
@@ -460,6 +461,7 @@ private:
     std::uint32_t nextKernelSemaphoreId_{1};
     struct GuestThreadAttribute {
         bool detached{};
+        bool inheritSched{};
         std::size_t stackSize{1024 * 1024};
     };
     struct GuestThread {

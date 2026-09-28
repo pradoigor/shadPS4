@@ -42,7 +42,6 @@ private:
   };
 
   std::filesystem::path executable_;
-  std::filesystem::path stateFile_;
   std::filesystem::path sessionFile_;
   std::string sessionId_;
   std::string guestPath_;

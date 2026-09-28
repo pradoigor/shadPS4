@@ -2,6 +2,7 @@
 #include "HomebrewRuntime.h"
 
 #include "BuildInfo.h"
+#include "DiagnosticReport.h"
 #include "GuestTlsPatch.h"
 #include "SysvThunk.h"
 #include "core/platform_memory.h"
@@ -20,7 +21,6 @@
 namespace Lab {
 namespace {
 
-std::filesystem::path gCrashStateFile;
 std::filesystem::path gCrashSessionFile;
 char gSessionId[64]{};
 char gBuildCommit[64]{};
@@ -76,24 +76,6 @@ bool Readable(MEMORY_BASIC_INFORMATION const& information, std::uint64_t address
   auto const begin = reinterpret_cast<std::uint64_t>(information.BaseAddress);
   return address >= begin && bytes <= information.RegionSize &&
          address - begin <= information.RegionSize - bytes;
-}
-
-void WriteCrashFile(std::filesystem::path const& path, char const* payload,
-                    DWORD length, DWORD disposition) noexcept {
-  if (path.empty()) return;
-  CREATEFILE2_EXTENDED_PARAMETERS parameters{sizeof(parameters)};
-  parameters.dwFileAttributes = FILE_ATTRIBUTE_NORMAL;
-  HANDLE file = CreateFile2(path.c_str(), GENERIC_WRITE,
-                            FILE_SHARE_READ, disposition, &parameters);
-  if (file == INVALID_HANDLE_VALUE) return;
-  if (disposition == OPEN_ALWAYS)
-    SetFilePointer(file, 0, nullptr, FILE_END);
-  DWORD written{};
-  WriteFile(file, payload, length, &written, nullptr);
-  if (disposition == OPEN_ALWAYS)
-    WriteFile(file, "\n", 1, &written, nullptr);
-  FlushFileBuffers(file);
-  CloseHandle(file);
 }
 
 std::uint32_t PatchFsTcbReads(std::vector<std::uint8_t>& image,
@@ -205,7 +187,7 @@ std::string BridgeStoreRootCallback(std::vector<std::uint8_t>& image,
 
 int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
   if (!exception || !exception->ExceptionRecord || !exception->ContextRecord ||
-      gCrashStateFile.empty())
+      gCrashSessionFile.empty())
     return EXCEPTION_EXECUTE_HANDLER;
   // A vectored handler sees the original fault. The later SEH filter must not
   // replace that evidence with a second exception during unwinding.
@@ -425,8 +407,8 @@ int RecordGuestException(EXCEPTION_POINTERS *exception) noexcept {
           gSessionId, gBuildCommit);
     }
     if (length > 0 && length < static_cast<int>(sizeof(payload))) {
-      WriteCrashFile(gCrashStateFile, payload, static_cast<DWORD>(length), CREATE_ALWAYS);
-      WriteCrashFile(gCrashSessionFile, payload, static_cast<DWORD>(length), OPEN_ALWAYS);
+      AppendDiagnosticLine(gCrashSessionFile,
+                           std::string_view(payload, static_cast<std::size_t>(length)));
     }
   }
   return EXCEPTION_EXECUTE_HANDLER;
@@ -527,12 +509,8 @@ void HomebrewRuntime::Record(std::string const &stage,
                          "\",\"detail\":\"" + EscapeJson(detail) +
                          "\",\"session_id\":\"" + sessionId_ +
                          "\",\"build_commit\":\"" + gBuildCommit +
-                         "\",\"session_file\":\"" +
+                         "\",\"report_file\":\"" +
                          EscapeJson(sessionFile_.filename().string()) +
-                         "\",\"hle_trace_file\":\"homebrew-hle-" +
-                         sessionId_ + ".jsonl" +
-                         "\",\"console_file\":\"homebrew-console-" +
-                         sessionId_ + ".log" +
                          "\",\"thread_id\":" + std::to_string(GetCurrentThreadId()) +
                          ",\"guest_entry\":" + std::to_string(load_.entry) +
                          ",\"guest_image_base\":" +
@@ -542,18 +520,7 @@ void HomebrewRuntime::Record(std::string const &stage,
                          ",\"patched_fs_reads\":" +
                          std::to_string(patchedFsReads_) +
                          ",\"timestamp\":" + std::to_string(UnixSeconds()) + "}";
-    auto temporary = stateFile_;
-    temporary += L".tmp";
-    std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-    output << payload;
-    output.flush();
-    output.close();
-    std::error_code ignored;
-    std::filesystem::remove(stateFile_, ignored);
-    std::filesystem::rename(temporary, stateFile_);
-    std::ofstream session(sessionFile_, std::ios::binary | std::ios::app);
-    session << payload << '\n';
-    session.flush();
+    AppendDiagnosticLine(sessionFile_, payload);
   } catch (...) {
   }
 }
@@ -574,11 +541,10 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
   }
 
   executable_ = std::move(executable);
-  stateFile_ = stateRoot / L"homebrew-runtime.json";
   sessionId_ = std::to_string(UnixSeconds()) + "-" +
                std::to_string(GetTickCount64()) + "-" +
                std::to_string(GetCurrentProcessId());
-  sessionFile_ = stateRoot / ("homebrew-session-" + sessionId_ + ".jsonl");
+  sessionFile_ = stateRoot / ("homebrew-report-" + sessionId_ + ".jsonl");
   std::snprintf(gSessionId, sizeof(gSessionId), "%s", sessionId_.c_str());
   std::size_t commitLength{};
   while (XBOX_BUILD_COMMIT[commitLength] && commitLength < sizeof(gBuildCommit) - 1) {
@@ -614,7 +580,7 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
   dispatcher_->AttachGraphics(graphics);
   dispatcher_->ConfigureFileSystem(executable_.parent_path(),
                                     executable_.parent_path() / L"RuntimeData");
-  dispatcher_->ConfigureTrace(stateRoot / L"homebrew-last-hle.json", sessionId_);
+  dispatcher_->ConfigureTrace(sessionFile_, sessionId_);
   const auto bindings = dispatcher_->Bind(load_.pending_symbol_names,
                                            load_.pending_data_symbols);
   gThunkDiagnosticCount.store(0, std::memory_order_release);
@@ -716,7 +682,6 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
   gGuestVirtualBase = load_.min_virtual_address;
   gGuestImageSize = load_.private_image.size();
   Record("ready", "Imagem real relocada; iniciando o ponto de entrada.");
-  gCrashStateFile = stateFile_;
   running_.store(true);
   worker_ = std::thread([this] { RunEntry(); });
 }

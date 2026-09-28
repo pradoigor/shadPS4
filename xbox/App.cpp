@@ -848,102 +848,29 @@ struct App : ApplicationT<App> {
         return false;
     }
     void ExportReport() {
-        if (!Save()) return;
         try {
-            auto exported = report->Json();
-            Windows::Data::Json::JsonObject debug;
-            auto directory = std::filesystem::path(report->directory);
-            auto runtimePath = directory / L"homebrew-runtime.json";
-            std::wstring sessionName;
-            std::wstring sessionId;
-            if (std::filesystem::is_regular_file(runtimePath)) {
-                std::ifstream input(runtimePath, std::ios::binary);
-                std::string raw{std::istreambuf_iterator<char>(input), {}};
-                auto runtime = Windows::Data::Json::JsonObject::Parse(to_hstring(raw));
-                sessionName = std::wstring(runtime.GetNamedString(L"session_file", L""));
-                sessionId = std::wstring(runtime.GetNamedString(L"session_id", L""));
-                if (sessionName.empty() && !sessionId.empty())
-                    sessionName = L"homebrew-session-" + sessionId + L".jsonl";
-                debug.SetNamedValue(L"runtime", runtime);
-            }
-            auto includeLines = [&](wchar_t const* field, std::filesystem::path const& path) {
-                Windows::Data::Json::JsonArray events;
-                if (std::filesystem::is_regular_file(path)) {
-                    std::ifstream input(path, std::ios::binary);
-                    std::string line;
-                    std::deque<Windows::Data::Json::JsonObject> recent;
-                    while (std::getline(input, line)) {
-                        try {
-                            recent.push_back(Windows::Data::Json::JsonObject::Parse(to_hstring(line)));
-                            if (recent.size() > 8192) recent.pop_front();
-                        } catch (...) {}
-                    }
-                    for (auto const& event : recent) events.Append(event);
-                }
-                debug.SetNamedValue(field, events);
-            };
-            auto includeRaw = [&](wchar_t const* field, std::filesystem::path const& path) {
-                if (!std::filesystem::is_regular_file(path)) return;
-                std::ifstream input(path, std::ios::binary);
-                std::string raw{std::istreambuf_iterator<char>(input), {}};
-                debug.SetNamedValue(field,
-                    Windows::Data::Json::JsonValue::CreateStringValue(to_hstring(raw)));
-            };
-            includeLines(L"hle_trace", directory / L"homebrew-hle-trace.jsonl");
-            includeRaw(L"hle_trace_jsonl", directory / L"homebrew-hle-trace.jsonl");
-            if (!sessionId.empty()) {
-                const auto archive = directory / (L"homebrew-hle-" + sessionId + L".jsonl");
-                includeRaw(L"hle_archive_jsonl", archive);
-                auto previous = archive;
-                previous += L".previous";
-                includeRaw(L"hle_archive_previous_jsonl", previous);
-            }
-            if (!sessionName.empty()) {
-                includeLines(L"session_events", directory / std::filesystem::path(sessionName).filename());
-                includeRaw(L"session_jsonl", directory / std::filesystem::path(sessionName).filename());
-            }
-            auto lastHle = directory / L"homebrew-last-hle.json";
-            auto anglePath = directory / L"angle-video.json";
-            if (std::filesystem::is_regular_file(anglePath)) {
-                std::ifstream input(anglePath, std::ios::binary);
-                std::string raw{std::istreambuf_iterator<char>(input), {}};
-                exported.SetNamedValue(L"angle_video", Windows::Data::Json::JsonObject::Parse(to_hstring(raw)));
-            }
-            if (std::filesystem::is_regular_file(lastHle)) {
-                try {
-                    std::ifstream input(lastHle, std::ios::binary);
-                    std::string raw{std::istreambuf_iterator<char>(input), {}};
-                    debug.SetNamedValue(L"last_hle", Windows::Data::Json::JsonObject::Parse(to_hstring(raw)));
-                } catch (...) {}
-            }
-            if (!sessionId.empty()) {
-                auto console = directory / (L"homebrew-console-" + sessionId + L".log");
-                if (std::filesystem::is_regular_file(console)) {
-                    std::ifstream input(console, std::ios::binary);
-                    std::string raw{std::istreambuf_iterator<char>(input), {}};
-                    try {
-                        debug.SetNamedValue(L"console_log",
-                            Windows::Data::Json::JsonValue::CreateStringValue(to_hstring(raw)));
-                    } catch (...) {}
+            const auto directory = std::filesystem::path(report->directory);
+            std::filesystem::path latest;
+            std::filesystem::file_time_type newest{};
+            for (const auto& entry : std::filesystem::directory_iterator(directory)) {
+                if (!entry.is_regular_file()) continue;
+                const auto name = entry.path().filename().wstring();
+                if (!name.starts_with(L"homebrew-report-") ||
+                    entry.path().extension() != L".jsonl") continue;
+                const auto modified = entry.last_write_time();
+                if (latest.empty() || modified > newest) {
+                    latest = entry.path();
+                    newest = modified;
                 }
             }
-            exported.SetNamedValue(L"homebrew_debug", debug);
-            std::wstring safeSessionId;
-            for (const auto character : sessionId) {
-                if ((character >= L'0' && character <= L'9') || character == L'-')
-                    safeSessionId.push_back(character);
-                if (safeSessionId.size() == 64) break;
+            if (latest.empty()) {
+                SetNotice(L"Nenhum relatório de execução foi gerado ainda.");
+                return;
             }
-            if (safeSessionId.empty())
-                safeSessionId = std::to_wstring(static_cast<uint64_t>(Lab::Now()));
-            const auto name = L"homebrew-report-" + safeSessionId + L".json";
-            Lab::WriteDurable(report->directory + L"\\" + name, to_string(exported.Stringify()));
-            SetNotice(L"Relatório completo em um arquivo: LocalState\\" + name +
-                      L". Baixe somente este JSON pelo Device Portal.");
-        } catch (hresult_error const& e) {
-            SetNotice(L"Falha na exportação: " + std::wstring(e.message()));
+            SetNotice(L"Relatório único em LocalState\\" + latest.filename().wstring() +
+                      L". Baixe este arquivo pelo Device Portal.");
         } catch (std::exception const& e) {
-            SetNotice(L"Falha na exportação: " + std::wstring(to_hstring(e.what())));
+            SetNotice(L"Falha ao localizar relatório: " + std::wstring(to_hstring(e.what())));
         }
     }
     void GoBack() {
@@ -1403,19 +1330,9 @@ struct App : ApplicationT<App> {
                     Find<Border>(L"AngleLoadingView").Visibility(Visibility::Collapsed);
                     Find<Border>(L"AngleTestControls").Visibility(Visibility::Visible);
                     Find<Button>(L"CloseAngleTest").IsEnabled(true);
-                    auto statePath = std::filesystem::path(report->directory) / L"homebrew-runtime.json";
-                    try {
-                        std::ifstream input(statePath, std::ios::binary);
-                        std::string raw{std::istreambuf_iterator<char>(input), {}};
-                        auto state = Windows::Data::Json::JsonObject::Parse(to_hstring(raw));
-                        auto detail = std::wstring(state.GetNamedString(L"detail", L"O processo terminou."));
-                        SetNotice(L"O conteúdo foi encerrado. Consulte Configurações para exportar o relatório, se necessário.");
-                        Find<TextBlock>(L"AngleStatus").Text(L"Conteúdo encerrado. " + detail +
-                            L" Pressione B para voltar à tela anterior.");
-                    } catch (...) {
-                        SetNotice(L"O conteúdo foi encerrado. Abra Configurações para exportar o relatório, se necessário.");
-                        Find<TextBlock>(L"AngleStatus").Text(L"Conteúdo encerrado. Pressione B para voltar à tela anterior.");
-                    }
+                    SetNotice(L"O conteúdo foi encerrado. Baixe o arquivo homebrew-report da sessão no Device Portal.");
+                    Find<TextBlock>(L"AngleStatus").Text(
+                        L"Conteúdo encerrado. Pressione B para voltar à tela anterior.");
                 }
             });
             timer.Start();

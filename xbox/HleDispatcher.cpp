@@ -2,6 +2,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include "HleDispatcher.h"
+#include "DiagnosticReport.h"
 #include "GuestGraphics.h"
 #include "GuestFreeType.h"
 #include "GuestDevices.h"
@@ -31,6 +32,8 @@
 #include <thread>
 #include <cstdio>
 #include <ctime>
+#include <cerrno>
+#include <sstream>
 
 namespace Lab {
 namespace {
@@ -537,6 +540,9 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
         name == "_sceLibcMallocStatsFast") use(&LibcMallocStatsFast);
     if (name == "fopen") use(&LibcFopen);
     if (name == "fclose") use(&LibcFclose);
+    if (name == "fseek") use(&LibcFseek);
+    if (name == "ftell") use(&LibcFtell);
+    if (name == "sceFiosInitialize") use(&FiosInitialize);
     if (name == "fprintf") use(&LibcFprintf);
     if (name == "vsnprintf") use(&LibcVsnprintf);
     if (name == "sceKernelGetModuleList") use(&KernelGetModuleList);
@@ -670,6 +676,9 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
         use(&PthreadAttrSetDetachState);
     if (name == "pthread_attr_setstacksize" || name == "scePthreadAttrSetstacksize")
         use(&PthreadAttrSetStackSize);
+    if (name == "pthread_attr_setinheritsched" || name == "scePthreadAttrSetinheritsched")
+        use(&PthreadAttrSetInheritSched);
+    if (name == "pthread_equal" || name == "scePthreadEqual") use(&PthreadEqual);
     if (name == "pthread_create" || name == "scePthreadCreate") use(&PthreadCreate);
     if (name == "pthread_join" || name == "scePthreadJoin") use(&PthreadJoin);
     if (name == "pthread_detach" || name == "scePthreadDetach") use(&PthreadDetach);
@@ -800,33 +809,29 @@ void HleDispatcher::ConfigureFileSystem(std::filesystem::path appRoot,
 
 void HleDispatcher::ConfigureTrace(std::filesystem::path path,
                                    std::string const& sessionId) {
+    (void)sessionId;
     tracePath_ = std::move(path);
-    traceHistoryPath_ = tracePath_.parent_path() / L"homebrew-hle-trace.jsonl";
-    traceArchivePath_ = sessionId.empty()
-        ? std::filesystem::path{}
-        : tracePath_.parent_path() / ("homebrew-hle-" + sessionId + ".jsonl");
-    consolePath_ = sessionId.empty()
-        ? std::filesystem::path{}
-        : tracePath_.parent_path() / ("homebrew-console-" + sessionId + ".log");
     consoleBytes_ = 0;
-    traceArchiveBytes_ = 0;
-    std::error_code ignored;
-    std::filesystem::remove(tracePath_, ignored);
-    std::filesystem::remove(traceHistoryPath_, ignored);
 }
 
 void HleDispatcher::AppendConsole(void const* bytes, std::size_t length) noexcept {
     constexpr std::size_t ConsoleLimit = 1024 * 1024;
-    if (!bytes || length == 0 || consolePath_.empty()) return;
+    if (!bytes || length == 0 || tracePath_.empty()) return;
     try {
         std::scoped_lock lock(consoleMutex_);
         if (consoleBytes_ >= ConsoleLimit) return;
         const auto accepted = (std::min)(length, ConsoleLimit - consoleBytes_);
-        std::ofstream output(consolePath_, std::ios::binary | std::ios::app);
-        output.write(static_cast<char const*>(bytes),
-                     static_cast<std::streamsize>(accepted));
-        output.flush();
-        if (output) consoleBytes_ += accepted;
+        std::ostringstream output;
+        output << "{\"kind\":\"console\",\"text\":\"";
+        constexpr char hex[] = "0123456789abcdef";
+        for (std::size_t index = 0; index < accepted; ++index) {
+            const auto ch = static_cast<unsigned char>(static_cast<char const*>(bytes)[index]);
+            if (ch == '"' || ch == '\\') output << '\\' << static_cast<char>(ch);
+            else if (ch < 0x20) output << "\\u00" << hex[ch >> 4] << hex[ch & 15];
+            else output << static_cast<char>(ch);
+        }
+        output << "\"}";
+        if (AppendDiagnosticLine(tracePath_, output.str())) consoleBytes_ += accepted;
     } catch (...) {}
 }
 
@@ -873,9 +878,9 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
             return;
         try {
             std::scoped_lock traceLock(self->traceMutex_);
-            std::ofstream latest(self->tracePath_, std::ios::binary | std::ios::trunc);
+            std::ostringstream latest;
             auto write = [&](std::ostream& output) {
-                output << "{\"sequence\":" << sequence
+                output << "{\"kind\":\"hle\",\"sequence\":" << sequence
                        << ",\"thread\":" << thread
                        << ",\"phase\":\"" << phase
                        << "\",\"symbol\":\"" << entry.encoded
@@ -892,45 +897,7 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
                 output << '}';
             };
             write(latest);
-            latest.flush();
-            {
-                if (sequence % 4096 == 0 && !includeResult) {
-                    std::error_code ignored;
-                    std::filesystem::copy_file(self->traceHistoryPath_, self->traceHistoryPath_.wstring() + L".previous",
-                        std::filesystem::copy_options::overwrite_existing, ignored);
-                    std::ofstream reset(self->traceHistoryPath_, std::ios::binary | std::ios::trunc);
-                }
-                std::ofstream history(self->traceHistoryPath_,
-                                      std::ios::binary | std::ios::app);
-                write(history);
-                history << '\n';
-                history.flush();
-                if (!self->traceArchivePath_.empty()) {
-                    constexpr std::size_t ArchiveLimit = 4 * 1024 * 1024;
-                    if (self->traceArchiveBytes_ >= ArchiveLimit) {
-                        std::error_code ignored;
-                        auto previous = self->traceArchivePath_;
-                        previous += L".previous";
-                        std::filesystem::remove(previous, ignored);
-                        std::filesystem::rename(self->traceArchivePath_, previous, ignored);
-                        if (ignored) {
-                            std::ofstream reset(self->traceArchivePath_,
-                                                std::ios::binary | std::ios::trunc);
-                        }
-                        self->traceArchiveBytes_ = 0;
-                    }
-                    std::ofstream archive(self->traceArchivePath_,
-                                         std::ios::binary | std::ios::app);
-                    write(archive);
-                    archive << '\n';
-                    archive.flush();
-                    if (archive) {
-                        auto position = archive.tellp();
-                        if (position >= 0)
-                            self->traceArchiveBytes_ = static_cast<std::size_t>(position);
-                    }
-                }
-            }
+            AppendDiagnosticLine(self->tracePath_, latest.str());
         } catch (...) {
         }
     };
@@ -2524,6 +2491,45 @@ std::uint64_t HleDispatcher::LibcFclose(
         return UINT64_MAX;
     }
     return std::fclose(stream) == 0 ? 0 : UINT64_MAX;
+}
+
+std::uint64_t HleDispatcher::LibcFseek(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto* stream = reinterpret_cast<std::FILE*>(frame.gpr[0]);
+    std::scoped_lock lock(dispatcher.fileStreamMutex_);
+    if (!dispatcher.guestFileStreams_.contains(stream)) {
+        GuestPosixErrno = 9;
+        return UINT64_MAX;
+    }
+    const auto origin = static_cast<int>(frame.gpr[2]);
+    if (origin != SEEK_SET && origin != SEEK_CUR && origin != SEEK_END) {
+        GuestPosixErrno = 22;
+        return UINT64_MAX;
+    }
+    if (_fseeki64(stream, static_cast<std::int64_t>(frame.gpr[1]), origin) == 0)
+        return 0;
+    GuestPosixErrno = errno;
+    return UINT64_MAX;
+}
+
+std::uint64_t HleDispatcher::LibcFtell(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto* stream = reinterpret_cast<std::FILE*>(frame.gpr[0]);
+    std::scoped_lock lock(dispatcher.fileStreamMutex_);
+    if (!dispatcher.guestFileStreams_.contains(stream)) {
+        GuestPosixErrno = 9;
+        return UINT64_MAX;
+    }
+    const auto position = _ftelli64(stream);
+    if (position >= 0) return static_cast<std::uint64_t>(position);
+    GuestPosixErrno = errno;
+    return UINT64_MAX;
+}
+
+std::uint64_t HleDispatcher::FiosInitialize(
+    HleDispatcher& dispatcher, GuestCallFrame const&) noexcept {
+    // The virtual mount tree is prepared by ConfigureFileSystem before entry.
+    return dispatcher.dataRoot_.empty() ? OrbisEnosys : 0;
 }
 
 std::uint64_t HleDispatcher::LibcFprintf(
@@ -4324,6 +4330,21 @@ std::uint64_t HleDispatcher::PthreadAttrSetStackSize(
     if (found == dispatcher.threadAttributes_.end()) return 22;
     found->second.stackSize = static_cast<std::size_t>(frame.gpr[1]);
     return 0;
+}
+
+std::uint64_t HleDispatcher::PthreadAttrSetInheritSched(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    if (frame.gpr[1] > 1) return 22;
+    std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+    auto found = dispatcher.threadAttributes_.find(frame.gpr[0]);
+    if (found == dispatcher.threadAttributes_.end()) return 22;
+    found->second.inheritSched = frame.gpr[1] != 0;
+    return 0;
+}
+
+std::uint64_t HleDispatcher::PthreadEqual(
+    HleDispatcher&, GuestCallFrame const& frame) noexcept {
+    return frame.gpr[0] == frame.gpr[1] ? 1 : 0;
 }
 
 // Keep SEH outside the lambda with C++ objects that require unwinding.
