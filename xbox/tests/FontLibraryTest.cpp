@@ -52,6 +52,15 @@ int main(int argc,char** argv) {
         Check(!SandboxAppPath("/mnt/sandbox/../app0/asset"),"sandbox traversal rejected");
         Check(!SandboxAppPath("/mnt/sandbox/APP_000/app0-other/asset"),"mount boundary");
         Check(!SandboxAppPath("/mnt/sandbox/APP_000/data/file"),"other mount rejected");
+        Check(NormalizeGuestPath("Media//Modules/./PS4Util.prx")=="/app0/Media/Modules/PS4Util.prx","relative PRX path");
+        Check(NormalizeGuestPath("/app0//Media/Modules/PS4Util.prx")=="/app0/Media/Modules/PS4Util.prx","double slash in app path");
+        Check(NormalizeGuestPath("/mnt/sandbox/OTHER0001_000/app0/Media/Modules/PS4Util.prx")=="/app0/Media/Modules/PS4Util.prx","sandbox path");
+        Check(NormalizeGuestPath("/data/cache/../file")=="/data/file","writable mount path");
+        Check(NormalizeGuestPath("/hostapp//sce_sys/param.sfo")=="/hostapp/sce_sys/param.sfo","alternate app mount");
+        Check(NormalizeGuestPath("/temp0//cache/file")=="/temp0/cache/file","temporary mount path");
+        Check(!NormalizeGuestPath("../data/file"),"relative path cannot escape app0");
+        Check(!NormalizeGuestPath("/app0/../data/file"),"absolute path cannot escape app0");
+        Check(!NormalizeGuestPath("C:\\outside"),"host path rejected");
         Render(std::filesystem::path(argv[1])/"NotoSans-Regular.ttf",0xe7);
         Render(std::filesystem::path(argv[1])/"NotoSansCJK-Regular.ttc",0x4e2d);
         std::cout<<"LP64 guest structures, Latin/CJK rasterization and resource lifetime passed\n";

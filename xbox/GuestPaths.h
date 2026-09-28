@@ -3,6 +3,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 namespace Lab {
 // OpenOrbis binaries may embed the process sandbox spelling of /app0.
 // Resolve only that mount; never use the sandbox token as a host directory.
@@ -33,5 +34,47 @@ inline std::optional<std::string> SandboxAppPath(std::string_view path) {
     const auto mount=path.substr(slash);
     if(mount!="/app0" && !mount.starts_with("/app0/")) return std::nullopt;
     return std::string(mount);
+}
+
+// Resolve paths against the guest's app0 working directory, regardless of
+// which HLE file or module API received them. Keep every path inside its mount.
+inline std::optional<std::string> NormalizeGuestPath(std::string_view rawPath) {
+    if (rawPath.empty() || rawPath.find('\\') != std::string_view::npos ||
+        rawPath.find(':') != std::string_view::npos ||
+        rawPath.find('\0') != std::string_view::npos)
+        return std::nullopt;
+
+    std::string path;
+    path.reserve(rawPath.size() + 6);
+    for (char character : rawPath) {
+        if (character != '/' || path.empty() || path.back() != '/')
+            path.push_back(character);
+    }
+    if (auto alias = SandboxAppPath(path)) path = *alias;
+    else if (path.front() != '/') path.insert(0, "/app0/");
+
+    std::vector<std::string_view> components;
+    for (std::size_t start = 1; start < path.size();) {
+        const auto end = path.find('/', start);
+        const auto component = std::string_view(path).substr(
+            start, end == std::string::npos ? end : end - start);
+        if (component == "..") {
+            if (components.size() <= 1) return std::nullopt;
+            components.pop_back();
+        } else if (!component.empty() && component != ".") {
+            components.push_back(component);
+        }
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    if (components.empty()) return std::nullopt;
+
+    std::string normalized;
+    normalized.reserve(path.size());
+    for (auto component : components) {
+        normalized.push_back('/');
+        normalized.append(component);
+    }
+    return normalized;
 }
 }

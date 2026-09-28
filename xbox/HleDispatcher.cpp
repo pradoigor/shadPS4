@@ -18,6 +18,7 @@
 #include <winrt/Windows.System.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
@@ -317,9 +318,14 @@ std::uint64_t HleDispatcher::LoadGuestModule(
     try {
         std::filesystem::path host;
         std::error_code error;
-        if (!ResolveGuestPath(path, false, host) ||
-            !std::filesystem::is_regular_file(host, error) || error)
+        if (!ResolveGuestPath(path, false, host)) {
+            GraphicsLog("PRX: caminho inválido: " + path);
             return OrbisEnoent;
+        }
+        if (!std::filesystem::is_regular_file(host, error) || error) {
+            GraphicsLog("PRX: arquivo não encontrado: " + path);
+            return OrbisEnoent;
+        }
         for (auto const& module : guestModules_)
             if (module->host == host) return module->handle;
 
@@ -699,6 +705,8 @@ void HleDispatcher::ConfigureFileSystem(std::filesystem::path appRoot,
         !dataRoot_.is_absolute())
         throw std::invalid_argument("Raízes do VFS UWP inválidas.");
     std::filesystem::create_directories(dataRoot_);
+    for (auto const* mount : {L"data", L"savedata0", L"user", L"temp0", L"download0"})
+        std::filesystem::create_directories(dataRoot_ / mount);
     const auto etcRoot = dataRoot_ / L"system" / L"etc";
     std::filesystem::create_directories(etcRoot);
     const auto hostsPath = etcRoot / L"hosts";
@@ -2623,10 +2631,10 @@ bool HleDispatcher::ReadGuestString(std::uint64_t address, std::string& value,
 bool HleDispatcher::ResolveGuestPath(std::string const& guestPath, bool write,
                                      std::filesystem::path& hostPath) const noexcept {
     try {
-        if (auto alias = SandboxAppPath(guestPath)) return ResolveGuestPath(*alias, write, hostPath);
-        if (guestPath.empty() || guestPath.find('\\') != std::string::npos)
-            return false;
-        if (guestPath == "/etc/hosts") {
+        const auto normalized = NormalizeGuestPath(guestPath);
+        if (!normalized) return false;
+        const auto& path = *normalized;
+        if (path == "/etc/hosts") {
             if (write) return false;
             hostPath = dataRoot_ / L"system" / L"etc" / L"hosts";
             return !dataRoot_.empty();
@@ -2636,39 +2644,50 @@ bool HleDispatcher::ResolveGuestPath(std::string const& guestPath, bool write,
         constexpr std::string_view iconSuffix = "/icon0.png";
         for (std::string_view prefix : {std::string_view("/user/appmeta/"),
                                         std::string_view("/user/appmeta/external/")}) {
-            if (!write && guestPath.starts_with(prefix) && guestPath.ends_with(iconSuffix)) {
-                const auto title = std::string_view(guestPath).substr(
-                    prefix.size(), guestPath.size() - prefix.size() - iconSuffix.size());
+            if (!write && path.starts_with(prefix) && path.ends_with(iconSuffix)) {
+                const auto title = std::string_view(path).substr(
+                    prefix.size(), path.size() - prefix.size() - iconSuffix.size());
                 if (title == appRoot_.filename().string()) {
                     hostPath = appRoot_ / L"sce_sys" / L"icon0.png";
                     return true;
                 }
             }
         }
-        std::filesystem::path root;
-        std::string relative;
-        if (guestPath == "/app0" || guestPath.starts_with("/app0/")) {
-            if (write) return false;
-            root = appRoot_;
-            relative = guestPath.size() > 6 ? guestPath.substr(6) : "";
-        } else if (guestPath == "/data" || guestPath.starts_with("/data/")) {
-            root = dataRoot_ / L"data";
-            relative = guestPath.size() > 6 ? guestPath.substr(6) : "";
-        } else if (guestPath == "/savedata0" || guestPath.starts_with("/savedata0/")) {
-            root = dataRoot_ / L"savedata0";
-            relative = guestPath.size() > 11 ? guestPath.substr(11) : "";
-        } else if (guestPath.starts_with("/user/")) {
-            root = dataRoot_ / L"user";
-            relative = guestPath.substr(6);
-        } else {
-            return false;
+        struct Mount {
+            std::string_view guest;
+            wchar_t const* dataDirectory;
+            bool writable;
+        };
+        static constexpr std::array mounts{
+            Mount{"/app0", nullptr, false},
+            Mount{"/hostapp", nullptr, false},
+            Mount{"/data", L"data", true},
+            Mount{"/savedata0", L"savedata0", true},
+            Mount{"/user", L"user", true},
+            Mount{"/temp0", L"temp0", true},
+            Mount{"/temp", L"temp0", true},
+            Mount{"/download0", L"download0", true},
+            Mount{"/system", L"system", false},
+        };
+        for (auto const& mount : mounts) {
+            if (path != mount.guest &&
+                !(path.starts_with(mount.guest) && path.size() > mount.guest.size() &&
+                  path[mount.guest.size()] == '/'))
+                continue;
+            if (write && !mount.writable) return false;
+            const auto relative = path.size() > mount.guest.size()
+                ? path.substr(mount.guest.size() + 1) : "";
+            const auto relativePath = std::filesystem::path(relative).lexically_normal();
+            if (relativePath.is_absolute() || relativePath.has_root_name()) return false;
+            for (auto const& component : relativePath)
+                if (component == L"..") return false;
+            const auto root = mount.dataDirectory
+                ? dataRoot_ / mount.dataDirectory : appRoot_;
+            if (root.empty()) return false;
+            hostPath = (root / relativePath).lexically_normal();
+            return true;
         }
-        auto relativePath = std::filesystem::path(relative).lexically_normal();
-        if (relativePath.is_absolute() || relativePath.has_root_name() || relative.find(':') != std::string::npos) return false;
-        for (auto const& component : relativePath)
-            if (component == L"..") return false;
-        hostPath = (root / relativePath).lexically_normal();
-        return !root.empty();
+        return false;
     } catch (...) {
         return false;
     }
