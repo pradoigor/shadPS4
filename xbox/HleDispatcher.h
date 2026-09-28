@@ -218,7 +218,6 @@ private:
     static std::uint64_t LibcFseek(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t LibcFtell(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t LibcFread(HleDispatcher&, GuestCallFrame const&) noexcept;
-    static std::uint64_t FiosInitialize(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t TlsGetAddr(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t LibcFprintf(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t LibcVsnprintf(HleDispatcher&, GuestCallFrame const&) noexcept;

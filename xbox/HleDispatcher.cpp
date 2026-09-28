@@ -570,7 +570,6 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "fseek") use(&LibcFseek);
     if (name == "ftell") use(&LibcFtell);
     if (name == "fread") use(&LibcFread);
-    if (name == "sceFiosInitialize") use(&FiosInitialize);
     if (name == "__tls_get_addr") use(&TlsGetAddr);
     if (name == "fprintf") use(&LibcFprintf);
     if (name == "vsnprintf") use(&LibcVsnprintf);
@@ -2589,12 +2588,6 @@ std::uint64_t HleDispatcher::LibcFread(
                                  static_cast<std::size_t>(itemCount), stream);
     if (std::ferror(stream)) GuestPosixErrno = errno;
     return read;
-}
-
-std::uint64_t HleDispatcher::FiosInitialize(
-    HleDispatcher& dispatcher, GuestCallFrame const&) noexcept {
-    // The virtual mount tree is prepared by ConfigureFileSystem before entry.
-    return dispatcher.dataRoot_.empty() ? OrbisEnosys : 0;
 }
 
 std::uint64_t HleDispatcher::TlsGetAddr(
