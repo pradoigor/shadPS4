@@ -60,6 +60,9 @@ std::uint64_t InvokeSysv4(void *entry, std::uint64_t argument0,
 std::uint64_t InvokeGuestSysv1(void *entry, std::uint64_t argument0);
 std::uint64_t InvokeGuestSysv2(void *entry, std::uint64_t argument0,
                                std::uint64_t argument1);
+std::uint64_t InvokeGuestSysv3(void *entry, std::uint64_t argument0,
+                               std::uint64_t argument1,
+                               std::uint64_t argument2);
 
 // Transfers control to a PS4 process entry with the kernel/OpenOrbis stack
 // layout. The guest exits through the callback supplied in RSI; the callback

@@ -433,7 +433,7 @@ std::uint64_t Call_sceKernelLoadStartModule(HleDispatcher& d, GuestCallFrame con
         }
         d.GraphicsLog("HLE module: jb.prx da Store ausente em " + path);
     }
-    return OrbisEnoent;
+    return d.LoadGuestModule(path, f.gpr[1], f.gpr[2], f.gpr[5]);
     } catch (...) {
         d.GraphicsLog("HLE module: erro ao analisar caminho do módulo convidado");
         return OrbisEnoent;

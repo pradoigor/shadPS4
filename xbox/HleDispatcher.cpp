@@ -6,6 +6,9 @@
 #include "GuestFreeType.h"
 #include "GuestDevices.h"
 #include "GuestPaths.h"
+#include "GuestTlsPatch.h"
+#include "SysvThunk.h"
+#include "common/sha1.h"
 #include "core/platform_memory.h"
 
 #include "core/aerolib/aerolib.h"
@@ -25,9 +28,31 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <cstdio>
 
 namespace Lab {
 namespace {
+
+std::string GuestSymbolNid(std::string_view symbol) {
+    static constexpr std::uint8_t salt[] = {
+        0x51, 0x8D, 0x64, 0xA6, 0x35, 0xDE, 0xD8, 0xC1,
+        0xE6, 0xB0, 0x39, 0xB1, 0xC3, 0xE5, 0x52, 0x30};
+    std::vector<std::uint8_t> input(symbol.begin(), symbol.end());
+    input.insert(input.end(), std::begin(salt), std::end(salt));
+    sha1::SHA1::digest8_t hash{};
+    sha1::SHA1 sha;
+    sha.processBytes(input.data(), input.size());
+    sha.getDigestBytes(hash);
+    std::uint64_t digest{};
+    std::memcpy(&digest, hash, sizeof(digest));
+    static constexpr char alphabet[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-";
+    std::string nid(11, '\0');
+    for (int index = 0; index < 10; ++index)
+        nid[index] = alphabet[(digest >> (58 - index * 6)) & 0x3f];
+    nid[10] = alphabet[(digest & 0xf) * 4];
+    return nid;
+}
 
 constexpr std::uint64_t OrbisEnosys = 0x8002004Eull;
 constexpr std::size_t MaxGuestHeapAllocation = 256ull * 1024 * 1024;
@@ -257,6 +282,136 @@ bool IsCommittedGuestProcessRange(std::uint64_t address, std::size_t bytes,
 }
 
 } // namespace
+
+struct HleDispatcher::GuestModule {
+    std::uint64_t handle{};
+    std::filesystem::path host;
+    std::unique_ptr<GuestMemory> memory;
+    std::unordered_map<std::string, std::uint64_t> exports;
+};
+
+void HleDispatcher::ConfigureMainExports(ControlledLoadResult const& load,
+                                         GuestMemory const& memory) {
+    for (auto const& symbol : load.exported_symbols)
+        guestExports_.emplace(symbol.name,
+                              memory.RuntimeAddress(symbol.address));
+}
+
+std::uint64_t HleDispatcher::GuestModuleSymbol(std::uint64_t handle,
+                                               std::string_view name) const noexcept {
+    try {
+    const auto nid = GuestSymbolNid(name);
+    for (auto const& module : guestModules_) {
+        if (module->handle != handle) continue;
+        for (auto const& [encoded, address] : module->exports)
+            if (encoded == name ||
+                (encoded.size() >= nid.size() &&
+                 encoded.compare(0, nid.size(), nid) == 0))
+                return address;
+        break;
+    }
+    return 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
+std::uint64_t HleDispatcher::LoadGuestModule(
+    std::string const& path, std::uint64_t arguments,
+    std::uint64_t argumentPointer, std::uint64_t resultPointer) noexcept {
+    constexpr std::uint64_t OrbisEnoent = 0x80020002ull;
+    constexpr std::uint64_t OrbisEnoexec = 0x80020008ull;
+    try {
+        std::filesystem::path host;
+        std::error_code error;
+        if (!ResolveGuestPath(path, false, host) ||
+            !std::filesystem::is_regular_file(host, error) || error)
+            return OrbisEnoent;
+        for (auto const& module : guestModules_)
+            if (module->host == host) return module->handle;
+
+        auto load = LoadControlled(host);
+        if (!load.validated || !load.mapped || !load.dynamic_module ||
+            load.protected_segments || load.unsupported_relocations ||
+            load.relocation_targets_outside_segments ||
+            load.symbol_relocations_invalid || !load.relocation_data_valid ||
+            load.private_image.empty()) {
+            GraphicsLog("PRX: imagem dinâmica inválida ou relocação não suportada: " + path);
+            return OrbisEnoexec;
+        }
+        for (auto const& relocation : load.pending_symbol_relocations) {
+            std::uint64_t target{};
+            if (auto it = guestExports_.find(relocation.symbol);
+                it != guestExports_.end()) target = it->second;
+            if (!target) {
+                const auto nid = relocation.symbol.substr(0, relocation.symbol.find('#'));
+                for (auto const& [encoded, address] : guestExports_) {
+                    if (encoded.size() >= nid.size() &&
+                        encoded.compare(0, nid.size(), nid) == 0) {
+                        target = address;
+                        break;
+                    }
+                }
+            }
+            if (!target) {
+                auto resolution = Resolve(relocation.symbol);
+                target = reinterpret_cast<std::uint64_t>(resolution.address);
+            }
+            if (!target || load.private_image.size() < sizeof(std::uint64_t) ||
+                relocation.target < load.min_virtual_address ||
+                relocation.target - load.min_virtual_address >
+                    load.private_image.size() - sizeof(std::uint64_t)) {
+                GraphicsLog("PRX: import não resolvido: " + relocation.symbol);
+                return OrbisEnoexec;
+            }
+            target += static_cast<std::uint64_t>(relocation.addend);
+            std::memcpy(load.private_image.data() +
+                            (relocation.target - load.min_virtual_address),
+                        &target, sizeof(target));
+        }
+        PatchGuestFsTcbReads(load.private_image, load.min_virtual_address,
+                             load.guest_segments, guestTlsSlot_);
+        auto module = std::make_unique<GuestModule>();
+        module->handle = 1000 + guestModules_.size();
+        module->host = host;
+        module->memory = std::make_unique<GuestMemory>();
+        if (!module->memory->MapValidated(load.private_image,
+                                          load.min_virtual_address,
+                                          load.guest_segments,
+                                          load.pending_relative_relocations)) {
+            GraphicsLog("PRX: falha ao mapear módulo: " + path);
+            return OrbisEnoexec;
+        }
+        for (auto const& symbol : load.exported_symbols) {
+            const auto address = module->memory->RuntimeAddress(symbol.address);
+            module->exports.emplace(symbol.name, address);
+            guestExports_.emplace(symbol.name, address);
+        }
+        const auto handle = module->handle;
+        auto* init = load.module_init
+            ? reinterpret_cast<void*>(module->memory->RuntimeAddress(load.module_init))
+            : nullptr;
+        guestModules_.push_back(std::move(module));
+        GraphicsLog("PRX: módulo carregado: " + path +
+                    "; exportações=" + std::to_string(load.exported_symbols.size()));
+        std::int32_t status = 0;
+        if (init) {
+            status = static_cast<std::int32_t>(InvokeGuestSysv3(
+                init, arguments, argumentPointer, 0));
+        }
+        if (resultPointer && IsCommittedGuestProcessRange(
+                resultPointer, sizeof(status), true))
+            std::memcpy(reinterpret_cast<void*>(resultPointer), &status,
+                        sizeof(status));
+        return handle;
+    } catch (std::exception const& exception) {
+        GraphicsLog("PRX: falha ao carregar " + path + ": " + exception.what());
+        return OrbisEnoexec;
+    } catch (...) {
+        GraphicsLog("PRX: falha desconhecida ao carregar " + path);
+        return OrbisEnoexec;
+    }
+}
 
 HleDispatcher::~HleDispatcher() {
     SetPaused(false);
@@ -783,9 +938,19 @@ std::uint64_t HleDispatcher::KernelDlsym(HleDispatcher& dispatcher,
                                          GuestCallFrame const& frame) noexcept {
     constexpr std::uint64_t OrbisEinval = 0x80020016ull;
     constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
-    if (frame.gpr[0] != 65 && frame.gpr[0] != 66) return OrbisEnosys;
     std::string symbol;
     if (!dispatcher.ReadGuestString(frame.gpr[1], symbol, 128)) return OrbisEfault;
+    if (frame.gpr[0] >= 1000) {
+        auto* output = static_cast<std::uint64_t*>(
+            WritablePointer(dispatcher, frame, frame.gpr[2],
+                            sizeof(std::uint64_t)));
+        if (!output) return OrbisEfault;
+        const auto address = dispatcher.GuestModuleSymbol(frame.gpr[0], symbol);
+        if (!address) return 0x80020003ull; // ORBIS_KERNEL_ERROR_ESRCH
+        *output = address;
+        return 0;
+    }
+    if (frame.gpr[0] != 65 && frame.gpr[0] != 66) return OrbisEnosys;
     const bool rsa = frame.gpr[0] == 65 && symbol == "VerifyRSA";
     const bool guestJailbreak = frame.gpr[0] == 66 && symbol == "jailbreak_me";
     if (!rsa && !guestJailbreak) return OrbisEnosys;

@@ -161,6 +161,7 @@ ControlledLoadResult LoadElf(Reader &reader, elf_header const &header,
   result.validated = true;
   result.file_size = reader.size;
   result.entry = header.e_entry;
+  result.dynamic_module = header.e_type == ET_SCE_DYNAMIC;
   result.segment_count = programs.size();
   result.min_virtual_address = std::numeric_limits<std::uint64_t>::max();
   result.max_virtual_address = 0;
@@ -209,6 +210,9 @@ ControlledLoadResult LoadElf(Reader &reader, elf_header const &header,
         break;
       ++result.dynamic_entries;
       switch (entry.d_tag) {
+      case DT_INIT:
+        result.module_init = entry.d_un.d_ptr;
+        break;
       case DT_SCE_RELA:
         dynamicTables.rela_offset = entry.d_un.d_ptr;
         break;
@@ -403,8 +407,23 @@ ControlledLoadResult LoadElf(Reader &reader, elf_header const &header,
         result.entry < program.p_vaddr + program.p_memsz)
       entryInExecutable = true;
   }
-  Require(entryInExecutable,
+  // PRX modules may have no e_entry: their module_start is exported through
+  // the dynamic symbol table. A main executable still needs a valid entry.
+  Require((header.e_type == ET_SCE_DYNAMIC && result.entry == 0) ||
+              entryInExecutable,
           "Ponto de entrada ELF não está em segmento executável.");
+  if (result.module_init != 0) {
+    bool initInExecutable = false;
+    for (auto const &load : loads) {
+      auto const &program = load.header;
+      if ((program.p_flags & PF_EXEC) != 0 &&
+          result.module_init >= program.p_vaddr &&
+          result.module_init - program.p_vaddr < program.p_memsz)
+        initInExecutable = true;
+    }
+    Require(initInExecutable,
+            "Inicializador do módulo não está em segmento executável.");
+  }
 
   std::vector<std::uint8_t> mapped(static_cast<std::size_t>(
       result.max_virtual_address - result.min_virtual_address));
@@ -472,6 +491,25 @@ ControlledLoadResult LoadElf(Reader &reader, elf_header const &header,
       *outputSymbol = symbol;
     return true;
   };
+  if (dynamicTables.symbol_entry_size == sizeof(elf_symbol) &&
+      dynamicTables.symbol_table_size % sizeof(elf_symbol) == 0) {
+    const auto symbolCount = dynamicTables.symbol_table_size / sizeof(elf_symbol);
+    Require(symbolCount <= 65536, "Tabela de símbolos ELF excede o limite seguro.");
+    std::set<std::string> seenExports;
+    for (std::uint32_t index = 0; index < symbolCount; ++index) {
+      std::string name;
+      elf_symbol symbol{};
+      if (!symbolHasValidName(index, &name, &symbol) || name.empty() ||
+          symbol.st_shndx == 0 ||
+          (symbol.GetBind() != STB_GLOBAL && symbol.GetBind() != STB_WEAK) ||
+          !targetIsMapped(symbol.st_value) ||
+          !seenExports.insert(name).second)
+        continue;
+      result.exported_symbols.push_back(GuestExportSymbol{
+          std::move(name), symbol.st_value, symbol.st_size,
+          symbol.GetType() == STT_FUN || symbol.GetType() == STT_SCE});
+    }
+  }
   std::set<std::string> seenSymbolNames;
   constexpr std::size_t MaxPendingImports = 4096;
   constexpr std::size_t MaxPendingSymbolRelocations = 65536;
@@ -510,11 +548,35 @@ ControlledLoadResult LoadElf(Reader &reader, elf_header const &header,
       } else if (relocation.GetType() == R_X86_64_64 ||
                  relocation.GetType() == R_X86_64_GLOB_DAT ||
                  relocation.GetType() == R_X86_64_JUMP_SLOT) {
-        ++result.symbol_relocations_pending;
         std::string symbolName;
         elf_symbol importedSymbol{};
         if (symbolHasValidName(relocation.GetSymbol(), &symbolName,
                                &importedSymbol)) {
+          // A defined symbol belongs to this module, including its own PLT
+          // entries. Its runtime address is the module load bias plus st_value;
+          // routing it through HLE would replace guest code with a stub.
+          if (result.dynamic_module && importedSymbol.st_shndx != 0) {
+            const auto addend = relocation.GetType() == R_X86_64_64
+                                    ? relocation.rel_addend : 0;
+            if (!targetIsMapped(importedSymbol.st_value) ||
+                importedSymbol.st_value >
+                    static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) ||
+                (addend > 0 &&
+                 importedSymbol.st_value >
+                     static_cast<std::uint64_t>(
+                         std::numeric_limits<std::int64_t>::max() -
+                         addend))) {
+              ++result.symbol_relocations_invalid;
+              continue;
+            }
+            result.pending_relative_relocations.push_back(
+                PendingRelativeRelocation{
+                    relocation.rel_offset,
+                    static_cast<std::int64_t>(importedSymbol.st_value) +
+                        addend});
+            continue;
+          }
+          ++result.symbol_relocations_pending;
           ++result.symbol_relocations_valid;
           if (seenSymbolNames.insert(symbolName).second) {
             Require(result.pending_symbol_names.size() < MaxPendingImports,

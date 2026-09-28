@@ -2,6 +2,7 @@
 #include "HomebrewRuntime.h"
 
 #include "BuildInfo.h"
+#include "GuestTlsPatch.h"
 #include "SysvThunk.h"
 #include "core/platform_memory.h"
 
@@ -480,6 +481,12 @@ std::uint64_t UnixSeconds() noexcept {
 
 } // namespace
 
+std::uint32_t PatchGuestFsTcbReads(
+    std::vector<std::uint8_t>& image, std::uint64_t virtualBase,
+    std::vector<GuestSegmentInfo> const& segments, std::uint32_t tlsSlot) {
+  return PatchFsTcbReads(image, virtualBase, segments, tlsSlot);
+}
+
 HomebrewRuntime::~HomebrewRuntime() {
   // A running guest cannot be cancelled safely. Keep its complete ownership
   // alive until process teardown; a returned entry is joined normally.
@@ -680,6 +687,7 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
                              load_.pending_relative_relocations))
     throw std::runtime_error("Não foi possível mapear a imagem real do homebrew.");
   dispatcher_->AttachGuestMemory(memory_.get());
+  dispatcher_->ConfigureMainExports(load_, *memory_);
   const auto entry = memory_->RuntimeAddress(load_.entry);
   if (!memory_->IsExecutable(entry))
     throw std::runtime_error("O ponto de entrada não pertence a um segmento executável.");

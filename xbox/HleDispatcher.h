@@ -84,6 +84,12 @@ public:
     void ConfigureFileSystem(std::filesystem::path appRoot,
                              std::filesystem::path dataRoot);
     void ConfigureGuestTls(std::uint32_t slot) noexcept { guestTlsSlot_ = slot; }
+    void ConfigureMainExports(ControlledLoadResult const& load,
+                              GuestMemory const& memory);
+    std::uint64_t LoadGuestModule(std::string const& path,
+                                  std::uint64_t arguments,
+                                  std::uint64_t argumentPointer,
+                                  std::uint64_t resultPointer) noexcept;
     void ConfigureTrace(std::filesystem::path path, std::string const& sessionId = {});
     void SetPaused(bool paused) noexcept;
 
@@ -91,6 +97,11 @@ public:
     std::size_t unresolvedCount() const noexcept;
 
 private:
+    struct GuestModule;
+    std::vector<std::unique_ptr<GuestModule>> guestModules_;
+    std::unordered_map<std::string, std::uint64_t> guestExports_;
+    std::uint64_t GuestModuleSymbol(std::uint64_t handle,
+                                    std::string_view name) const noexcept;
     struct Entry {
         std::string encoded;
         std::string nid;

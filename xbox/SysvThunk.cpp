@@ -414,8 +414,9 @@ std::uint64_t InvokeGuestSysv1(void *entry, std::uint64_t argument0) {
   return value;
 }
 
-std::uint64_t InvokeGuestSysv2(void *entry, std::uint64_t argument0,
-                               std::uint64_t argument1) {
+std::uint64_t InvokeGuestSysv3(void *entry, std::uint64_t argument0,
+                               std::uint64_t argument1,
+                               std::uint64_t argument2) {
   if (!entry)
     throw std::invalid_argument("Entrada convidada SysV ausente.");
   auto *caller = static_cast<std::uint8_t *>(
@@ -434,6 +435,7 @@ std::uint64_t InvokeGuestSysv2(void *entry, std::uint64_t argument0,
                  static_cast<std::uint32_t>((reg - 6) * 16), false);
   Byte(caller, offset, 0x48); Byte(caller, offset, 0xBF); U64(caller, offset, argument0);
   Byte(caller, offset, 0x48); Byte(caller, offset, 0xBE); U64(caller, offset, argument1);
+  Byte(caller, offset, 0x48); Byte(caller, offset, 0xBA); U64(caller, offset, argument2);
   Byte(caller, offset, 0x48); Byte(caller, offset, 0xB8);
   U64(caller, offset, reinterpret_cast<std::uint64_t>(entry));
   Byte(caller, offset, 0xFF); Byte(caller, offset, 0xD0);
@@ -454,6 +456,11 @@ std::uint64_t InvokeGuestSysv2(void *entry, std::uint64_t argument0,
   const auto value = reinterpret_cast<std::uint64_t (*)()>(caller)();
   Core::PlatformMemory::Free(GetCurrentProcess(), caller, 0, MEM_RELEASE);
   return value;
+}
+
+std::uint64_t InvokeGuestSysv2(void *entry, std::uint64_t argument0,
+                               std::uint64_t argument1) {
+  return InvokeGuestSysv3(entry, argument0, argument1, 0);
 }
 
 std::uint64_t InvokeGuestEntry(void *entry, std::uint64_t entryParams,

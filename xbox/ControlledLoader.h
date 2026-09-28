@@ -30,6 +30,13 @@ struct GuestSegmentInfo {
   std::uint32_t flags{};
 };
 
+struct GuestExportSymbol {
+  std::string name;
+  std::uint64_t address{};
+  std::uint64_t size{};
+  bool function{};
+};
+
 struct ControlledLoadResult {
   bool recognized{};
   bool self{};
@@ -43,6 +50,8 @@ struct ControlledLoadResult {
   std::uint64_t load_segments{};
   std::uint64_t mapped_bytes{};
   std::uint64_t entry{};
+  std::uint64_t module_init{};
+  bool dynamic_module{};
   std::uint64_t min_virtual_address{};
   std::uint64_t max_virtual_address{};
   std::uint64_t checksum{};
@@ -106,6 +115,7 @@ struct ControlledLoadResult {
   std::vector<PendingSymbolRelocation> pending_symbol_relocations;
   std::vector<PendingRelativeRelocation> pending_relative_relocations;
   std::vector<GuestSegmentInfo> guest_segments;
+  std::vector<GuestExportSymbol> exported_symbols;
   // Private, non-executable image used only for relocation dry-runs.
   std::vector<std::uint8_t> private_image;
   bool runtime_preflight_ready{};
