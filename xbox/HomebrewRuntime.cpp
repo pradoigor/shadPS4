@@ -16,6 +16,7 @@
 #include <intrin.h>
 #include <stdexcept>
 #include <string_view>
+#include <unordered_set>
 #include <windows.h>
 
 namespace Lab {
@@ -657,19 +658,41 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
     throw std::runtime_error("Não foi possível mapear a imagem real do homebrew.");
   dispatcher_->AttachGuestMemory(memory_.get());
   dispatcher_->ConfigureMainExports(load_, *memory_);
-  // System PRXs bundled with a title provide their own implementations.
-  // Load them before e_entry so already bound import thunks can resolve
-  // exports as the guest calls them.
-  for (auto const* systemModule : {"sce_module/libc.prx",
-                                   "sce_module/libSceFios2.prx"}) {
+  dispatcher_->AuditImports("before_prx");
+  // Preload bundled PRXs named by the executable before e_entry. Keep the
+  // two runtime dependencies first for titles whose metadata omits them.
+  std::vector<std::string> systemModules{"libc", "libSceFios2"};
+  std::unordered_set<std::string> moduleNames(systemModules.begin(),
+                                               systemModules.end());
+  for (auto const& descriptor : load_.needed_module_names) {
+    const auto equal = descriptor.find('=');
+    if (equal == std::string::npos) continue;
+    const auto version = descriptor.find('@', equal + 1);
+    auto name = descriptor.substr(equal + 1, version - equal - 1);
+    if (name.ends_with(".prx")) name.resize(name.size() - 4);
+    if (name.empty() || name.size() > 128 || name.front() == '.' ||
+        !std::all_of(name.begin(), name.end(), [](unsigned char ch) {
+          return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+                 (ch >= '0' && ch <= '9') || ch == '_' || ch == '-' || ch == '.';
+        })) continue;
+    if (moduleNames.insert(name).second) systemModules.push_back(std::move(name));
+  }
+  for (auto const& name : systemModules) {
+    const auto systemModule = "sce_module/" + name + ".prx";
     std::error_code systemError;
     if (std::filesystem::is_regular_file(executable_.parent_path() / systemModule,
                                          systemError) && !systemError) {
       const auto handle = dispatcher_->LoadGuestModule(systemModule, 0, 0, 0);
-      Record("system_module", std::string(systemModule) +
+      Record("system_module", systemModule +
           "; handle=" + std::to_string(handle));
     }
   }
+  const auto audit = dispatcher_->AuditImports("before_entry");
+  Record("import_audit", "xbox_handlers=" + std::to_string(audit.xboxHandlers) +
+      "; guest_exports=" + std::to_string(audit.guestExport) +
+      "; data=" + std::to_string(audit.dataStorage) +
+      "; known_stubs=" + std::to_string(audit.knownStub) +
+      "; unknown=" + std::to_string(audit.unknown));
   const auto entry = memory_->RuntimeAddress(load_.entry);
   if (!memory_->IsExecutable(entry))
     throw std::runtime_error("O ponto de entrada não pertence a um segmento executável.");

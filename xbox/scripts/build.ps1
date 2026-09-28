@@ -18,6 +18,8 @@ $storeLibs = @(Get-ChildItem "$vs\VC\Tools\MSVC\*\lib\x64\store\vcruntime.lib" -
 if (!$storeLibs.Count) { throw 'C++ UWP runtime libraries are missing. Install Microsoft.VisualStudio.ComponentGroup.UWP.VC.' }
 $artifacts = Join-Path $project 'artifacts'
 New-Item $artifacts -ItemType Directory -Force | Out-Null
+& python "$PSScriptRoot\audit_core_hle.py"
+if ($LASTEXITCODE -ne 0) { throw 'Core HLE inventory failed.' }
 $commit = (& git -C $root rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Cannot identify git commit.' }
 $commitInfo = @"

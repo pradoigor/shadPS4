@@ -6,6 +6,16 @@ contador do sistema e processo. Um único arquivo
 saída de console (limitada a 1 MiB) e a exceção. Cada linha é um objeto JSON.
 O botão **Exportar** informa o nome desse arquivo para baixar pelo Device Portal.
 Sessões anteriores permanecem disponíveis em seus próprios arquivos.
+Antes de carregar os PRXs e antes da entrada do executável, o evento
+`import_audit` classifica cada import
+como `xbox_handler`, `guest_export`, `data_storage`, `known_stub` ou `unknown`.
+Essa classificação permite priorizar lacunas antes de ocorrer uma exceção;
+`xbox_handler` confirma apenas que existe um manipulador no XS4, sem garantir
+que ele reproduza toda a semântica do PS4. `known_stub` significa que o catálogo
+conhece o nome, sem implementação.
+O build inclui `core-hle-inventory.json` no artefato da CI, com os NIDs
+registrados pelo núcleo shadPS4 e os arquivos de origem. Cada registro é um
+candidato a adaptação; o inventário não afirma compatibilidade com UWP.
 
 Uma exceção registrada inclui commit, ID da sessão, código e tipo de acesso,
 endereço da falha, RIP virtual do convidado, bytes da instrução, registradores

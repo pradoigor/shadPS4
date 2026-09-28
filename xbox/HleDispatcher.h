@@ -37,6 +37,14 @@ struct HleResolution {
     bool data{};
 };
 
+struct ImportAuditSummary {
+    std::size_t xboxHandlers{};
+    std::size_t guestExport{};
+    std::size_t dataStorage{};
+    std::size_t knownStub{};
+    std::size_t unknown{};
+};
+
 struct HleBindingSummary {
     std::size_t requested{};
     std::size_t executable_addresses{};
@@ -97,6 +105,7 @@ public:
 
     std::size_t implementedCount() const noexcept;
     std::size_t unresolvedCount() const noexcept;
+    ImportAuditSummary AuditImports(std::string_view phase) const noexcept;
 
 private:
     struct TlsImage {
@@ -112,7 +121,11 @@ private:
         TlsImage tls;
     };
     std::vector<std::unique_ptr<GuestModule>> guestModules_;
-    std::unordered_map<std::string, std::uint64_t> guestExports_;
+    using GuestExportMap = std::unordered_map<std::string, std::uint64_t>;
+    GuestExportMap guestExports_;
+    GuestExportMap guestCallableExports_;
+    std::atomic<std::shared_ptr<const GuestExportMap>> guestExportSnapshot_{};
+    void PublishGuestExports();
     std::mutex environmentMutex_;
     std::map<std::string, std::string> guestEnvironment_;
     struct DirectAllocation {
@@ -134,6 +147,8 @@ private:
         HleHandler handler{};
         void* address{};
     };
+    static std::uint64_t FindGuestExport(std::string const& encodedSymbol,
+                                         GuestExportMap const& exports) noexcept;
     AngleVideo* graphics_{};
     std::shared_ptr<GuestFontState> fonts_;
     std::shared_ptr<GuestDeviceState> devices_;
@@ -468,7 +483,7 @@ private:
     std::uint32_t nextKernelSemaphoreId_{1};
     struct GuestThreadAttribute {
         bool detached{};
-        bool inheritSched{};
+        std::uint32_t schedInherit{};
         std::size_t stackSize{1024 * 1024};
     };
     struct GuestThread {

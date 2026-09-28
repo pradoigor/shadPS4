@@ -13,6 +13,7 @@
 #include "core/platform_memory.h"
 
 #include "core/aerolib/aerolib.h"
+#include "core/libraries/kernel/posix_error.h"
 
 #include <windows.h>
 #include <bcrypt.h>
@@ -37,6 +38,25 @@
 
 namespace Lab {
 namespace {
+
+std::string EscapeImportJson(std::string_view value) {
+    std::string escaped;
+    escaped.reserve(value.size());
+    constexpr char digits[] = "0123456789abcdef";
+    for (const unsigned char byte : value) {
+        if (byte == '"' || byte == '\\') {
+            escaped.push_back('\\');
+            escaped.push_back(static_cast<char>(byte));
+        } else if (byte < 0x20) {
+            escaped += "\\u00";
+            escaped.push_back(digits[byte >> 4]);
+            escaped.push_back(digits[byte & 15]);
+        } else {
+            escaped.push_back(static_cast<char>(byte));
+        }
+    }
+    return escaped;
+}
 
 std::string GuestSymbolNid(std::string_view symbol) {
     static constexpr std::uint8_t salt[] = {
@@ -300,9 +320,37 @@ void HleDispatcher::ConfigureMainExports(ControlledLoadResult const& load,
             (load.tls_virtual_address - load.min_virtual_address);
         mainTls_.initial.assign(start, start + load.tls_init_image_size);
     }
-    for (auto const& symbol : load.exported_symbols)
+    for (auto const& symbol : load.exported_symbols) {
+        const auto address = memory.RuntimeAddress(symbol.address);
         guestExports_.emplace(symbol.name,
-                              memory.RuntimeAddress(symbol.address));
+                              address);
+        if (memory.IsExecutable(address))
+            guestCallableExports_.emplace(symbol.name, address);
+    }
+    PublishGuestExports();
+}
+
+void HleDispatcher::PublishGuestExports() {
+    guestExportSnapshot_.store(std::make_shared<const GuestExportMap>(guestCallableExports_),
+                               std::memory_order_release);
+}
+
+std::uint64_t HleDispatcher::FindGuestExport(
+    std::string const& encodedSymbol, GuestExportMap const& exports) noexcept {
+    if (auto exact = exports.find(encodedSymbol); exact != exports.end())
+        return exact->second;
+    const auto separator = encodedSymbol.find('#');
+    if (separator == std::string_view::npos) return 0;
+    const auto nid = encodedSymbol.substr(0, separator);
+    std::uint64_t unique{};
+    for (auto const& [encoded, address] : exports) {
+        if (encoded.size() <= nid.size() ||
+            encoded.compare(0, nid.size(), nid) != 0 ||
+            encoded[nid.size()] != '#') continue;
+        if (unique && unique != address) return 0;
+        unique = address;
+    }
+    return unique;
 }
 
 std::uint64_t HleDispatcher::GuestModuleSymbol(std::uint64_t handle,
@@ -374,19 +422,7 @@ std::uint64_t HleDispatcher::LoadGuestModule(
             return OrbisEnoexec;
         }
         for (auto const& relocation : load.pending_symbol_relocations) {
-            std::uint64_t target{};
-            if (auto it = guestExports_.find(relocation.symbol);
-                it != guestExports_.end()) target = it->second;
-            if (!target) {
-                const auto nid = relocation.symbol.substr(0, relocation.symbol.find('#'));
-                for (auto const& [encoded, address] : guestExports_) {
-                    if (encoded.size() >= nid.size() &&
-                        encoded.compare(0, nid.size(), nid) == 0) {
-                        target = address;
-                        break;
-                    }
-                }
-            }
+            auto target = FindGuestExport(relocation.symbol, guestExports_);
             if (!target) {
                 auto resolution = Resolve(relocation.symbol);
                 target = reinterpret_cast<std::uint64_t>(resolution.address);
@@ -431,13 +467,18 @@ std::uint64_t HleDispatcher::LoadGuestModule(
         for (auto const& symbol : load.exported_symbols) {
             const auto address = module->memory->RuntimeAddress(symbol.address);
             module->exports.emplace(symbol.name, address);
-            guestExports_.emplace(symbol.name, address);
         }
         const auto handle = module->handle;
         auto* init = load.module_init
             ? reinterpret_cast<void*>(module->memory->RuntimeAddress(load.module_init))
             : nullptr;
         guestModules_.push_back(std::move(module));
+        for (auto const& [encoded, address] : guestModules_.back()->exports) {
+            guestExports_.emplace(encoded, address);
+            if (guestModules_.back()->memory->IsExecutable(address))
+                guestCallableExports_.emplace(encoded, address);
+        }
+        PublishGuestExports();
         GraphicsLog("PRX: módulo carregado: " + path +
                     "; exportações=" + std::to_string(load.exported_symbols.size()));
         std::int32_t status = 0;
@@ -872,6 +913,50 @@ std::size_t HleDispatcher::unresolvedCount() const noexcept {
     return entries_.size() - implementedCount();
 }
 
+ImportAuditSummary HleDispatcher::AuditImports(std::string_view phase) const noexcept {
+    ImportAuditSummary summary;
+    try {
+        const auto exports = guestExportSnapshot_.load(std::memory_order_acquire);
+        std::ostringstream imports;
+        bool first = true;
+        for (auto const& entry : entries_) {
+            std::string_view source;
+            if (dataSymbolSizes_.contains(entry.encoded)) {
+                source = "data_storage";
+                ++summary.dataStorage;
+            } else if (entry.implemented) {
+                source = "xbox_handler";
+                ++summary.xboxHandlers;
+            } else if (exports && FindGuestExport(entry.encoded, *exports)) {
+                source = "guest_export";
+                ++summary.guestExport;
+            } else if (!entry.name.empty()) {
+                source = "known_stub";
+                ++summary.knownStub;
+            } else {
+                source = "unknown";
+                ++summary.unknown;
+            }
+            if (!first) imports << ',';
+            first = false;
+            imports << "{\"symbol\":\"" << EscapeImportJson(entry.encoded)
+                    << "\",\"name\":\"" << EscapeImportJson(entry.name)
+                    << "\",\"source\":\"" << source << "\"}";
+        }
+        std::ostringstream report;
+        report << "{\"kind\":\"import_audit\",\"phase\":\""
+               << EscapeImportJson(phase) << "\",\"total\":" << entries_.size()
+               << ",\"xbox_handler\":" << summary.xboxHandlers
+               << ",\"guest_export\":" << summary.guestExport
+               << ",\"data_storage\":" << summary.dataStorage
+               << ",\"known_stub\":" << summary.knownStub
+               << ",\"unknown\":" << summary.unknown
+               << ",\"imports\":[" << imports.str() << "]}";
+        AppendDiagnosticLine(tracePath_, report.str());
+    } catch (...) {}
+    return summary;
+}
+
 std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
                                        GuestCallFrame const* frame, void* guestStack) noexcept {
     auto* self = static_cast<HleDispatcher*>(context);
@@ -935,28 +1020,17 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
     }
     writeTrace("enter", 0, false);
     std::uint64_t result = OrbisEnosys;
-    if (!entry.implemented &&
-        (entry.name == "SetDataFolder" ||
-         entry.name == "unity_mono_set_user_malloc_mutex" ||
-         entry.name == "sceFiosInitialize" ||
-         entry.name == "sceFiosIOFilterAdd" ||
-         entry.name == "sceFiosIOFilterPsarcDearchiver" ||
-         entry.name == "sceFiosArchiveGetMountBufferSizeSync")) {
-        for (auto const& [encoded, address] : self->guestExports_) {
-            if (encoded == entry.encoded ||
-                (encoded.size() > entry.nid.size() &&
-                 encoded.compare(0, entry.nid.size(), entry.nid) == 0 &&
-                 encoded[entry.nid.size()] == '#')) {
-                try {
-                    result = InvokeGuestSysv6(reinterpret_cast<void*>(address),
-                                              frame->gpr[0], frame->gpr[1], frame->gpr[2],
-                                              frame->gpr[3], frame->gpr[4], frame->gpr[5]);
-                } catch (std::exception const& error) {
-                    self->GraphicsLog(std::string("PRX: chamada falhou: ") + error.what());
-                    result = OrbisEnosys;
-                }
-                break;
-            }
+    const auto exports = self->guestExportSnapshot_.load(std::memory_order_acquire);
+    const auto guestAddress = !entry.implemented && exports
+        ? FindGuestExport(entry.encoded, *exports) : 0;
+    if (guestAddress) {
+        try {
+            result = InvokeGuestSysv6(reinterpret_cast<void*>(guestAddress),
+                                      frame->gpr[0], frame->gpr[1], frame->gpr[2],
+                                      frame->gpr[3], frame->gpr[4], frame->gpr[5]);
+        } catch (std::exception const& error) {
+            self->GraphicsLog(std::string("PRX: chamada falhou: ") + error.what());
+            result = OrbisEnosys;
         }
     } else {
         result = entry.handler ? entry.handler(*self, *frame) : OrbisEnosys;
@@ -4434,11 +4508,11 @@ std::uint64_t HleDispatcher::PthreadAttrSetStackSize(
 
 std::uint64_t HleDispatcher::PthreadAttrSetInheritSched(
     HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
-    if (frame.gpr[1] > 1) return 22;
+    if (frame.gpr[1] != 0 && frame.gpr[1] != 4) return POSIX_ENOTSUP;
     std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
     auto found = dispatcher.threadAttributes_.find(frame.gpr[0]);
-    if (found == dispatcher.threadAttributes_.end()) return 22;
-    found->second.inheritSched = frame.gpr[1] != 0;
+    if (found == dispatcher.threadAttributes_.end()) return POSIX_EINVAL;
+    found->second.schedInherit = static_cast<std::uint32_t>(frame.gpr[1]);
     return 0;
 }
 
