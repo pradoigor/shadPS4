@@ -9,6 +9,7 @@ namespace Lab {
 struct GuestCallFrame {
   std::uint64_t gpr[6]{};
   std::uint64_t guest_stack{};
+  std::uint64_t incoming_rax{};
   alignas(16) std::uint8_t xmm[8][16]{};
 };
 

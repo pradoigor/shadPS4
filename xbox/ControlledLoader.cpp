@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "ControlledLoader.h"
+#include "GuestSymbolIdentity.h"
 
 #include "HleDispatcher.h"
 #include "core/aerolib/aerolib.h"
@@ -180,6 +181,8 @@ ControlledLoadResult LoadElf(Reader &reader, elf_header const &header,
   } dynamicTables;
   std::vector<std::uint64_t> importDescriptors;
   std::vector<std::uint64_t> moduleDescriptors;
+  std::vector<std::uint64_t> exportLibraryDescriptors;
+  std::vector<std::uint64_t> exportModuleDescriptors;
   const elf_program_header *dynlibData = nullptr;
   for (auto const &program : programs)
     if (program.p_type == PT_SCE_DYNLIBDATA)
@@ -254,6 +257,12 @@ ControlledLoadResult LoadElf(Reader &reader, elf_header const &header,
         result.import_library_ids.push_back(
             EncodeId((entry.d_un.d_val >> 48u) & 0xffffu));
         importDescriptors.push_back(entry.d_un.d_val);
+        break;
+      case DT_SCE_EXPORT_LIB:
+        exportLibraryDescriptors.push_back(entry.d_un.d_val);
+        break;
+      case DT_SCE_MODULE_INFO:
+        exportModuleDescriptors.push_back(entry.d_un.d_val);
         break;
       case DT_SCE_NEEDED_MODULE:
       case DT_NEEDED:
@@ -354,6 +363,17 @@ ControlledLoadResult LoadElf(Reader &reader, elf_header const &header,
         std::to_string((descriptor >> 40u) & 0xffu) + "." +
         std::to_string((descriptor >> 32u) & 0xffu));
   }
+
+  std::vector<std::string> exportLibraryNames, exportModuleNames;
+  for (auto descriptor : exportLibraryDescriptors)
+    exportLibraryNames.push_back(EncodeId((descriptor >> 48u) & 0xffffu) + "=" +
+        readDynlibString(static_cast<std::uint32_t>(descriptor)) + "@" +
+        std::to_string((descriptor >> 32u) & 0xffffu));
+  for (auto descriptor : exportModuleDescriptors)
+    exportModuleNames.push_back(EncodeId((descriptor >> 48u) & 0xffffu) + "=" +
+        readDynlibString(static_cast<std::uint32_t>(descriptor)) + "@" +
+        std::to_string((descriptor >> 40u) & 0xffu) + "." +
+        std::to_string((descriptor >> 32u) & 0xffu));
 
   auto targetIsMapped = [&](std::uint64_t address) {
     for (auto const &program : programs) {
@@ -491,8 +511,12 @@ ControlledLoadResult LoadElf(Reader &reader, elf_header const &header,
     const auto terminator = std::find(name.begin(), name.end(), '\0');
     if (terminator == name.end())
       return false;
-    if (outputName)
-      outputName->assign(name.begin(), terminator);
+    if (outputName) {
+      const std::string raw(name.begin(), terminator);
+      *outputName = CanonicalGuestSymbol(raw,
+          symbol.st_shndx == 0 ? result.import_library_names : exportLibraryNames,
+          symbol.st_shndx == 0 ? result.needed_module_names : exportModuleNames);
+    }
     if (outputSymbol)
       *outputSymbol = symbol;
     return true;

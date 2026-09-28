@@ -20,6 +20,12 @@ $artifacts = Join-Path $project 'artifacts'
 New-Item $artifacts -ItemType Directory -Force | Out-Null
 & python "$PSScriptRoot\audit_core_hle.py"
 if ($LASTEXITCODE -ne 0) { throw 'Core HLE inventory failed.' }
+& cmake -S "$project\tests" -B "$project\obj\runtime-host" -G 'Visual Studio 17 2022' -A x64
+if ($LASTEXITCODE -ne 0) { throw 'Runtime ABI checks configuration failed.' }
+& cmake --build "$project\obj\runtime-host" --config Release --parallel
+if ($LASTEXITCODE -ne 0) { throw 'Runtime ABI checks compilation failed.' }
+& ctest --test-dir "$project\obj\runtime-host" -C Release --output-on-failure
+if ($LASTEXITCODE -ne 0) { throw 'Runtime ABI / symbol identity checks failed.' }
 $commit = (& git -C $root rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Cannot identify git commit.' }
 $commitInfo = @"

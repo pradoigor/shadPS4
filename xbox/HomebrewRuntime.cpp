@@ -689,6 +689,8 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
   }
   const auto audit = dispatcher_->AuditImports("before_entry");
   Record("import_audit", "xbox_handlers=" + std::to_string(audit.xboxHandlers) +
+      "; placeholders=" + std::to_string(audit.placeholderHandlers) +
+      "; core_candidates=" + std::to_string(audit.coreCandidates) +
       "; guest_exports=" + std::to_string(audit.guestExport) +
       "; data=" + std::to_string(audit.dataStorage) +
       "; known_stubs=" + std::to_string(audit.knownStub) +

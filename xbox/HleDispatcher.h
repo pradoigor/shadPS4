@@ -2,6 +2,7 @@
 #pragma once
 
 #include "GuestMemory.h"
+#include "GuestSymbolIdentity.h"
 #include "SysvThunk.h"
 
 #include <cstddef>
@@ -39,6 +40,8 @@ struct HleResolution {
 
 struct ImportAuditSummary {
     std::size_t xboxHandlers{};
+    std::size_t placeholderHandlers{};
+    std::size_t coreCandidates{};
     std::size_t guestExport{};
     std::size_t dataStorage{};
     std::size_t knownStub{};
@@ -121,7 +124,7 @@ private:
         TlsImage tls;
     };
     std::vector<std::unique_ptr<GuestModule>> guestModules_;
-    using GuestExportMap = std::unordered_map<std::string, std::uint64_t>;
+    using GuestExportMap = GuestSymbolMap;
     GuestExportMap guestExports_;
     GuestExportMap guestCallableExports_;
     std::atomic<std::shared_ptr<const GuestExportMap>> guestExportSnapshot_{};
@@ -146,6 +149,7 @@ private:
         bool implemented{};
         HleHandler handler{};
         void* address{};
+        bool guestDataBound{};
     };
     static std::uint64_t FindGuestExport(std::string const& encodedSymbol,
                                          GuestExportMap const& exports) noexcept;

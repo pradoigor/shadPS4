@@ -5,6 +5,7 @@
 #include <windows.h>
 
 #include <csetjmp>
+#include <cstddef>
 #include <cstring>
 #include <stdexcept>
 
@@ -14,6 +15,9 @@ namespace {
 constexpr std::size_t PageSize = 4096;
 constexpr std::uint32_t FrameSize = 0xF8;
 constexpr std::uint8_t WindowsShadowSpace = 0x20;
+static_assert(offsetof(GuestCallFrame, incoming_rax) == 0x38);
+static_assert(offsetof(GuestCallFrame, xmm) == 0x40);
+static_assert(sizeof(GuestCallFrame) == 0xC0);
 thread_local std::jmp_buf GuestExitContext;
 thread_local bool GuestExitContextActive = false;
 thread_local std::int32_t GuestExitStatus = 0;
@@ -99,24 +103,41 @@ constexpr std::uint64_t ValidationStack[] = {0x7777'7777'7777'7777ull,
 constexpr std::uint64_t ValidationXmm[] = {0x0123'4567'89AB'CDEFull,
                                            0xFEDC'BA98'7654'3210ull};
 
-std::uint64_t ValidateDispatch(void *, std::uint64_t slot,
+struct ValidationForwardState {
+  void* target{};
+  std::uint64_t originalStack{};
+};
+
+std::uint64_t ForwardValidationDispatch(void* context, std::uint64_t,
+                                        GuestCallFrame const* frame, void*) noexcept {
+  auto& state = *static_cast<ValidationForwardState*>(context);
+  state.originalStack = frame->guest_stack;
+  QueueGuestForwardTarget(state.target);
+  return 0;
+}
+
+std::uint64_t ValidateDispatch(void *context, std::uint64_t slot,
                                GuestCallFrame const *frame,
                                void *guestStack) noexcept {
   if (slot != 0 || !frame || !guestStack ||
-      frame->guest_stack != reinterpret_cast<std::uint64_t>(guestStack))
+      frame->guest_stack != reinterpret_cast<std::uint64_t>(guestStack) ||
+      frame->incoming_rax != 8)
     return 0;
+  auto const& state = *static_cast<ValidationForwardState*>(context);
+  if (state.originalStack && state.originalStack != frame->guest_stack) return 0;
   for (std::size_t index = 0; index != 6; ++index)
     if (frame->gpr[index] != ValidationGpr[index])
       return 0;
   auto const *stack = static_cast<std::uint64_t const *>(guestStack);
   if (stack[1] != ValidationStack[0] || stack[2] != ValidationStack[1])
     return 0;
-  std::uint64_t xmm0{};
-  std::uint64_t xmm1{};
-  std::memcpy(&xmm0, frame->xmm[0], sizeof(xmm0));
-  std::memcpy(&xmm1, frame->xmm[1], sizeof(xmm1));
-  return xmm0 == ValidationXmm[0] && xmm1 == ValidationXmm[1] ? ValidationReturn
-                                                              : 0;
+  for (std::size_t index = 0; index != 8; ++index) {
+    std::uint64_t halves[2]{};
+    std::memcpy(halves, frame->xmm[index], sizeof(halves));
+    const auto expected = ValidationXmm[index % 2] ^ index;
+    if (halves[0] != expected || halves[1] != expected) return 0;
+  }
+  return ValidationReturn;
 }
 
 } // namespace
@@ -157,6 +178,7 @@ void *SysvThunkArena::Create(void *context, std::uint64_t slot,
   Byte(page, offset, 0x84);
   Byte(page, offset, 0x24);
   U32(page, offset, 0xE0); // mov [rsp+E0h],rax
+  StoreGpr(page, offset, 0, WindowsShadowSpace + 0x38);
   // Keep the Windows 32-byte shadow space separate from GuestCallFrame;
   // the dispatcher is allowed to use that area for its own arguments.
   StoreGpr(page, offset, 7, WindowsShadowSpace + 0x00); // rdi
@@ -272,9 +294,14 @@ void *SysvThunkArena::Create(void *context, std::uint64_t slot,
   return page;
 }
 
-SysvAbiValidation ValidateSysvThunkAbi() {
+static SysvAbiValidation ValidateSysvThunkAbiMode(bool forward) {
   SysvThunkArena arena;
-  auto *thunk = arena.Create(nullptr, 0, &ValidateDispatch);
+  ValidationForwardState state;
+  auto *thunk = arena.Create(&state, 0, &ValidateDispatch);
+  if (forward) {
+    state.target = thunk;
+    thunk = arena.Create(&state, 0, &ForwardValidationDispatch);
+  }
   auto *caller = static_cast<std::uint8_t *>(
       Core::PlatformMemory::Allocate(GetCurrentProcess(), nullptr, PageSize,
                                      MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
@@ -288,7 +315,9 @@ SysvAbiValidation ValidateSysvThunkAbi() {
   Byte(caller, offset, 0x48);
   Byte(caller, offset, 0x83);
   Byte(caller, offset, 0xEC);
-  Byte(caller, offset, 0x28); // align SysV call and reserve two stack arguments
+  Byte(caller, offset, 0x48); // stack arguments and Windows nonvolatile XMM6/7
+  MoveXmmStack(caller, offset, 6, 0x20, false);
+  MoveXmmStack(caller, offset, 7, 0x30, false);
   for (std::size_t index = 0; index != 2; ++index) {
     Byte(caller, offset, 0x48);
     Byte(caller, offset, 0xB8);
@@ -311,25 +340,34 @@ SysvAbiValidation ValidateSysvThunkAbi() {
     U64(caller, offset, ValidationGpr[index]);
   }
   // mov rax,pattern; movq xmmN,rax
-  for (std::size_t index = 0; index != 2; ++index) {
+  for (std::size_t index = 0; index != 8; ++index) {
     Byte(caller, offset, 0x48);
     Byte(caller, offset, 0xB8);
-    U64(caller, offset, ValidationXmm[index]);
+    U64(caller, offset, ValidationXmm[index % 2] ^ index);
     Byte(caller, offset, 0x66);
     Byte(caller, offset, 0x48);
     Byte(caller, offset, 0x0F);
     Byte(caller, offset, 0x6E);
     Byte(caller, offset, static_cast<std::uint8_t>(0xC0 | (index << 3)));
+    Byte(caller, offset, 0x66);
+    Byte(caller, offset, 0x0F);
+    Byte(caller, offset, 0x6C); // punpcklqdq xmmN,xmmN: check both halves
+    Byte(caller, offset, static_cast<std::uint8_t>(0xC0 | (index << 3) | index));
   }
-  Byte(caller, offset, 0x48);
-  Byte(caller, offset, 0xB8);
+  Byte(caller, offset, 0x49);
+  Byte(caller, offset, 0xBB); // mov r11,thunk; preserve AL for variadic calls
   U64(caller, offset, reinterpret_cast<std::uint64_t>(thunk));
+  Byte(caller, offset, 0xB8);
+  U32(caller, offset, 8); // mov eax,8
+  Byte(caller, offset, 0x41);
   Byte(caller, offset, 0xFF);
-  Byte(caller, offset, 0xD0); // call rax
+  Byte(caller, offset, 0xD3); // call r11
+  MoveXmmStack(caller, offset, 6, 0x20, true);
+  MoveXmmStack(caller, offset, 7, 0x30, true);
   Byte(caller, offset, 0x48);
   Byte(caller, offset, 0x83);
   Byte(caller, offset, 0xC4);
-  Byte(caller, offset, 0x28);
+  Byte(caller, offset, 0x48);
   Byte(caller, offset, 0x5E);
   Byte(caller, offset, 0x5F);
   Byte(caller, offset, 0xC3);
@@ -345,6 +383,12 @@ SysvAbiValidation ValidateSysvThunkAbi() {
   const auto value = reinterpret_cast<std::uint64_t (*)()>(caller)();
   Core::PlatformMemory::Free(GetCurrentProcess(), caller, 0, MEM_RELEASE);
   return SysvAbiValidation{value == ValidationReturn, value};
+}
+
+SysvAbiValidation ValidateSysvThunkAbi() {
+  const auto normal = ValidateSysvThunkAbiMode(false);
+  if (!normal.passed) return normal;
+  return ValidateSysvThunkAbiMode(true);
 }
 
 std::uint64_t InvokeSysv2(void *entry, std::uint64_t argument0,

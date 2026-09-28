@@ -9,6 +9,7 @@
 #include "GuestPaths.h"
 #include "GuestTlsPatch.h"
 #include "SysvThunk.h"
+#include "Generated Files/CoreHleInventory.h"
 #include "common/sha1.h"
 #include "core/platform_memory.h"
 
@@ -322,10 +323,9 @@ void HleDispatcher::ConfigureMainExports(ControlledLoadResult const& load,
     }
     for (auto const& symbol : load.exported_symbols) {
         const auto address = memory.RuntimeAddress(symbol.address);
-        guestExports_.emplace(symbol.name,
-                              address);
+        AddGuestSymbol(guestExports_, symbol.name, address);
         if (memory.IsExecutable(address))
-            guestCallableExports_.emplace(symbol.name, address);
+            AddGuestSymbol(guestCallableExports_, symbol.name, address);
     }
     PublishGuestExports();
 }
@@ -337,20 +337,7 @@ void HleDispatcher::PublishGuestExports() {
 
 std::uint64_t HleDispatcher::FindGuestExport(
     std::string const& encodedSymbol, GuestExportMap const& exports) noexcept {
-    if (auto exact = exports.find(encodedSymbol); exact != exports.end())
-        return exact->second;
-    const auto separator = encodedSymbol.find('#');
-    if (separator == std::string_view::npos) return 0;
-    const auto nid = encodedSymbol.substr(0, separator);
-    std::uint64_t unique{};
-    for (auto const& [encoded, address] : exports) {
-        if (encoded.size() <= nid.size() ||
-            encoded.compare(0, nid.size(), nid) != 0 ||
-            encoded[nid.size()] != '#') continue;
-        if (unique && unique != address) return 0;
-        unique = address;
-    }
-    return unique;
+    return FindGuestSymbol(encodedSymbol, exports);
 }
 
 std::uint64_t HleDispatcher::GuestModuleSymbol(std::uint64_t handle,
@@ -359,12 +346,9 @@ std::uint64_t HleDispatcher::GuestModuleSymbol(std::uint64_t handle,
     const auto nid = GuestSymbolNid(name);
     for (auto const& module : guestModules_) {
         if (module->handle != handle) continue;
-        for (auto const& [encoded, address] : module->exports)
-            if (encoded == name ||
-                (encoded.size() >= nid.size() &&
-                 encoded.compare(0, nid.size(), nid) == 0))
-                return address;
-        break;
+        if (const auto address = FindGuestSymbol(std::string(name), module->exports))
+            return address;
+        return FindUniqueGuestNid(nid, module->exports);
     }
     return 0;
     } catch (...) {
@@ -421,11 +405,32 @@ std::uint64_t HleDispatcher::LoadGuestModule(
             GraphicsLog("PRX: relocação TLS inválida: " + path);
             return OrbisEnoexec;
         }
+        std::size_t dataBytes{};
+        for (auto const& [symbol, size] : dataSymbolSizes_) dataBytes += size;
+        for (auto const& data : load.pending_data_symbols) {
+            if (data.size == 0 || data.size > 1024 * 1024) return OrbisEnoexec;
+            if (!dataSymbolSizes_.contains(data.symbol)) {
+                if (dataBytes > 64 * 1024 * 1024 - data.size) return OrbisEnoexec;
+                dataBytes += static_cast<std::size_t>(data.size);
+                dataSymbolSizes_.emplace(data.symbol, static_cast<std::size_t>(data.size));
+            }
+        }
+        std::unordered_map<std::string, HleResolution> moduleResolutions;
         for (auto const& relocation : load.pending_symbol_relocations) {
-            auto target = FindGuestExport(relocation.symbol, guestExports_);
-            if (!target) {
-                auto resolution = Resolve(relocation.symbol);
-                target = reinterpret_cast<std::uint64_t>(resolution.address);
+            // Use the same HLE precedence as the main executable. Mixing host
+            // libc handles with guest libc implementations is not ABI compatible.
+            auto found = moduleResolutions.find(relocation.symbol);
+            if (found == moduleResolutions.end())
+                found = moduleResolutions.emplace(relocation.symbol, Resolve(relocation.symbol)).first;
+            const auto& resolution = found->second;
+            auto target = reinterpret_cast<std::uint64_t>(resolution.address);
+            if (!resolution.implemented) {
+                if (const auto exported = FindGuestExport(relocation.symbol, guestExports_)) {
+                    target = exported;
+                    if (resolution.data)
+                        for (auto& entry : entries_)
+                            if (entry.address == resolution.address) entry.guestDataBound = true;
+                }
             }
             if (!target || load.private_image.size() < sizeof(std::uint64_t) ||
                 relocation.target < load.min_virtual_address ||
@@ -474,9 +479,9 @@ std::uint64_t HleDispatcher::LoadGuestModule(
             : nullptr;
         guestModules_.push_back(std::move(module));
         for (auto const& [encoded, address] : guestModules_.back()->exports) {
-            guestExports_.emplace(encoded, address);
+            AddGuestSymbol(guestExports_, encoded, address);
             if (guestModules_.back()->memory->IsExecutable(address))
-                guestCallableExports_.emplace(encoded, address);
+                AddGuestSymbol(guestCallableExports_, encoded, address);
         }
         PublishGuestExports();
         GraphicsLog("PRX: módulo carregado: " + path +
@@ -921,9 +926,15 @@ ImportAuditSummary HleDispatcher::AuditImports(std::string_view phase) const noe
         bool first = true;
         for (auto const& entry : entries_) {
             std::string_view source;
-            if (dataSymbolSizes_.contains(entry.encoded)) {
+            if (entry.guestDataBound) {
+                source = "guest_data_export";
+                ++summary.guestExport;
+            } else if (dataSymbolSizes_.contains(entry.encoded)) {
                 source = "data_storage";
                 ++summary.dataStorage;
+            } else if (entry.handler == &GenericSuccess) {
+                source = "xbox_placeholder";
+                ++summary.placeholderHandlers;
             } else if (entry.implemented) {
                 source = "xbox_handler";
                 ++summary.xboxHandlers;
@@ -939,14 +950,22 @@ ImportAuditSummary HleDispatcher::AuditImports(std::string_view phase) const noe
             }
             if (!first) imports << ',';
             first = false;
+            const auto* core = CoreHleInventory::Find(entry.nid);
+            if (core && (source == "known_stub" || source == "unknown" ||
+                         source == "xbox_placeholder")) ++summary.coreCandidates;
             imports << "{\"symbol\":\"" << EscapeImportJson(entry.encoded)
                     << "\",\"name\":\"" << EscapeImportJson(entry.name)
-                    << "\",\"source\":\"" << source << "\"}";
+                    << "\",\"source\":\"" << source
+                    << "\",\"core_registered\":" << (core ? "true" : "false")
+                    << ",\"core_sources\":\""
+                    << (core ? EscapeImportJson(core->sources) : "") << "\"}";
         }
         std::ostringstream report;
         report << "{\"kind\":\"import_audit\",\"phase\":\""
                << EscapeImportJson(phase) << "\",\"total\":" << entries_.size()
                << ",\"xbox_handler\":" << summary.xboxHandlers
+               << ",\"xbox_placeholder\":" << summary.placeholderHandlers
+               << ",\"core_candidates\":" << summary.coreCandidates
                << ",\"guest_export\":" << summary.guestExport
                << ",\"data_storage\":" << summary.dataStorage
                << ",\"known_stub\":" << summary.knownStub
@@ -1118,13 +1137,8 @@ std::uint64_t HleDispatcher::Il2CppLookupSymbol(HleDispatcher& dispatcher,
     if (!dispatcher.ReadGuestString(frame.gpr[0], name, 256)) return 0;
     try {
         const auto nid = GuestSymbolNid(name);
-        for (auto const& [encoded, address] : dispatcher.guestExports_) {
-            if (encoded == name ||
-                (encoded.size() > nid.size() &&
-                 encoded.compare(0, nid.size(), nid) == 0 &&
-                 encoded[nid.size()] == '#'))
-                return address;
-        }
+        if (const auto address = FindGuestSymbol(name, dispatcher.guestExports_)) return address;
+        if (const auto address = FindUniqueGuestNid(nid, dispatcher.guestExports_)) return address;
         dispatcher.GraphicsLog("IL2CPP: símbolo indisponível: " + name);
     } catch (...) {
         dispatcher.GraphicsLog("IL2CPP: falha ao consultar símbolo");
@@ -4503,10 +4517,10 @@ std::uint64_t HleDispatcher::PthreadAttrSetStackSize(
 
 std::uint64_t HleDispatcher::PthreadAttrSetInheritSched(
     HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
-    if (frame.gpr[1] != 0 && frame.gpr[1] != 4) return POSIX_ENOTSUP;
     std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
     auto found = dispatcher.threadAttributes_.find(frame.gpr[0]);
     if (found == dispatcher.threadAttributes_.end()) return POSIX_EINVAL;
+    if (frame.gpr[1] != 0 && frame.gpr[1] != 4) return POSIX_ENOTSUP;
     found->second.schedInherit = static_cast<std::uint32_t>(frame.gpr[1]);
     return 0;
 }
