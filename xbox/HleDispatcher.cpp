@@ -1024,14 +1024,9 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
     const auto guestAddress = !entry.implemented && exports
         ? FindGuestExport(entry.encoded, *exports) : 0;
     if (guestAddress) {
-        try {
-            result = InvokeGuestSysv6(reinterpret_cast<void*>(guestAddress),
-                                      frame->gpr[0], frame->gpr[1], frame->gpr[2],
-                                      frame->gpr[3], frame->gpr[4], frame->gpr[5]);
-        } catch (std::exception const& error) {
-            self->GraphicsLog(std::string("PRX: chamada falhou: ") + error.what());
-            result = OrbisEnosys;
-        }
+        writeTrace("forward", guestAddress, true);
+        QueueGuestForwardTarget(reinterpret_cast<void*>(guestAddress));
+        return 0;
     } else {
         result = entry.handler ? entry.handler(*self, *frame) : OrbisEnosys;
     }

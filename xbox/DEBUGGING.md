@@ -13,6 +13,8 @@ Essa classificação permite priorizar lacunas antes de ocorrer uma exceção;
 `xbox_handler` confirma apenas que existe um manipulador no XS4, sem garantir
 que ele reproduza toda a semântica do PS4. `known_stub` significa que o catálogo
 conhece o nome, sem implementação.
+O evento `forward` indica que o thunk transferiu a chamada completa para um
+PRX do título, preservando os registradores e a pilha da ABI SysV.
 O build inclui `core-hle-inventory.json` no artefato da CI, com os NIDs
 registrados pelo núcleo shadPS4 e os arquivos de origem. Cada registro é um
 candidato a adaptação; o inventário não afirma compatibilidade com UWP.

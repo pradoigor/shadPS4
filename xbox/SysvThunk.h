@@ -68,6 +68,10 @@ std::uint64_t InvokeGuestSysv6(void *entry, std::uint64_t argument0,
                                std::uint64_t argument3, std::uint64_t argument4,
                                std::uint64_t argument5);
 
+// A dispatcher can forward the current guest call directly to a guest PRX.
+// The thunk restores the original SysV register and stack frame before jumping.
+void QueueGuestForwardTarget(void* entry) noexcept;
+
 // Transfers control to a PS4 process entry with the kernel/OpenOrbis stack
 // layout. The guest exits through the callback supplied in RSI; the callback
 // returns here through a thread-local jump context without terminating UWP.

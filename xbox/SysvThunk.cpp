@@ -12,12 +12,19 @@ namespace Lab {
 namespace {
 
 constexpr std::size_t PageSize = 4096;
-constexpr std::uint32_t FrameSize = 0xE8;
+constexpr std::uint32_t FrameSize = 0xF8;
 constexpr std::uint8_t WindowsShadowSpace = 0x20;
 thread_local std::jmp_buf GuestExitContext;
 thread_local bool GuestExitContextActive = false;
 thread_local std::int32_t GuestExitStatus = 0;
 thread_local void* GuestExitTrampoline = nullptr;
+thread_local void* GuestForwardTarget = nullptr;
+
+void* TakeGuestForwardTarget() noexcept {
+  auto* target = GuestForwardTarget;
+  GuestForwardTarget = nullptr;
+  return target;
+}
 
 void GuestProgramExit() noexcept {
   if (GuestExitContextActive)
@@ -44,6 +51,16 @@ void StoreGpr(std::uint8_t *code, std::size_t &offset, std::uint8_t reg,
   Byte(code, offset,
        static_cast<std::uint8_t>(0x48 | (reg >= 8 ? 0x04 : 0x00)));
   Byte(code, offset, 0x89);
+  Byte(code, offset, static_cast<std::uint8_t>(0x44 | ((reg & 7u) << 3)));
+  Byte(code, offset, 0x24);
+  Byte(code, offset, displacement);
+}
+
+void LoadGpr(std::uint8_t *code, std::size_t &offset, std::uint8_t reg,
+             std::uint8_t displacement) {
+  Byte(code, offset,
+       static_cast<std::uint8_t>(0x48 | (reg >= 8 ? 0x04 : 0x00)));
+  Byte(code, offset, 0x8B);
   Byte(code, offset, static_cast<std::uint8_t>(0x44 | ((reg & 7u) << 3)));
   Byte(code, offset, 0x24);
   Byte(code, offset, displacement);
@@ -109,6 +126,10 @@ void* PrepareGuestExitFromHle(std::int32_t status) noexcept {
   return GuestExitTrampoline;
 }
 
+void QueueGuestForwardTarget(void* entry) noexcept {
+  GuestForwardTarget = entry;
+}
+
 SysvThunkArena::~SysvThunkArena() {
   for (auto *page : pages_)
     Core::PlatformMemory::Free(GetCurrentProcess(), page, 0, MEM_RELEASE);
@@ -130,6 +151,12 @@ void *SysvThunkArena::Create(void *context, std::uint64_t slot,
   Byte(page, offset, 0x81);
   Byte(page, offset, 0xEC); // sub rsp, imm32
   U32(page, offset, FrameSize);
+  // Save incoming RAX as well: SysV variadic calls use AL for the vector count.
+  Byte(page, offset, 0x48);
+  Byte(page, offset, 0x89);
+  Byte(page, offset, 0x84);
+  Byte(page, offset, 0x24);
+  U32(page, offset, 0xE0); // mov [rsp+E0h],rax
   // Keep the Windows 32-byte shadow space separate from GuestCallFrame;
   // the dispatcher is allowed to use that area for its own arguments.
   StoreGpr(page, offset, 7, WindowsShadowSpace + 0x00); // rdi
@@ -173,6 +200,57 @@ void *SysvThunkArena::Create(void *context, std::uint64_t slot,
       reinterpret_cast<std::uint64_t>(dispatch)); // mov rax,dispatch
   Byte(page, offset, 0xFF);
   Byte(page, offset, 0xD0); // call rax
+  // Keep the HLE return value while checking whether Dispatch queued a PRX.
+  Byte(page, offset, 0x48);
+  Byte(page, offset, 0x89);
+  Byte(page, offset, 0x84);
+  Byte(page, offset, 0x24);
+  U32(page, offset, 0xE8); // mov [rsp+E8h],rax
+  Byte(page, offset, 0x48);
+  Byte(page, offset, 0xB8);
+  U64(page, offset, reinterpret_cast<std::uint64_t>(&TakeGuestForwardTarget));
+  Byte(page, offset, 0xFF);
+  Byte(page, offset, 0xD0); // call rax
+  Byte(page, offset, 0x48);
+  Byte(page, offset, 0x85);
+  Byte(page, offset, 0xC0); // test rax,rax
+  Byte(page, offset, 0x0F);
+  Byte(page, offset, 0x84); // jz normalReturn
+  const auto normalJumpOffset = offset;
+  U32(page, offset, 0);
+  Byte(page, offset, 0x49);
+  Byte(page, offset, 0x89);
+  Byte(page, offset, 0xC3); // mov r11,rax
+  for (std::uint8_t index = 0; index != 8; ++index)
+    MoveXmmStack(page, offset, index,
+                 WindowsShadowSpace + 0x40u + index * 16u, true);
+  LoadGpr(page, offset, 7, WindowsShadowSpace + 0x00); // rdi
+  LoadGpr(page, offset, 6, WindowsShadowSpace + 0x08); // rsi
+  LoadGpr(page, offset, 2, WindowsShadowSpace + 0x10); // rdx
+  LoadGpr(page, offset, 1, WindowsShadowSpace + 0x18); // rcx
+  LoadGpr(page, offset, 8, WindowsShadowSpace + 0x20); // r8
+  LoadGpr(page, offset, 9, WindowsShadowSpace + 0x28); // r9
+  Byte(page, offset, 0x48);
+  Byte(page, offset, 0x8B);
+  Byte(page, offset, 0x84);
+  Byte(page, offset, 0x24);
+  U32(page, offset, 0xE0); // mov rax,[rsp+E0h]
+  Byte(page, offset, 0x48);
+  Byte(page, offset, 0x81);
+  Byte(page, offset, 0xC4); // add rsp,imm32
+  U32(page, offset, FrameSize);
+  Byte(page, offset, 0x41);
+  Byte(page, offset, 0xFF);
+  Byte(page, offset, 0xE3); // jmp r11 with original stack and return address
+  const auto normalReturn = offset;
+  const auto displacement = static_cast<std::uint32_t>(normalReturn -
+                                                        (normalJumpOffset + sizeof(std::uint32_t)));
+  std::memcpy(page + normalJumpOffset, &displacement, sizeof(displacement));
+  Byte(page, offset, 0x48);
+  Byte(page, offset, 0x8B);
+  Byte(page, offset, 0x84);
+  Byte(page, offset, 0x24);
+  U32(page, offset, 0xE8); // mov rax,[rsp+E8h]
   Byte(page, offset, 0x48);
   Byte(page, offset, 0x81);
   Byte(page, offset, 0xC4); // add rsp,imm32
