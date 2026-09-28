@@ -242,6 +242,12 @@ private:
     static std::uint64_t SemaphoreTimedWait(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t SemaphoreGetValue(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t SemaphorePost(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelCreateSema(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelWaitSema(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelPollSema(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelSignalSema(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelCancelSema(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelDeleteSema(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t PthreadAttrInit(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t PthreadAttrSetDetachState(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t PthreadAttrSetStackSize(HleDispatcher&, GuestCallFrame const&) noexcept;
@@ -378,6 +384,16 @@ private:
         std::condition_variable condition;
         std::uint32_t value{};
     };
+    struct GuestKernelSemaphore {
+        std::mutex mutex;
+        std::condition_variable condition;
+        std::uint32_t value{};
+        std::uint32_t maximum{};
+        std::uint32_t initial{};
+        std::uint32_t waiters{};
+        std::uint64_t cancellationGeneration{};
+        bool deleted{};
+    };
     std::mutex synchronizationStateMutex_;
     std::condition_variable cxaGuardChanged_;
     std::unordered_set<std::uint64_t> cxaGuardsInitializing_;
@@ -385,6 +401,8 @@ private:
     std::unordered_map<std::uint64_t, std::shared_ptr<GuestMutex>> mutexes_;
     std::unordered_map<std::uint64_t, std::shared_ptr<GuestCondition>> conditions_;
     std::unordered_map<std::uint64_t, std::shared_ptr<GuestSemaphore>> semaphores_;
+    std::unordered_map<std::uint32_t, std::shared_ptr<GuestKernelSemaphore>> kernelSemaphores_;
+    std::uint32_t nextKernelSemaphoreId_{1};
     struct GuestThreadAttribute {
         bool detached{};
         std::size_t stackSize{1024 * 1024};

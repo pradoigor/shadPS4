@@ -437,6 +437,12 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sem_timedwait") use(&SemaphoreTimedWait);
     if (name == "sem_getvalue") use(&SemaphoreGetValue);
     if (name == "sem_post") use(&SemaphorePost);
+    if (name == "sceKernelCreateSema") use(&KernelCreateSema);
+    if (name == "sceKernelWaitSema") use(&KernelWaitSema);
+    if (name == "sceKernelPollSema") use(&KernelPollSema);
+    if (name == "sceKernelSignalSema") use(&KernelSignalSema);
+    if (name == "sceKernelCancelSema") use(&KernelCancelSema);
+    if (name == "sceKernelDeleteSema") use(&KernelDeleteSema);
     if (name == "pthread_attr_init") use(&PthreadAttrInit);
     if (name == "pthread_attr_setdetachstate") use(&PthreadAttrSetDetachState);
     if (name == "pthread_attr_setstacksize") use(&PthreadAttrSetStackSize);
@@ -3397,6 +3403,205 @@ std::uint64_t HleDispatcher::SemaphorePost(
         ++semaphore->value;
     }
     semaphore->condition.notify_one();
+    return 0;
+}
+
+std::uint64_t HleDispatcher::KernelCreateSema(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    constexpr std::uint64_t OrbisEinval = 0x80020016ull;
+    constexpr std::uint64_t OrbisEnomem = 0x8002000Cull;
+    auto* output = static_cast<std::uint32_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[0], sizeof(std::uint32_t)));
+    std::string name;
+    if (!output || !dispatcher.ReadGuestString(frame.gpr[1], name, 32))
+        return OrbisEfault;
+
+    const auto attributes = static_cast<std::uint32_t>(frame.gpr[2]);
+    const auto initial = static_cast<std::int32_t>(frame.gpr[3]);
+    const auto maximum = static_cast<std::int32_t>(frame.gpr[4]);
+    if (attributes > 2 || initial < 0 || maximum <= 0 || initial > maximum)
+        return OrbisEinval;
+    try {
+        auto semaphore = std::make_shared<GuestKernelSemaphore>();
+        semaphore->value = static_cast<std::uint32_t>(initial);
+        semaphore->initial = static_cast<std::uint32_t>(initial);
+        semaphore->maximum = static_cast<std::uint32_t>(maximum);
+        std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        if (dispatcher.nextKernelSemaphoreId_ == 0)
+            return OrbisEnomem;
+        const auto handle = dispatcher.nextKernelSemaphoreId_++;
+        dispatcher.kernelSemaphores_.emplace(handle, std::move(semaphore));
+        *output = handle;
+        return 0;
+    } catch (...) {
+        return OrbisEnomem;
+    }
+}
+
+std::uint64_t HleDispatcher::KernelWaitSema(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEsrch = 0x80020003ull;
+    constexpr std::uint64_t OrbisEacces = 0x8002000Dull;
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    constexpr std::uint64_t OrbisEinval = 0x80020016ull;
+    constexpr std::uint64_t OrbisEbusy = 0x80020010ull;
+    constexpr std::uint64_t OrbisEtimedout = 0x8002003Cull;
+    constexpr std::uint64_t OrbisEcanceled = 0x80020055ull;
+    const auto need = static_cast<std::int32_t>(frame.gpr[1]);
+    if (need <= 0) return OrbisEinval;
+    std::uint32_t* guestTimeout = nullptr;
+    std::uint32_t timeout = 0;
+    if (frame.gpr[2] != 0) {
+        guestTimeout = static_cast<std::uint32_t*>(WritablePointer(
+            dispatcher, frame, frame.gpr[2], sizeof(std::uint32_t)));
+        auto const* readableTimeout = static_cast<std::uint32_t const*>(ReadablePointer(
+            dispatcher, frame, frame.gpr[2], sizeof(std::uint32_t)));
+        if (!guestTimeout || !readableTimeout) return OrbisEfault;
+        timeout = *readableTimeout;
+    }
+    std::shared_ptr<GuestKernelSemaphore> semaphore;
+    {
+        std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        auto found = dispatcher.kernelSemaphores_.find(
+            static_cast<std::uint32_t>(frame.gpr[0]));
+        if (found == dispatcher.kernelSemaphores_.end()) return OrbisEsrch;
+        semaphore = found->second;
+    }
+    const auto start = std::chrono::steady_clock::now();
+    std::unique_lock lock(semaphore->mutex);
+    if (semaphore->value >= static_cast<std::uint32_t>(need)) {
+        semaphore->value -= static_cast<std::uint32_t>(need);
+        return 0;
+    }
+    if (frame.gpr[2] != 0 && timeout == 0) return OrbisEtimedout;
+    if (semaphore->deleted) return OrbisEacces;
+    const auto generation = semaphore->cancellationGeneration;
+    ++semaphore->waiters;
+    const auto ready = [&] {
+        return semaphore->deleted ||
+               semaphore->cancellationGeneration != generation ||
+               semaphore->value >= static_cast<std::uint32_t>(need);
+    };
+    bool awakened = false;
+    if (frame.gpr[2] == 0) {
+        semaphore->condition.wait(lock, ready);
+        awakened = true;
+    } else {
+        awakened = semaphore->condition.wait_for(
+            lock, std::chrono::microseconds(timeout), ready);
+    }
+    --semaphore->waiters;
+    if (guestTimeout) {
+        const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - start).count();
+        *guestTimeout = awakened
+            ? (elapsed >= timeout ? 0u : timeout - static_cast<std::uint32_t>(elapsed))
+            : 0u;
+    }
+    if (semaphore->deleted) return OrbisEacces;
+    if (semaphore->cancellationGeneration != generation) return OrbisEcanceled;
+    if (!awakened) return OrbisEtimedout;
+    if (semaphore->value < static_cast<std::uint32_t>(need)) return OrbisEbusy;
+    semaphore->value -= static_cast<std::uint32_t>(need);
+    return 0;
+}
+
+std::uint64_t HleDispatcher::KernelPollSema(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEsrch = 0x80020003ull;
+    constexpr std::uint64_t OrbisEinval = 0x80020016ull;
+    constexpr std::uint64_t OrbisEbusy = 0x80020010ull;
+    const auto need = static_cast<std::int32_t>(frame.gpr[1]);
+    if (need <= 0) return OrbisEinval;
+    std::shared_ptr<GuestKernelSemaphore> semaphore;
+    {
+        std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        auto found = dispatcher.kernelSemaphores_.find(
+            static_cast<std::uint32_t>(frame.gpr[0]));
+        if (found == dispatcher.kernelSemaphores_.end()) return OrbisEsrch;
+        semaphore = found->second;
+    }
+    std::scoped_lock lock(semaphore->mutex);
+    if (semaphore->deleted) return OrbisEsrch;
+    if (semaphore->value < static_cast<std::uint32_t>(need)) return OrbisEbusy;
+    semaphore->value -= static_cast<std::uint32_t>(need);
+    return 0;
+}
+
+std::uint64_t HleDispatcher::KernelSignalSema(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEsrch = 0x80020003ull;
+    constexpr std::uint64_t OrbisEinval = 0x80020016ull;
+    const auto signal = static_cast<std::int32_t>(frame.gpr[1]);
+    if (signal <= 0) return OrbisEinval;
+    std::shared_ptr<GuestKernelSemaphore> semaphore;
+    {
+        std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        auto found = dispatcher.kernelSemaphores_.find(
+            static_cast<std::uint32_t>(frame.gpr[0]));
+        if (found == dispatcher.kernelSemaphores_.end()) return OrbisEsrch;
+        semaphore = found->second;
+    }
+    {
+        std::scoped_lock lock(semaphore->mutex);
+        if (semaphore->deleted) return OrbisEsrch;
+        if (static_cast<std::uint64_t>(semaphore->value) +
+                static_cast<std::uint32_t>(signal) > semaphore->maximum)
+            return OrbisEinval;
+        semaphore->value += static_cast<std::uint32_t>(signal);
+    }
+    semaphore->condition.notify_all();
+    return 0;
+}
+
+std::uint64_t HleDispatcher::KernelCancelSema(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEsrch = 0x80020003ull;
+    constexpr std::uint64_t OrbisEfault = 0x8002000Eull;
+    constexpr std::uint64_t OrbisEinval = 0x80020016ull;
+    auto* waitersOutput = frame.gpr[2] == 0 ? nullptr : static_cast<std::int32_t*>(
+        WritablePointer(dispatcher, frame, frame.gpr[2], sizeof(std::int32_t)));
+    if (frame.gpr[2] != 0 && !waitersOutput) return OrbisEfault;
+    const auto requested = static_cast<std::int32_t>(frame.gpr[1]);
+    std::shared_ptr<GuestKernelSemaphore> semaphore;
+    {
+        std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        auto found = dispatcher.kernelSemaphores_.find(
+            static_cast<std::uint32_t>(frame.gpr[0]));
+        if (found == dispatcher.kernelSemaphores_.end()) return OrbisEsrch;
+        semaphore = found->second;
+    }
+    {
+        std::scoped_lock lock(semaphore->mutex);
+        const auto newValue = requested < 0 ? semaphore->initial
+                                             : static_cast<std::uint32_t>(requested);
+        if (newValue > semaphore->maximum) return OrbisEinval;
+        if (waitersOutput) *waitersOutput = static_cast<std::int32_t>(semaphore->waiters);
+        semaphore->value = newValue;
+        ++semaphore->cancellationGeneration;
+    }
+    semaphore->condition.notify_all();
+    return 0;
+}
+
+std::uint64_t HleDispatcher::KernelDeleteSema(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t OrbisEsrch = 0x80020003ull;
+    std::shared_ptr<GuestKernelSemaphore> semaphore;
+    {
+        std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+        auto found = dispatcher.kernelSemaphores_.find(
+            static_cast<std::uint32_t>(frame.gpr[0]));
+        if (found == dispatcher.kernelSemaphores_.end()) return OrbisEsrch;
+        semaphore = found->second;
+        dispatcher.kernelSemaphores_.erase(found);
+    }
+    {
+        std::scoped_lock lock(semaphore->mutex);
+        semaphore->deleted = true;
+    }
+    semaphore->condition.notify_all();
     return 0;
 }
 
