@@ -197,14 +197,14 @@
           <StackPanel Spacing="18" Margin="0,14,0,10">
             <Border Background="#0D2630" BorderBrush="#33535D" BorderThickness="1" CornerRadius="12" Padding="24">
               <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <StackPanel Spacing="7"><TextBlock Text="XS4" FontSize="24"/><TextBlock Text="Versão instalada" FontSize="14" Foreground="#AFCBD2"/><TextBlock x:Name="CurrentVersion" Text="0.120.0.0" FontSize="20" Foreground="#F2FBFC"/></StackPanel>
+                <StackPanel Spacing="7"><TextBlock Text="XS4" FontSize="24"/><TextBlock Text="Versão instalada" FontSize="14" Foreground="#AFCBD2"/><TextBlock x:Name="CurrentVersion" Text="0.121.0.0" FontSize="20" Foreground="#F2FBFC"/></StackPanel>
                 <Border Grid.Column="1" Width="72" Height="72" CornerRadius="18" Background="#11313B" VerticalAlignment="Center"><Image Width="64" Height="64" Source="ms-appx:///Assets/XS4-Mark.png" Stretch="Uniform"/></Border>
               </Grid>
             </Border>
             <Border Background="#0D2630" BorderBrush="#33535D" BorderThickness="1" CornerRadius="12" Padding="24">
               <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="260"/></Grid.ColumnDefinitions>
-                <StackPanel Spacing="9" VerticalAlignment="Center" Margin="0,0,28,0"><TextBlock Text="Diagnóstico e suporte" FontSize="24"/><TextBlock Text="Exporte o relatório técnico da última sessão para investigar falhas." FontSize="16" Foreground="#AFCBD2" TextWrapping="Wrap"/><TextBlock x:Name="SettingsStatus" FontSize="14" Foreground="#C9E2E8" TextWrapping="Wrap"/></StackPanel>
-                <Button x:Name="Export" Grid.Column="1" Content="Exportar relatório" HorizontalAlignment="Stretch" VerticalAlignment="Center" HorizontalContentAlignment="Center" Background="#19606A" BorderBrush="#26DCD6"/>
+                <StackPanel Spacing="9" VerticalAlignment="Center" Margin="0,0,28,0"><TextBlock Text="Diagnóstico e suporte" FontSize="24"/><TextBlock Text="Exporte toda a última sessão em um único JSON para baixar pelo Device Portal." FontSize="16" Foreground="#AFCBD2" TextWrapping="Wrap"/><TextBlock x:Name="SettingsStatus" FontSize="14" Foreground="#C9E2E8" TextWrapping="Wrap"/></StackPanel>
+                <Button x:Name="Export" Grid.Column="1" Content="Exportar 1 arquivo" HorizontalAlignment="Stretch" VerticalAlignment="Center" HorizontalContentAlignment="Center" Background="#19606A" BorderBrush="#26DCD6"/>
               </Grid>
             </Border>
           </StackPanel>
@@ -215,7 +215,7 @@
       <Grid x:Name="DiagnosticsView" Margin="54,24,54,20" Visibility="Collapsed">
         <Grid.RowDefinitions><RowDefinition Height="74"/><RowDefinition Height="62"/><RowDefinition Height="*"/><RowDefinition Height="52"/></Grid.RowDefinitions>
         <Grid Grid.Row="0"><StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="16"><Button x:Name="DiagnosticsBack" Content="←" Width="54" Height="54" Padding="0" FontSize="26"/><TextBlock Text="Diagnóstico avançado" FontSize="29" FontWeight="Light" VerticalAlignment="Center"/></StackPanel><TextBlock x:Name="DeviceInfo" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="12" Foreground="#AFCBD2" TextWrapping="Wrap" MaxWidth="700" TextAlignment="Right"/></Grid>
-        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center"><Button x:Name="RunSelected" Content="Executar probe" Padding="15,9"/><Button x:Name="TestAngle" Content="Testar vídeo ANGLE" Padding="15,9"/><Button x:Name="DiagnosticsExport" Content="Exportar relatório" Padding="15,9"/></StackPanel>
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center"><Button x:Name="RunSelected" Content="Executar probe" Padding="15,9"/><Button x:Name="TestAngle" Content="Testar vídeo ANGLE" Padding="15,9"/><Button x:Name="DiagnosticsExport" Content="Exportar 1 arquivo" Padding="15,9"/></StackPanel>
         <Grid Grid.Row="2" Margin="0,8,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="5*"/><ColumnDefinition Width="6*"/></Grid.ColumnDefinitions><ListView Grid.Column="0" x:Name="Tests" SelectionMode="Single" IsItemClickEnabled="False" Margin="0,0,24,0" Background="#102B35" BorderBrush="#33535D" BorderThickness="1"/><ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Background="#102B35" BorderBrush="#33535D" BorderThickness="1" Padding="20"><StackPanel Spacing="14"><TextBlock x:Name="Details" Text="Selecione um probe para ver os detalhes coletados." FontSize="17" TextWrapping="Wrap" IsTextSelectionEnabled="True"/><TextBlock Text="Os probes validam recursos específicos; não executam o arquivo importado." FontSize="14" Foreground="#AFCBD2" TextWrapping="Wrap"/></StackPanel></ScrollViewer></Grid>
         <TextBlock x:Name="Status" Grid.Row="3" FontSize="13" TextWrapping="Wrap" VerticalAlignment="Center" Foreground="#AFC4DE"/>
       </Grid>
@@ -251,7 +251,7 @@
   <Grid x:Name="ShortcutOverlay" Visibility="Collapsed" Background="#D908183C">
     <Border Width="510" Padding="24" Background="#F0112B5B" CornerRadius="20" HorizontalAlignment="Center" VerticalAlignment="Center">
       <StackPanel Spacing="8">
-        <Button x:Name="ShortcutExport" Content="Exportar relatório" HorizontalAlignment="Stretch" Height="62" HorizontalContentAlignment="Left" Background="#193B70" BorderThickness="0"/>
+        <Button x:Name="ShortcutExport" Content="Exportar 1 arquivo" HorizontalAlignment="Stretch" Height="62" HorizontalContentAlignment="Left" Background="#193B70" BorderThickness="0"/>
         <Button x:Name="ShortcutResume" Content="Retomar processo" HorizontalAlignment="Stretch" Height="62" HorizontalContentAlignment="Left" Background="#193B70" BorderThickness="0" Visibility="Collapsed"/>
         <Button x:Name="ShortcutEnd" Content="Encerrar processo" HorizontalAlignment="Stretch" Height="62" HorizontalContentAlignment="Left" Background="#193B70" BorderThickness="0" Visibility="Collapsed"/>
         <Button x:Name="ShortcutExit" Content="Sair do XS4" HorizontalAlignment="Stretch" Height="62" HorizontalContentAlignment="Left" Background="#193B70" BorderThickness="0"/>

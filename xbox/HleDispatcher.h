@@ -301,6 +301,7 @@ private:
     static std::uint64_t KernelCancelSema(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t KernelDeleteSema(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t PthreadAttrInit(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadAttrDestroy(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t PthreadAttrSetDetachState(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t PthreadAttrSetStackSize(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t PthreadCreate(HleDispatcher&, GuestCallFrame const&) noexcept;

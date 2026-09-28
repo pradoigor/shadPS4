@@ -850,7 +850,6 @@ struct App : ApplicationT<App> {
     void ExportReport() {
         if (!Save()) return;
         try {
-            auto name = L"report-export-" + std::to_wstring(static_cast<uint64_t>(Lab::Now())) + L".json";
             auto exported = report->Json();
             Windows::Data::Json::JsonObject debug;
             auto directory = std::filesystem::path(report->directory);
@@ -883,9 +882,26 @@ struct App : ApplicationT<App> {
                 }
                 debug.SetNamedValue(field, events);
             };
+            auto includeRaw = [&](wchar_t const* field, std::filesystem::path const& path) {
+                if (!std::filesystem::is_regular_file(path)) return;
+                std::ifstream input(path, std::ios::binary);
+                std::string raw{std::istreambuf_iterator<char>(input), {}};
+                debug.SetNamedValue(field,
+                    Windows::Data::Json::JsonValue::CreateStringValue(to_hstring(raw)));
+            };
             includeLines(L"hle_trace", directory / L"homebrew-hle-trace.jsonl");
-            if (!sessionName.empty())
+            includeRaw(L"hle_trace_jsonl", directory / L"homebrew-hle-trace.jsonl");
+            if (!sessionId.empty()) {
+                const auto archive = directory / (L"homebrew-hle-" + sessionId + L".jsonl");
+                includeRaw(L"hle_archive_jsonl", archive);
+                auto previous = archive;
+                previous += L".previous";
+                includeRaw(L"hle_archive_previous_jsonl", previous);
+            }
+            if (!sessionName.empty()) {
                 includeLines(L"session_events", directory / std::filesystem::path(sessionName).filename());
+                includeRaw(L"session_jsonl", directory / std::filesystem::path(sessionName).filename());
+            }
             auto lastHle = directory / L"homebrew-last-hle.json";
             auto anglePath = directory / L"angle-video.json";
             if (std::filesystem::is_regular_file(anglePath)) {
@@ -912,8 +928,18 @@ struct App : ApplicationT<App> {
                 }
             }
             exported.SetNamedValue(L"homebrew_debug", debug);
+            std::wstring safeSessionId;
+            for (const auto character : sessionId) {
+                if ((character >= L'0' && character <= L'9') || character == L'-')
+                    safeSessionId.push_back(character);
+                if (safeSessionId.size() == 64) break;
+            }
+            if (safeSessionId.empty())
+                safeSessionId = std::to_wstring(static_cast<uint64_t>(Lab::Now()));
+            const auto name = L"homebrew-report-" + safeSessionId + L".json";
             Lab::WriteDurable(report->directory + L"\\" + name, to_string(exported.Stringify()));
-            SetNotice(L"Relatório exportado: LocalState\\" + name + L". Baixe pelo Device Portal.");
+            SetNotice(L"Relatório completo em um arquivo: LocalState\\" + name +
+                      L". Baixe somente este JSON pelo Device Portal.");
         } catch (hresult_error const& e) {
             SetNotice(L"Falha na exportação: " + std::wstring(e.message()));
         } catch (std::exception const& e) {

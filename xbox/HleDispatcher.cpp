@@ -642,10 +642,14 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "pthread_mutex_trylock" || name == "scePthreadMutexTrylock") use(&PthreadMutexTryLock);
     if (name == "pthread_mutex_unlock" || name == "scePthreadMutexUnlock") use(&PthreadMutexUnlock);
     if (name == "pthread_cond_init" || name == "scePthreadCondInit") use(&PthreadCondInit);
-    if (name == "pthread_cond_destroy") use(&PthreadCondDestroy);
-    if (name == "pthread_cond_wait") use(&PthreadCondWait);
-    if (name == "pthread_cond_signal") use(&PthreadCondSignal);
-    if (name == "pthread_cond_broadcast") use(&PthreadCondBroadcast);
+    if (name == "pthread_cond_destroy" || name == "scePthreadCondDestroy")
+        use(&PthreadCondDestroy);
+    if (name == "pthread_cond_wait" || name == "scePthreadCondWait")
+        use(&PthreadCondWait);
+    if (name == "pthread_cond_signal" || name == "scePthreadCondSignal")
+        use(&PthreadCondSignal);
+    if (name == "pthread_cond_broadcast" || name == "scePthreadCondBroadcast")
+        use(&PthreadCondBroadcast);
     if (name == "sem_init") use(&SemaphoreInit);
     if (name == "sem_destroy") use(&SemaphoreDestroy);
     if (name == "sem_trywait") use(&SemaphoreTryWait);
@@ -659,16 +663,22 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "sceKernelSignalSema") use(&KernelSignalSema);
     if (name == "sceKernelCancelSema") use(&KernelCancelSema);
     if (name == "sceKernelDeleteSema") use(&KernelDeleteSema);
-    if (name == "pthread_attr_init") use(&PthreadAttrInit);
-    if (name == "pthread_attr_setdetachstate") use(&PthreadAttrSetDetachState);
-    if (name == "pthread_attr_setstacksize") use(&PthreadAttrSetStackSize);
-    if (name == "pthread_create") use(&PthreadCreate);
-    if (name == "pthread_join") use(&PthreadJoin);
-    if (name == "pthread_detach") use(&PthreadDetach);
-    if (name == "pthread_key_create") use(&PthreadKeyCreate);
-    if (name == "pthread_getspecific") use(&PthreadGetSpecific);
-    if (name == "pthread_setspecific") use(&PthreadSetSpecific);
-    if (name == "pthread_once") use(&PthreadOnce);
+    if (name == "pthread_attr_init" || name == "scePthreadAttrInit") use(&PthreadAttrInit);
+    if (name == "pthread_attr_destroy" || name == "scePthreadAttrDestroy")
+        use(&PthreadAttrDestroy);
+    if (name == "pthread_attr_setdetachstate" || name == "scePthreadAttrSetdetachstate")
+        use(&PthreadAttrSetDetachState);
+    if (name == "pthread_attr_setstacksize" || name == "scePthreadAttrSetstacksize")
+        use(&PthreadAttrSetStackSize);
+    if (name == "pthread_create" || name == "scePthreadCreate") use(&PthreadCreate);
+    if (name == "pthread_join" || name == "scePthreadJoin") use(&PthreadJoin);
+    if (name == "pthread_detach" || name == "scePthreadDetach") use(&PthreadDetach);
+    if (name == "pthread_key_create" || name == "scePthreadKeyCreate") use(&PthreadKeyCreate);
+    if (name == "pthread_getspecific" || name == "scePthreadGetspecific")
+        use(&PthreadGetSpecific);
+    if (name == "pthread_setspecific" || name == "scePthreadSetspecific")
+        use(&PthreadSetSpecific);
+    if (name == "pthread_once" || name == "scePthreadOnce") use(&PthreadOnce);
     if (name == "pthread_rwlock_init" || name == "scePthreadRwlockInit")
         use(&PthreadRwlockInit);
     if (name == "pthread_rwlock_destroy" || name == "scePthreadRwlockDestroy")
@@ -4283,6 +4293,17 @@ std::uint64_t HleDispatcher::PthreadAttrInit(
     } catch (...) {
         return 12;
     }
+}
+
+std::uint64_t HleDispatcher::PthreadAttrDestroy(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto* slot = static_cast<std::uint64_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[0], sizeof(std::uint64_t)));
+    if (!slot) return 22;
+    std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
+    if (!dispatcher.threadAttributes_.erase(frame.gpr[0])) return 22;
+    *slot = 0;
+    return 0;
 }
 
 std::uint64_t HleDispatcher::PthreadAttrSetDetachState(
