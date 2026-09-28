@@ -5,6 +5,7 @@
 #include "SysvThunk.h"
 
 #include <cstddef>
+#include <cstdio>
 #include <cstdint>
 #include <array>
 #include <atomic>
@@ -12,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <map>
 #include <mutex>
 #include <stdexcept>
 #include <shared_mutex>
@@ -105,6 +107,16 @@ private:
     };
     std::vector<std::unique_ptr<GuestModule>> guestModules_;
     std::unordered_map<std::string, std::uint64_t> guestExports_;
+    std::mutex environmentMutex_;
+    std::map<std::string, std::string> guestEnvironment_;
+    struct DirectAllocation {
+        std::uint64_t length{};
+        std::int32_t memoryType{};
+    };
+    std::mutex directMemoryMutex_;
+    std::map<std::uint64_t, DirectAllocation> directAllocations_;
+    std::mutex fileStreamMutex_;
+    std::unordered_set<std::FILE*> guestFileStreams_;
     std::uint64_t GuestModuleSymbol(std::uint64_t handle,
                                     std::string_view name) const noexcept;
     struct Entry {
@@ -180,6 +192,26 @@ private:
     static std::uint64_t LibcMalloc(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t CxxAlignedNew(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t LibcFree(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PosixSetenv(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PosixGetenv(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PosixUnsetenv(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PosixPuts(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PosixStrcat(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PosixTime(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelIsNeoMode(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelProcessCounterFrequency(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t AppContentInitialize(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelDirectMemorySize(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelAllocateDirectMemory(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelDirectMemoryQuery(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelVirtualQuery(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t LibcMallocStatsFast(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t LibcFopen(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t LibcFclose(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t LibcFprintf(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t LibcVsnprintf(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t KernelGetModuleList(HleDispatcher&, GuestCallFrame const&) noexcept;
+    static std::uint64_t PthreadSetAffinity(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t LibcSnprintf(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t LibcPrintf(HleDispatcher&, GuestCallFrame const&) noexcept;
     static std::uint64_t CxaGuardAcquire(HleDispatcher&, GuestCallFrame const&) noexcept;

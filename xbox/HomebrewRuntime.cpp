@@ -688,6 +688,19 @@ void HomebrewRuntime::Start(std::filesystem::path executable,
     throw std::runtime_error("Não foi possível mapear a imagem real do homebrew.");
   dispatcher_->AttachGuestMemory(memory_.get());
   dispatcher_->ConfigureMainExports(load_, *memory_);
+  // System PRXs bundled with a title provide their own implementations.
+  // Load them before e_entry so already bound import thunks can resolve
+  // exports as the guest calls them.
+  for (auto const* systemModule : {"sce_module/libc.prx",
+                                   "sce_module/libSceFios2.prx"}) {
+    std::error_code systemError;
+    if (std::filesystem::is_regular_file(executable_.parent_path() / systemModule,
+                                         systemError) && !systemError) {
+      const auto handle = dispatcher_->LoadGuestModule(systemModule, 0, 0, 0);
+      Record("system_module", std::string(systemModule) +
+          "; handle=" + std::to_string(handle));
+    }
+  }
   const auto entry = memory_->RuntimeAddress(load_.entry);
   if (!memory_->IsExecutable(entry))
     throw std::runtime_error("O ponto de entrada não pertence a um segmento executável.");

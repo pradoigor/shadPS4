@@ -30,6 +30,7 @@
 #include <string>
 #include <thread>
 #include <cstdio>
+#include <ctime>
 
 namespace Lab {
 namespace {
@@ -424,6 +425,7 @@ std::uint64_t HleDispatcher::LoadGuestModule(
 HleDispatcher::~HleDispatcher() {
     SetPaused(false);
     threads_.clear();
+    for (auto* stream : guestFileStreams_) std::fclose(stream);
     for (auto const& [descriptor, socket] : sockets_) {
         (void)descriptor;
         closesocket(static_cast<SOCKET>(socket));
@@ -510,6 +512,28 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "memalign") use(&LibcMemalign);
     if (name == "malloc") use(&LibcMalloc);
     if (name == "free") use(&LibcFree);
+    if (name == "setenv") use(&PosixSetenv);
+    if (name == "getenv") use(&PosixGetenv);
+    if (name == "unsetenv") use(&PosixUnsetenv);
+    if (name == "puts") use(&PosixPuts);
+    if (name == "strcat") use(&PosixStrcat);
+    if (name == "time") use(&PosixTime);
+    if (name == "sceKernelIsNeoMode") use(&KernelIsNeoMode);
+    if (name == "sceKernelGetProcessTimeCounterFrequency")
+        use(&KernelProcessCounterFrequency);
+    if (name == "sceAppContentInitialize") use(&AppContentInitialize);
+    if (name == "sceKernelGetDirectMemorySize") use(&KernelDirectMemorySize);
+    if (name == "sceKernelAllocateDirectMemory") use(&KernelAllocateDirectMemory);
+    if (name == "sceKernelDirectMemoryQuery") use(&KernelDirectMemoryQuery);
+    if (name == "sceKernelVirtualQuery") use(&KernelVirtualQuery);
+    if (name == "malloc_stats_fast" || name == "_malloc_stats_fast" ||
+        name == "_sceLibcMallocStatsFast") use(&LibcMallocStatsFast);
+    if (name == "fopen") use(&LibcFopen);
+    if (name == "fclose") use(&LibcFclose);
+    if (name == "fprintf") use(&LibcFprintf);
+    if (name == "vsnprintf") use(&LibcVsnprintf);
+    if (name == "sceKernelGetModuleList") use(&KernelGetModuleList);
+    if (name == "scePthreadSetaffinity") use(&PthreadSetAffinity);
     if (name == "_Znwm" || name == "_Znam" ||
         name == "_ZnwmRKSt9nothrow_t" ||
         name == "_ZnamRKSt9nothrow_t") use(&LibcMalloc);
@@ -610,7 +634,7 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "pthread_mutex_lock" || name == "scePthreadMutexLock") use(&PthreadMutexLock);
     if (name == "pthread_mutex_trylock" || name == "scePthreadMutexTrylock") use(&PthreadMutexTryLock);
     if (name == "pthread_mutex_unlock" || name == "scePthreadMutexUnlock") use(&PthreadMutexUnlock);
-    if (name == "pthread_cond_init") use(&PthreadCondInit);
+    if (name == "pthread_cond_init" || name == "scePthreadCondInit") use(&PthreadCondInit);
     if (name == "pthread_cond_destroy") use(&PthreadCondDestroy);
     if (name == "pthread_cond_wait") use(&PthreadCondWait);
     if (name == "pthread_cond_signal") use(&PthreadCondSignal);
@@ -891,7 +915,26 @@ std::uint64_t HleDispatcher::Dispatch(void* context, std::uint64_t slot,
         sequence = ++self->callSequence_;
     }
     writeTrace("enter", 0, false);
-    const auto result = entry.handler ? entry.handler(*self, *frame) : OrbisEnosys;
+    std::uint64_t result = OrbisEnosys;
+    if (!entry.implemented &&
+        (entry.name == "SetDataFolder" ||
+         entry.name == "unity_mono_set_user_malloc_mutex" ||
+         entry.name == "sceFiosInitialize" ||
+         entry.name == "sceFiosIOFilterAdd" ||
+         entry.name == "sceFiosArchiveGetMountBufferSizeSync")) {
+        for (auto const& [encoded, address] : self->guestExports_) {
+            if (encoded == entry.encoded ||
+                (encoded.size() > entry.nid.size() &&
+                 encoded.compare(0, entry.nid.size(), entry.nid) == 0 &&
+                 encoded[entry.nid.size()] == '#')) {
+                result = InvokeGuestSysv3(reinterpret_cast<void*>(address),
+                                          frame->gpr[0], frame->gpr[1], frame->gpr[2]);
+                break;
+            }
+        }
+    } else {
+        result = entry.handler ? entry.handler(*self, *frame) : OrbisEnosys;
+    }
     writeTrace("return", result, true);
     if (entry.nid == "6Z83sYWFlA8" || entry.name == "exit" ||
         (entry.name == "raise" && frame->gpr[0] == 6)) {
@@ -1997,25 +2040,254 @@ std::uint64_t HleDispatcher::LibcFree(
     return MspaceFree(dispatcher, adjusted);
 }
 
+std::uint64_t HleDispatcher::PosixSetenv(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    std::string name, value;
+    if (!dispatcher.ReadGuestString(frame.gpr[0], name, 4096) ||
+        !dispatcher.ReadGuestString(frame.gpr[1], value, 65536)) {
+        GuestPosixErrno = 14;
+        return UINT64_MAX;
+    }
+    if (name.empty() || name.find('=') != std::string::npos) {
+        GuestPosixErrno = 22;
+        return UINT64_MAX;
+    }
+    try {
+        std::scoped_lock lock(dispatcher.environmentMutex_);
+        auto found = dispatcher.guestEnvironment_.find(name);
+        if (found == dispatcher.guestEnvironment_.end())
+            dispatcher.guestEnvironment_.emplace(std::move(name), std::move(value));
+        else if (frame.gpr[2])
+            found->second = std::move(value);
+        return 0;
+    } catch (...) {
+        GuestPosixErrno = 12;
+        return UINT64_MAX;
+    }
+}
+
+std::uint64_t HleDispatcher::PosixGetenv(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    std::string name;
+    if (!dispatcher.ReadGuestString(frame.gpr[0], name, 4096)) return 0;
+    std::scoped_lock lock(dispatcher.environmentMutex_);
+    auto found = dispatcher.guestEnvironment_.find(name);
+    return found == dispatcher.guestEnvironment_.end() ? 0 :
+        reinterpret_cast<std::uint64_t>(found->second.c_str());
+}
+
+std::uint64_t HleDispatcher::PosixUnsetenv(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    std::string name;
+    if (!dispatcher.ReadGuestString(frame.gpr[0], name, 4096)) {
+        GuestPosixErrno = 14;
+        return UINT64_MAX;
+    }
+    if (name.empty() || name.find('=') != std::string::npos) {
+        GuestPosixErrno = 22;
+        return UINT64_MAX;
+    }
+    std::scoped_lock lock(dispatcher.environmentMutex_);
+    dispatcher.guestEnvironment_.erase(name);
+    return 0;
+}
+
+std::uint64_t HleDispatcher::PosixPuts(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    std::string value;
+    if (!dispatcher.ReadGuestString(frame.gpr[0], value, 65536)) {
+        GuestPosixErrno = 14;
+        return UINT64_MAX;
+    }
+    dispatcher.GraphicsLog(value);
+    return value.size() + 1;
+}
+
+std::uint64_t HleDispatcher::PosixStrcat(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    std::string destination, source;
+    if (!dispatcher.ReadGuestString(frame.gpr[0], destination, 65536) ||
+        !dispatcher.ReadGuestString(frame.gpr[1], source, 65536) ||
+        source.size() >= 65536 ||
+        destination.size() > 65535 - source.size()) {
+        GuestPosixErrno = 14;
+        return 0;
+    }
+    auto* output = static_cast<char*>(WritablePointer(
+        dispatcher, frame, frame.gpr[0], destination.size() + source.size() + 1));
+    if (!output) {
+        GuestPosixErrno = 14;
+        return 0;
+    }
+    std::memcpy(output + destination.size(), source.c_str(), source.size() + 1);
+    return frame.gpr[0];
+}
+
+std::uint64_t HleDispatcher::PosixTime(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    const auto seconds = static_cast<std::uint64_t>(std::time(nullptr));
+    if (frame.gpr[0]) {
+        auto* output = static_cast<std::uint64_t*>(WritablePointer(
+            dispatcher, frame, frame.gpr[0], sizeof(seconds)));
+        if (!output) { GuestPosixErrno = 14; return UINT64_MAX; }
+        *output = seconds;
+    }
+    return seconds;
+}
+
+std::uint64_t HleDispatcher::KernelIsNeoMode(
+    HleDispatcher&, GuestCallFrame const&) noexcept {
+    return 0;
+}
+
+std::uint64_t HleDispatcher::KernelProcessCounterFrequency(
+    HleDispatcher&, GuestCallFrame const&) noexcept {
+    LARGE_INTEGER frequency{};
+    return QueryPerformanceFrequency(&frequency) ?
+        static_cast<std::uint64_t>(frequency.QuadPart) : 0;
+}
+
+std::uint64_t HleDispatcher::AppContentInitialize(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    // OrbisAppContentBootParam is 40 bytes. Its reserved fields and attr are
+    // zero when no additional content was mounted for this title.
+    if (frame.gpr[1]) {
+        auto* output = WritablePointer(dispatcher, frame, frame.gpr[1], 40);
+        if (!output) return 0x8002000Eull;
+        std::memset(output, 0, 40);
+    }
+    return 0;
+}
+
+std::uint64_t HleDispatcher::KernelDirectMemorySize(
+    HleDispatcher&, GuestCallFrame const&) noexcept {
+    return 5248ull * 1024 * 1024;
+}
+
+std::uint64_t HleDispatcher::KernelAllocateDirectMemory(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t Einval = 0x80020016ull;
+    constexpr std::uint64_t Eagain = 0x80020023ull;
+    const auto start = frame.gpr[0], end = frame.gpr[1];
+    const auto length = frame.gpr[2];
+    const auto alignment = frame.gpr[3] ? frame.gpr[3] : 0x4000ull;
+    if (!length || (length & 0x3fffull) || alignment < 0x4000 ||
+        (alignment & (alignment - 1)) || end > KernelDirectMemorySize(dispatcher, frame) ||
+        end <= start || length > end - start || frame.gpr[4] > 10)
+        return Einval;
+    auto* output = static_cast<std::uint64_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[5], sizeof(std::uint64_t)));
+    if (!output) return Einval;
+    std::scoped_lock lock(dispatcher.directMemoryMutex_);
+    auto candidate = (start + alignment - 1) & ~(alignment - 1);
+    for (auto const& [base, allocation] : dispatcher.directAllocations_) {
+        if (candidate <= base && length <= base - candidate) break;
+        if (candidate < base + allocation.length) {
+            if (base + allocation.length > UINT64_MAX - alignment + 1) return Eagain;
+            candidate = (base + allocation.length + alignment - 1) & ~(alignment - 1);
+        }
+    }
+    if (candidate > end || length > end - candidate) return Eagain;
+    try {
+        dispatcher.directAllocations_.emplace(candidate,
+            DirectAllocation{length, static_cast<std::int32_t>(frame.gpr[4])});
+    } catch (...) { return Eagain; }
+    *output = candidate;
+    return 0;
+}
+
+std::uint64_t HleDispatcher::KernelDirectMemoryQuery(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t Eacces = 0x8002000Dull;
+    if (frame.gpr[3] < 24) return 0x80020016ull;
+    std::scoped_lock lock(dispatcher.directMemoryMutex_);
+    auto found = dispatcher.directAllocations_.upper_bound(frame.gpr[0]);
+    if (found != dispatcher.directAllocations_.begin()) {
+        auto previous = std::prev(found);
+        if (frame.gpr[0] < previous->first + previous->second.length)
+            found = previous;
+    }
+    if (found == dispatcher.directAllocations_.end() ||
+        (frame.gpr[1] != 1 && frame.gpr[0] < found->first)) return Eacces;
+    auto* output = WritablePointer(dispatcher, frame, frame.gpr[2], 24);
+    if (!output) return 0x8002000Eull;
+    struct Query { std::uint64_t start, end; std::int32_t type, pad; };
+    Query result{found->first, found->first + found->second.length,
+                 found->second.memoryType, 0};
+    std::memcpy(output, &result, sizeof(result));
+    return 0;
+}
+
+std::uint64_t HleDispatcher::KernelVirtualQuery(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    constexpr std::uint64_t Eacces = 0x8002000Dull;
+    if (frame.gpr[3] < 72 || frame.gpr[1] > 1) return 0x80020016ull;
+    auto* output = WritablePointer(dispatcher, frame, frame.gpr[2], 72);
+    if (!output) return 0x8002000Eull;
+    auto address = frame.gpr[0];
+    if (frame.gpr[1] == 1 && dispatcher.memory_ &&
+        address < dispatcher.memory_->hostAddress())
+        address = dispatcher.memory_->hostAddress();
+    MEMORY_BASIC_INFORMATION region{};
+    for (int search = 0; search < 64; ++search) {
+        if (!VirtualQuery(reinterpret_cast<void const*>(address), &region, sizeof(region)))
+            return Eacces;
+        const auto base = reinterpret_cast<std::uint64_t>(region.BaseAddress);
+        if (region.State == MEM_COMMIT && region.Type == MEM_PRIVATE) break;
+        if (frame.gpr[1] != 1 || region.RegionSize > UINT64_MAX - base)
+            return Eacces;
+        address = base + region.RegionSize;
+    }
+    if (region.State != MEM_COMMIT || region.Type != MEM_PRIVATE) return Eacces;
+    struct Query {
+        std::uint64_t start, end, offset;
+        std::int32_t protection, memoryType;
+        std::uint8_t flags;
+        char name[32];
+        std::uint8_t padding[7];
+    } result{};
+    static_assert(sizeof(Query) == 72);
+    result.start = reinterpret_cast<std::uint64_t>(region.BaseAddress);
+    result.end = result.start + region.RegionSize;
+    const auto protection = region.Protect & 0xffu;
+    if (protection != PAGE_NOACCESS) result.protection |= 1;
+    if (protection == PAGE_READWRITE || protection == PAGE_EXECUTE_READWRITE)
+        result.protection |= 2;
+    if (protection == PAGE_EXECUTE || protection == PAGE_EXECUTE_READ ||
+        protection == PAGE_EXECUTE_READWRITE) result.protection |= 4;
+    result.flags = 0x10;
+    std::memcpy(output, &result, sizeof(result));
+    return 0;
+}
+
+std::uint64_t HleDispatcher::LibcMallocStatsFast(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto* output = WritablePointer(dispatcher, frame, frame.gpr[0], 40);
+    if (!output) return 0x8002000Eull;
+    struct Stats {
+        std::uint16_t size, version;
+        std::uint32_t reserved;
+        std::uint64_t maxSystem, currentSystem, maxInUse, currentInUse;
+    } result{40, 1, 0, MaxGuestHeapBytes, MaxGuestHeapBytes, 0, 0};
+    static_assert(sizeof(Stats) == 40);
+    {
+        std::scoped_lock lock(dispatcher.allocationsMutex_);
+        result.currentInUse = dispatcher.guestAllocationBytes_;
+        result.maxInUse = dispatcher.guestAllocationBytes_;
+    }
+    std::memcpy(output, &result, sizeof(result));
+    return 0;
+}
+
 namespace {
-bool FormatGuestText(HleDispatcher& dispatcher, GuestCallFrame const& frame,
-                     std::uint64_t formatAddress, unsigned firstArgument,
-                     std::string& output) noexcept {
+template <typename NextArgument>
+bool FormatGuestTextWithArgs(HleDispatcher& dispatcher,
+                             std::uint64_t formatAddress,
+                             NextArgument nextArgument,
+                             std::string& output) noexcept {
     try {
         std::string format;
         if (!dispatcher.GuestString(formatAddress, format, 4096)) return false;
-        unsigned argument = firstArgument;
-        auto nextArgument = [&](std::uint64_t& value) {
-            if (argument < 6) { value = frame.gpr[argument++]; return true; }
-            const auto slot = argument++ - 6;
-            if (slot > 32 || frame.guest_stack > UINT64_MAX - 8 - slot * 8)
-                return false;
-            auto* address = static_cast<std::uint64_t const*>(dispatcher.GuestReadable(
-                frame, frame.guest_stack + 8 + slot * 8, sizeof(value)));
-            if (!address) return false;
-            value = *address;
-            return true;
-        };
         output.clear();
         for (std::size_t index = 0; index < format.size();) {
             if (output.size() > 16384) return false;
@@ -2087,6 +2359,24 @@ bool FormatGuestText(HleDispatcher& dispatcher, GuestCallFrame const& frame,
         return true;
     } catch (...) { return false; }
 }
+
+bool FormatGuestText(HleDispatcher& dispatcher, GuestCallFrame const& frame,
+                     std::uint64_t formatAddress, unsigned firstArgument,
+                     std::string& output) noexcept {
+    unsigned argument = firstArgument;
+    auto nextArgument = [&](std::uint64_t& value) {
+        if (argument < 6) { value = frame.gpr[argument++]; return true; }
+        const auto slot = argument++ - 6;
+        if (slot > 32 || frame.guest_stack > UINT64_MAX - 8 - slot * 8)
+            return false;
+        auto* address = static_cast<std::uint64_t const*>(dispatcher.GuestReadable(
+            frame, frame.guest_stack + 8 + slot * 8, sizeof(value)));
+        if (!address) return false;
+        value = *address;
+        return true;
+    };
+    return FormatGuestTextWithArgs(dispatcher, formatAddress, nextArgument, output);
+}
 }
 
 std::uint64_t HleDispatcher::LibcSnprintf(
@@ -2119,6 +2409,137 @@ std::uint64_t HleDispatcher::LibcPrintf(
         return UINT64_MAX;
     dispatcher.GraphicsLog(output);
     return output.size();
+}
+
+std::uint64_t HleDispatcher::LibcVsnprintf(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    struct SysvVaList {
+        std::uint32_t gpOffset, fpOffset;
+        std::uint64_t overflow, savedRegisters;
+    } args{};
+    auto* guestArgs = ReadablePointer(dispatcher, frame, frame.gpr[3], sizeof(args));
+    if (!guestArgs) return UINT64_MAX;
+    std::memcpy(&args, guestArgs, sizeof(args));
+    unsigned consumed = 0;
+    auto nextArgument = [&](std::uint64_t& value) {
+        if (++consumed > 32) return false;
+        std::uint64_t address{};
+        if (args.gpOffset < 48) {
+            if (args.savedRegisters > UINT64_MAX - args.gpOffset) return false;
+            address = args.savedRegisters + args.gpOffset;
+            args.gpOffset += 8;
+        } else {
+            address = args.overflow;
+            if (args.overflow > UINT64_MAX - 8) return false;
+            args.overflow += 8;
+        }
+        auto* source = ReadablePointer(dispatcher, frame, address, sizeof(value));
+        if (!source) return false;
+        std::memcpy(&value, source, sizeof(value));
+        return true;
+    };
+    std::string output;
+    if (!FormatGuestTextWithArgs(dispatcher, frame.gpr[2], nextArgument, output))
+        return UINT64_MAX;
+    if (frame.gpr[1]) {
+        const auto bytes = static_cast<std::size_t>((std::min<std::uint64_t>)(
+            frame.gpr[1] - 1, output.size()));
+        auto* destination = static_cast<char*>(WritablePointer(
+            dispatcher, frame, frame.gpr[0], bytes + 1));
+        if (!destination) return UINT64_MAX;
+        std::memcpy(destination, output.data(), bytes);
+        destination[bytes] = '\0';
+    }
+    return output.size();
+}
+
+std::uint64_t HleDispatcher::LibcFopen(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    try {
+        std::string path, mode;
+        if (!dispatcher.ReadGuestString(frame.gpr[0], path, 4096) ||
+            !dispatcher.ReadGuestString(frame.gpr[1], mode, 8) || mode.empty() ||
+            std::strchr("rwa", mode.front()) == nullptr ||
+            mode.find_first_not_of("rwa+b") != std::string::npos) {
+            GuestPosixErrno = 22;
+            return 0;
+        }
+        std::filesystem::path host;
+        const bool write = mode.front() != 'r' || mode.find('+') != std::string::npos;
+        if (!dispatcher.ResolveGuestPath(path, write, host)) {
+            GuestPosixErrno = 13;
+            return 0;
+        }
+        std::FILE* stream = nullptr;
+        const auto wideMode = std::wstring(mode.begin(), mode.end());
+        if (_wfopen_s(&stream, host.c_str(), wideMode.c_str()) != 0 || !stream) {
+            GuestPosixErrno = 2;
+            return 0;
+        }
+        try {
+            std::scoped_lock lock(dispatcher.fileStreamMutex_);
+            dispatcher.guestFileStreams_.insert(stream);
+        } catch (...) {
+            std::fclose(stream);
+            GuestPosixErrno = 12;
+            return 0;
+        }
+        return reinterpret_cast<std::uint64_t>(stream);
+    } catch (...) {
+        GuestPosixErrno = 5;
+        return 0;
+    }
+}
+
+std::uint64_t HleDispatcher::LibcFclose(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    auto* stream = reinterpret_cast<std::FILE*>(frame.gpr[0]);
+    std::scoped_lock lock(dispatcher.fileStreamMutex_);
+    if (!dispatcher.guestFileStreams_.erase(stream)) {
+        GuestPosixErrno = 9;
+        return UINT64_MAX;
+    }
+    return std::fclose(stream) == 0 ? 0 : UINT64_MAX;
+}
+
+std::uint64_t HleDispatcher::LibcFprintf(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    std::string output;
+    if (!FormatGuestText(dispatcher, frame, frame.gpr[1], 2, output))
+        return UINT64_MAX;
+    std::scoped_lock lock(dispatcher.fileStreamMutex_);
+    auto* stream = reinterpret_cast<std::FILE*>(frame.gpr[0]);
+    if (!dispatcher.guestFileStreams_.contains(stream)) {
+        GuestPosixErrno = 9;
+        return UINT64_MAX;
+    }
+    const auto written = std::fwrite(output.data(), 1, output.size(), stream);
+    return written == output.size() ? written : UINT64_MAX;
+}
+
+std::uint64_t HleDispatcher::KernelGetModuleList(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    const auto total = dispatcher.guestModules_.size() + 1;
+    if (frame.gpr[1] < total || frame.gpr[1] > 4096)
+        return 0x8002000Cull;
+    auto* handles = static_cast<std::int32_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[0], total * sizeof(std::int32_t)));
+    auto* count = static_cast<std::uint64_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[2], sizeof(std::uint64_t)));
+    if (!handles || !count) return 0x8002000Eull;
+    handles[0] = 0;
+    for (std::size_t index = 0; index < dispatcher.guestModules_.size(); ++index)
+        handles[index + 1] = static_cast<std::int32_t>(
+            dispatcher.guestModules_[index]->handle);
+    *count = total;
+    return 0;
+}
+
+std::uint64_t HleDispatcher::PthreadSetAffinity(
+    HleDispatcher&, GuestCallFrame const& frame) noexcept {
+    // Xbox controls placement of UWP worker threads. An affinity hint does
+    // not change guest-visible scheduling, so accept nonempty masks.
+    return frame.gpr[1] ? 0 : 0x80020016ull;
 }
 
 std::uint64_t HleDispatcher::CxaGuardAcquire(
