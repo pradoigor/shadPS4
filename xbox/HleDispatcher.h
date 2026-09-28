@@ -97,7 +97,12 @@ public:
     std::size_t unresolvedCount() const noexcept;
 
 private:
-    struct GuestModule;
+    struct GuestModule {
+        std::uint64_t handle{};
+        std::filesystem::path host;
+        std::unique_ptr<GuestMemory> memory;
+        std::unordered_map<std::string, std::uint64_t> exports;
+    };
     std::vector<std::unique_ptr<GuestModule>> guestModules_;
     std::unordered_map<std::string, std::uint64_t> guestExports_;
     std::uint64_t GuestModuleSymbol(std::uint64_t handle,

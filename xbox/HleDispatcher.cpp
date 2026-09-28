@@ -283,13 +283,6 @@ bool IsCommittedGuestProcessRange(std::uint64_t address, std::size_t bytes,
 
 } // namespace
 
-struct HleDispatcher::GuestModule {
-    std::uint64_t handle{};
-    std::filesystem::path host;
-    std::unique_ptr<GuestMemory> memory;
-    std::unordered_map<std::string, std::uint64_t> exports;
-};
-
 void HleDispatcher::ConfigureMainExports(ControlledLoadResult const& load,
                                          GuestMemory const& memory) {
     for (auto const& symbol : load.exported_symbols)
