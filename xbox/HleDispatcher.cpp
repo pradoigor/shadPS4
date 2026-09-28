@@ -510,6 +510,28 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "memalign") use(&LibcMemalign);
     if (name == "malloc") use(&LibcMalloc);
     if (name == "free") use(&LibcFree);
+    if (name == "_Znwm" || name == "_Znam" ||
+        name == "_ZnwmRKSt9nothrow_t" ||
+        name == "_ZnamRKSt9nothrow_t") use(&LibcMalloc);
+    if (name == "_ZnwmSt11align_val_t" ||
+        name == "_ZnamSt11align_val_t" ||
+        name == "_ZnwmSt11align_val_tRKSt9nothrow_t" ||
+        name == "_ZnamSt11align_val_tRKSt9nothrow_t")
+        use(&CxxAlignedNew);
+    if (name == "_ZdlPv" || name == "_ZdaPv" ||
+        name == "_ZdlPvm" || name == "_ZdaPvm" ||
+        name == "_ZdlPvRKSt9nothrow_t" ||
+        name == "_ZdaPvRKSt9nothrow_t" ||
+        name == "_ZdlPvmRKSt9nothrow_t" ||
+        name == "_ZdaPvmRKSt9nothrow_t" ||
+        name == "_ZdlPvSt11align_val_t" ||
+        name == "_ZdaPvSt11align_val_t" ||
+        name == "_ZdlPvmSt11align_val_t" ||
+        name == "_ZdaPvmSt11align_val_t" ||
+        name == "_ZdlPvSt11align_val_tRKSt9nothrow_t" ||
+        name == "_ZdaPvSt11align_val_tRKSt9nothrow_t")
+        use(&LibcFree);
+    if (name == "_ZdlPvS_" || name == "_ZdaPvS_") use(&GenericSuccess);
     if (name == "snprintf") use(&LibcSnprintf);
     if (name == "printf") use(&LibcPrintf);
     if (name == "__cxa_guard_acquire") use(&CxaGuardAcquire);
@@ -1955,6 +1977,16 @@ std::uint64_t HleDispatcher::LibcMalloc(
     adjusted.gpr[1] = frame.gpr[0];
     adjusted.gpr[0] = 0;
     return MspaceMalloc(dispatcher, adjusted);
+}
+
+std::uint64_t HleDispatcher::CxxAlignedNew(
+    HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
+    // C++17 aligned operator new receives (size, alignment), matching
+    // the libc memalign handler's (alignment, size) after swapping them.
+    auto adjusted = frame;
+    adjusted.gpr[0] = frame.gpr[1];
+    adjusted.gpr[1] = frame.gpr[0];
+    return LibcMemalign(dispatcher, adjusted);
 }
 
 std::uint64_t HleDispatcher::LibcFree(
