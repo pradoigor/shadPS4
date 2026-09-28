@@ -119,6 +119,7 @@ private:
     std::unordered_set<std::FILE*> guestFileStreams_;
     std::uint64_t GuestModuleSymbol(std::uint64_t handle,
                                     std::string_view name) const noexcept;
+    bool GuestExecutable(std::uint64_t address) const noexcept;
     struct Entry {
         std::string encoded;
         std::string nid;

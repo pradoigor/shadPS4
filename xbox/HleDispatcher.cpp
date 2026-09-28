@@ -311,6 +311,13 @@ std::uint64_t HleDispatcher::GuestModuleSymbol(std::uint64_t handle,
     }
 }
 
+bool HleDispatcher::GuestExecutable(std::uint64_t address) const noexcept {
+    if (memory_ && memory_->IsExecutable(address)) return true;
+    for (auto const& module : guestModules_)
+        if (module->memory && module->memory->IsExecutable(address)) return true;
+    return false;
+}
+
 std::uint64_t HleDispatcher::LoadGuestModule(
     std::string const& path, std::uint64_t arguments,
     std::uint64_t argumentPointer, std::uint64_t resultPointer) noexcept {
@@ -3796,10 +3803,8 @@ std::uint64_t HleDispatcher::PthreadMutexInit(
 
 std::uint64_t HleDispatcher::PthreadMutexDestroy(
     HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
-    auto* slot = dispatcher.memory_
-                     ? static_cast<std::uint64_t*>(dispatcher.memory_->TranslateWritable(
-                           frame.gpr[0], sizeof(std::uint64_t)))
-                     : nullptr;
+    auto* slot = static_cast<std::uint64_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[0], sizeof(std::uint64_t)));
     if (!slot) return 22;
     std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
     const auto found = dispatcher.mutexes_.find(frame.gpr[0]);
@@ -3817,11 +3822,8 @@ std::uint64_t HleDispatcher::PthreadMutexLock(
             std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
             auto found = dispatcher.mutexes_.find(frame.gpr[0]);
             if (found == dispatcher.mutexes_.end()) {
-                auto* slot = dispatcher.memory_
-                                 ? static_cast<std::uint64_t*>(
-                                       dispatcher.memory_->TranslateWritable(
-                                           frame.gpr[0], sizeof(std::uint64_t)))
-                                 : nullptr;
+                auto* slot = static_cast<std::uint64_t*>(WritablePointer(
+                    dispatcher, frame, frame.gpr[0], sizeof(std::uint64_t)));
                 if (!slot || *slot == 2) return 22;
                 mutex = std::make_shared<GuestMutex>();
                 dispatcher.mutexes_[frame.gpr[0]] = mutex;
@@ -3874,10 +3876,8 @@ std::uint64_t HleDispatcher::PthreadMutexUnlock(
 
 std::uint64_t HleDispatcher::PthreadCondInit(
     HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
-    auto* slot = dispatcher.memory_
-                     ? static_cast<std::uint64_t*>(dispatcher.memory_->TranslateWritable(
-                           frame.gpr[0], sizeof(std::uint64_t)))
-                     : nullptr;
+    auto* slot = static_cast<std::uint64_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[0], sizeof(std::uint64_t)));
     if (!slot) return 22;
     try {
         auto condition = std::make_shared<GuestCondition>();
@@ -3892,10 +3892,8 @@ std::uint64_t HleDispatcher::PthreadCondInit(
 
 std::uint64_t HleDispatcher::PthreadCondDestroy(
     HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
-    auto* slot = dispatcher.memory_
-                     ? static_cast<std::uint64_t*>(dispatcher.memory_->TranslateWritable(
-                           frame.gpr[0], sizeof(std::uint64_t)))
-                     : nullptr;
+    auto* slot = static_cast<std::uint64_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[0], sizeof(std::uint64_t)));
     if (!slot) return 22;
     std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
     dispatcher.conditions_.erase(frame.gpr[0]);
@@ -3956,10 +3954,8 @@ std::uint64_t HleDispatcher::PthreadCondBroadcast(
 
 std::uint64_t HleDispatcher::SemaphoreInit(
     HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
-    auto* slot = dispatcher.memory_
-                     ? static_cast<std::uint64_t*>(dispatcher.memory_->TranslateWritable(
-                           frame.gpr[0], sizeof(std::uint64_t)))
-                     : nullptr;
+    auto* slot = static_cast<std::uint64_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[0], sizeof(std::uint64_t)));
     if (!slot || frame.gpr[2] > 32767) return UINT64_MAX;
     try {
         auto semaphore = std::make_shared<GuestSemaphore>();
@@ -3975,10 +3971,8 @@ std::uint64_t HleDispatcher::SemaphoreInit(
 
 std::uint64_t HleDispatcher::SemaphoreDestroy(
     HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
-    auto* slot = dispatcher.memory_
-                     ? static_cast<std::uint64_t*>(dispatcher.memory_->TranslateWritable(
-                           frame.gpr[0], sizeof(std::uint64_t)))
-                     : nullptr;
+    auto* slot = static_cast<std::uint64_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[0], sizeof(std::uint64_t)));
     if (!slot) return UINT64_MAX;
     std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
     if (dispatcher.semaphores_.erase(frame.gpr[0]) == 0) return UINT64_MAX;
@@ -4018,11 +4012,8 @@ std::uint64_t HleDispatcher::SemaphoreWait(
 
 std::uint64_t HleDispatcher::SemaphoreTimedWait(
     HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
-    auto const* timeout = dispatcher.memory_
-                              ? static_cast<OrbisTimespec const*>(
-                                    dispatcher.memory_->Translate(frame.gpr[1],
-                                                                  sizeof(OrbisTimespec)))
-                              : nullptr;
+    auto const* timeout = static_cast<OrbisTimespec const*>(ReadablePointer(
+        dispatcher, frame, frame.gpr[1], sizeof(OrbisTimespec)));
     if (!timeout || timeout->seconds < 0 || timeout->nanoseconds < 0 ||
         timeout->nanoseconds >= 1'000'000'000)
         return UINT64_MAX;
@@ -4047,10 +4038,8 @@ std::uint64_t HleDispatcher::SemaphoreTimedWait(
 
 std::uint64_t HleDispatcher::SemaphoreGetValue(
     HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
-    auto* output = dispatcher.memory_
-                       ? static_cast<std::int32_t*>(dispatcher.memory_->TranslateWritable(
-                             frame.gpr[1], sizeof(std::int32_t)))
-                       : nullptr;
+    auto* output = static_cast<std::int32_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[1], sizeof(std::int32_t)));
     if (!output) return UINT64_MAX;
     std::shared_ptr<GuestSemaphore> semaphore;
     {
@@ -4333,7 +4322,7 @@ std::uint64_t HleDispatcher::PthreadCreate(
     auto* output = static_cast<std::uint64_t*>(WritablePointer(
         dispatcher, frame, frame.gpr[0], sizeof(std::uint64_t)));
     if (!output || !dispatcher.memory_ || dispatcher.guestTlsSlot_ >= 64 ||
-        !dispatcher.memory_->IsExecutable(frame.gpr[2]))
+        !dispatcher.GuestExecutable(frame.gpr[2]))
         return 22;
     try {
         GuestThreadAttribute attribute{};
@@ -4420,11 +4409,8 @@ std::uint64_t HleDispatcher::PthreadJoin(
         }
         if (thread->native.joinable()) thread->native.join();
         if (frame.gpr[1] != 0) {
-            auto* output = dispatcher.memory_
-                               ? static_cast<std::uint64_t*>(
-                                     dispatcher.memory_->TranslateWritable(
-                                         frame.gpr[1], sizeof(std::uint64_t)))
-                               : nullptr;
+            auto* output = static_cast<std::uint64_t*>(WritablePointer(
+                dispatcher, frame, frame.gpr[1], sizeof(std::uint64_t)));
             if (!output) return 14;
             *output = result;
         }
@@ -4450,8 +4436,7 @@ std::uint64_t HleDispatcher::PthreadKeyCreate(
     auto* output = static_cast<std::uint32_t*>(WritablePointer(
         dispatcher, frame, frame.gpr[0], sizeof(std::uint32_t)));
     if (!output) return 22;
-    if (frame.gpr[1] != 0 &&
-        (!dispatcher.memory_ || !dispatcher.memory_->IsExecutable(frame.gpr[1])))
+    if (frame.gpr[1] != 0 && !dispatcher.GuestExecutable(frame.gpr[1]))
         return 22;
     std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
     if (dispatcher.nextKey_ == UINT32_MAX) return 11;
@@ -4489,12 +4474,9 @@ std::uint64_t HleDispatcher::PthreadSetSpecific(
 
 std::uint64_t HleDispatcher::PthreadOnce(
     HleDispatcher& dispatcher, GuestCallFrame const& frame) noexcept {
-    auto* control = dispatcher.memory_
-                        ? static_cast<std::uint32_t*>(dispatcher.memory_->TranslateWritable(
-                              frame.gpr[0], sizeof(std::uint32_t)))
-                        : nullptr;
-    if (!control || !dispatcher.memory_ ||
-        !dispatcher.memory_->IsExecutable(frame.gpr[1]))
+    auto* control = static_cast<std::uint32_t*>(WritablePointer(
+        dispatcher, frame, frame.gpr[0], sizeof(std::uint32_t)));
+    if (!control || !dispatcher.GuestExecutable(frame.gpr[1]))
         return 22;
     try {
         std::shared_ptr<GuestOnce> once;
@@ -4573,10 +4555,8 @@ std::uint64_t HleDispatcher::PthreadRwlockReadLock(
             std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
             auto& slot = dispatcher.rwlocks_[frame.gpr[0]];
             if (!slot) {
-                auto* guestSlot = dispatcher.memory_
-                                      ? dispatcher.memory_->TranslateWritable(
-                                            frame.gpr[0], sizeof(std::uint64_t))
-                                      : nullptr;
+                auto* guestSlot = WritablePointer(
+                    dispatcher, frame, frame.gpr[0], sizeof(std::uint64_t));
                 if (!guestSlot) return 22;
                 slot = std::make_shared<GuestRwlock>();
             }
@@ -4599,10 +4579,8 @@ std::uint64_t HleDispatcher::PthreadRwlockWriteLock(
             std::scoped_lock lock(dispatcher.synchronizationStateMutex_);
             auto& slot = dispatcher.rwlocks_[frame.gpr[0]];
             if (!slot) {
-                auto* guestSlot = dispatcher.memory_
-                                      ? dispatcher.memory_->TranslateWritable(
-                                            frame.gpr[0], sizeof(std::uint64_t))
-                                      : nullptr;
+                auto* guestSlot = WritablePointer(
+                    dispatcher, frame, frame.gpr[0], sizeof(std::uint64_t));
                 if (!guestSlot) return 22;
                 slot = std::make_shared<GuestRwlock>();
             }
