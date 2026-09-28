@@ -621,6 +621,8 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
     if (name == "pthread_rwlock_unlock") use(&PthreadRwlockUnlock);
     if (name == "__error") use(&KernelErrorPointer);
     if (name == "sceKernelDlsym") use(&KernelDlsym);
+    if (name == "il2cpp_api_register_symbols") use(&Il2CppRegisterSymbols);
+    if (name == "il2cpp_api_lookup_symbol") use(&Il2CppLookupSymbol);
     if (name == "sysconf") use(&KernelSysconf);
     if (name == "sceKernelGetFsSandboxRandomWord") use(&KernelSandboxWord);
     if (name == "_nanosleep") use(&KernelNanosleep);
@@ -942,6 +944,34 @@ std::uint64_t HleDispatcher::Unimplemented(HleDispatcher&, GuestCallFrame const&
 std::uint64_t HleDispatcher::KernelErrorPointer(HleDispatcher&,
                                                  GuestCallFrame const&) noexcept {
     return reinterpret_cast<std::uint64_t>(&GuestPosixErrno);
+}
+
+std::uint64_t HleDispatcher::Il2CppRegisterSymbols(HleDispatcher& dispatcher,
+                                                    GuestCallFrame const&) noexcept {
+    dispatcher.GraphicsLog("IL2CPP: registro de símbolos solicitado; resolução limitada às exportações carregadas");
+    return 0;
+}
+
+std::uint64_t HleDispatcher::Il2CppLookupSymbol(HleDispatcher& dispatcher,
+                                                 GuestCallFrame const& frame) noexcept {
+    std::string name;
+    if (!dispatcher.ReadGuestString(frame.gpr[0], name, 256)) return 0;
+    try {
+        const auto nid = GuestSymbolNid(name);
+        for (auto const& [encoded, address] : dispatcher.guestExports_) {
+            if (encoded == name ||
+                (encoded.size() > nid.size() &&
+                 encoded.compare(0, nid.size(), nid) == 0 &&
+                 encoded[nid.size()] == '#'))
+                return address;
+        }
+        dispatcher.GraphicsLog("IL2CPP: símbolo indisponível: " + name);
+    } catch (...) {
+        dispatcher.GraphicsLog("IL2CPP: falha ao consultar símbolo");
+    }
+    // The Unity lookup ABI returns a pointer. ENOSYS is a non-null value and
+    // becomes an invalid indirect-call target in the guest.
+    return 0;
 }
 
 std::uint64_t HleDispatcher::KernelDlsym(HleDispatcher& dispatcher,
