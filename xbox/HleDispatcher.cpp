@@ -348,6 +348,8 @@ HleResolution HleDispatcher::Resolve(std::string_view encodedSymbol) {
         use(&GenericSuccess);
     if (name == "memcmp") use(&MemoryMemcmp);
     if (name == "strlen") use(&MemoryStrlen);
+    if (name == "strstr") use(&MemoryStrstr);
+    if (name == "strncpy") use(&MemoryStrncpy);
     if (name == "mmap" || name == "mmap_np" || name == "__wrap_mmap") use(&MemoryMmap);
     if (name == "sceLibcMspaceMalloc") use(&MspaceMalloc);
     if (name == "sceLibcMspacePosixMemalign") use(&MspacePosixMemalign);
@@ -1428,8 +1430,8 @@ std::uint64_t HleDispatcher::MemoryMemcpy(HleDispatcher& dispatcher,
     if (!dispatcher.memory_ || frame.gpr[2] > static_cast<std::uint64_t>(SIZE_MAX))
         return OrbisEfault;
     const auto bytes = static_cast<std::size_t>(frame.gpr[2]);
-    auto* destination = dispatcher.memory_->TranslateWritable(frame.gpr[0], bytes);
-    auto* source = dispatcher.memory_->Translate(frame.gpr[1], bytes);
+    auto* destination = WritablePointer(dispatcher, frame, frame.gpr[0], bytes);
+    auto* source = ReadablePointer(dispatcher, frame, frame.gpr[1], bytes);
     if (bytes != 0 && (!destination || !source)) return OrbisEfault;
     if (bytes != 0) std::memcpy(destination, source, bytes);
     return frame.gpr[0];
@@ -1441,8 +1443,8 @@ std::uint64_t HleDispatcher::MemoryMemmove(HleDispatcher& dispatcher,
     if (!dispatcher.memory_ || frame.gpr[2] > static_cast<std::uint64_t>(SIZE_MAX))
         return OrbisEfault;
     const auto bytes = static_cast<std::size_t>(frame.gpr[2]);
-    auto* destination = dispatcher.memory_->TranslateWritable(frame.gpr[0], bytes);
-    auto* source = dispatcher.memory_->Translate(frame.gpr[1], bytes);
+    auto* destination = WritablePointer(dispatcher, frame, frame.gpr[0], bytes);
+    auto* source = ReadablePointer(dispatcher, frame, frame.gpr[1], bytes);
     if (bytes != 0 && (!destination || !source)) return OrbisEfault;
     if (bytes != 0) std::memmove(destination, source, bytes);
     return frame.gpr[0];
@@ -1454,7 +1456,7 @@ std::uint64_t HleDispatcher::MemoryMemset(HleDispatcher& dispatcher,
     if (!dispatcher.memory_ || frame.gpr[2] > static_cast<std::uint64_t>(SIZE_MAX))
         return OrbisEfault;
     const auto bytes = static_cast<std::size_t>(frame.gpr[2]);
-    auto* destination = dispatcher.memory_->TranslateWritable(frame.gpr[0], bytes);
+    auto* destination = WritablePointer(dispatcher, frame, frame.gpr[0], bytes);
     if (bytes != 0 && !destination) return OrbisEfault;
     if (bytes != 0) std::memset(destination, static_cast<int>(frame.gpr[1] & 0xFFu), bytes);
     return frame.gpr[0];
@@ -1466,8 +1468,8 @@ std::uint64_t HleDispatcher::MemoryMemcmp(HleDispatcher& dispatcher,
     if (!dispatcher.memory_ || frame.gpr[2] > static_cast<std::uint64_t>(SIZE_MAX))
         return OrbisEfault;
     const auto bytes = static_cast<std::size_t>(frame.gpr[2]);
-    auto* left = dispatcher.memory_->Translate(frame.gpr[0], bytes);
-    auto* right = dispatcher.memory_->Translate(frame.gpr[1], bytes);
+    auto* left = ReadablePointer(dispatcher, frame, frame.gpr[0], bytes);
+    auto* right = ReadablePointer(dispatcher, frame, frame.gpr[1], bytes);
     if (bytes != 0 && (!left || !right)) return OrbisEfault;
     if (bytes == 0) return 0;
     return static_cast<std::uint64_t>(static_cast<std::int64_t>(std::memcmp(left, right, bytes)));
@@ -1480,11 +1482,56 @@ std::uint64_t HleDispatcher::MemoryStrlen(HleDispatcher& dispatcher,
     if (!dispatcher.memory_ || frame.gpr[0] == 0) return OrbisEfault;
     for (std::size_t length = 0; length < MaxString; ++length) {
         if (frame.gpr[0] > UINT64_MAX - length) return OrbisEfault;
-        auto* byte = static_cast<char*>(dispatcher.memory_->Translate(frame.gpr[0] + length, 1));
+        auto* byte = static_cast<char const*>(ReadablePointer(
+            dispatcher, frame, frame.gpr[0] + length, 1));
         if (!byte) return OrbisEfault;
         if (*byte == '\0') return length;
     }
     return OrbisEfault;
+}
+
+std::uint64_t HleDispatcher::MemoryStrstr(HleDispatcher& dispatcher,
+                                          GuestCallFrame const& frame) noexcept {
+    constexpr std::size_t MaxString = 1u << 20;
+    try {
+        std::string needle;
+        if (!dispatcher.GuestString(frame.gpr[1], needle, MaxString)) return 0;
+        if (needle.empty()) return frame.gpr[0];
+        if (frame.gpr[0] == 0 || frame.gpr[0] > UINT64_MAX - MaxString) return 0;
+        for (std::size_t offset = 0; offset < MaxString; ++offset) {
+            auto* first = static_cast<char const*>(ReadablePointer(
+                dispatcher, frame, frame.gpr[0] + offset, 1));
+            if (!first || *first == '\0') return 0;
+            if (*first != needle[0] || needle.size() > MaxString - offset) continue;
+            auto* candidate = static_cast<char const*>(ReadablePointer(
+                dispatcher, frame, frame.gpr[0] + offset, needle.size()));
+            if (candidate && std::memcmp(candidate, needle.data(), needle.size()) == 0)
+                return frame.gpr[0] + offset;
+        }
+    } catch (...) {}
+    return 0;
+}
+
+std::uint64_t HleDispatcher::MemoryStrncpy(HleDispatcher& dispatcher,
+                                           GuestCallFrame const& frame) noexcept {
+    constexpr std::size_t MaxCopy = 1u << 20;
+    if (frame.gpr[2] > MaxCopy) return 0;
+    const auto bytes = static_cast<std::size_t>(frame.gpr[2]);
+    if (bytes == 0) return frame.gpr[0];
+    auto* destination = static_cast<char*>(WritablePointer(
+        dispatcher, frame, frame.gpr[0], bytes));
+    if (!destination) return 0;
+    std::size_t copied = 0;
+    for (; copied < bytes; ++copied) {
+        if (frame.gpr[1] > UINT64_MAX - copied) return 0;
+        auto* source = static_cast<char const*>(ReadablePointer(
+            dispatcher, frame, frame.gpr[1] + copied, 1));
+        if (!source) return 0;
+        destination[copied] = *source;
+        if (*source == '\0') { ++copied; break; }
+    }
+    if (copied < bytes) std::memset(destination + copied, 0, bytes - copied);
+    return frame.gpr[0];
 }
 
 std::uint64_t HleDispatcher::AllocateFromMspace(GuestMspace& space,
